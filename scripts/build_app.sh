@@ -1,9 +1,5 @@
 #!/bin/bash
 # Builds build/Nimb.app from the Swift package (ad-hoc signed, no Apple Developer account needed).
-#
-# LEGACY=1 also builds build/RDNS.app: the same app under its old file name and bundle id (com.rdns.app).
-# Releases ship it as RDNS-<version>.zip so that installs made before the rename can still update themselves;
-# the app then moves itself over to Nimb.app on its next update.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -46,6 +42,3 @@ PLIST
 }
 
 make_bundle Nimb.app com.nimb.app
-if [ "${LEGACY:-0}" = "1" ]; then
-    make_bundle RDNS.app com.rdns.app
-fi

@@ -19,8 +19,7 @@ struct UpdateError: LocalizedError {
 /// Checks GitHub for a newer release and replaces the running app with it.
 enum Updater {
     static let repository = "Dizrane/Nimb"
-    /// The app used to be called RDNS (com.rdns.app); releases still carry a copy under that name for old installs.
-    static let acceptedIdentifiers: Set<String> = ["com.nimb.app", "com.rdns.app"]
+    static let bundleIdentifier = "com.nimb.app"
 
     static var currentVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
@@ -48,9 +47,7 @@ enum Updater {
             throw UpdateError("GitHub не отдал информацию о релизе.")
         }
         let github = try JSONDecoder().decode(GitHubRelease.self, from: data)
-        // Prefer the Nimb build; the RDNS one exists only so that installs made before the rename can update.
-        let isZip: (String, String) -> Bool = { name, prefix in name.hasPrefix(prefix) && name.hasSuffix(".zip") }
-        guard let asset = github.assets.first(where: { isZip($0.name, "Nimb") }) ?? github.assets.first(where: { isZip($0.name, "RDNS") }) else {
+        guard let asset = github.assets.first(where: { $0.name.hasPrefix("Nimb") && $0.name.hasSuffix(".zip") }) else {
             throw UpdateError("В последнем релизе нет файла Nimb-*.zip.")
         }
         let body = github.body ?? ""
@@ -140,7 +137,7 @@ enum Updater {
               let info = NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist")) else {
             throw UpdateError("В архиве нет приложения.")
         }
-        guard let identifier = info["CFBundleIdentifier"] as? String, acceptedIdentifiers.contains(identifier) else {
+        guard let identifier = info["CFBundleIdentifier"] as? String, identifier == bundleIdentifier else {
             throw UpdateError("В архиве не то приложение (другой идентификатор).")
         }
         guard info["CFBundleShortVersionString"] as? String == version else {
@@ -150,38 +147,25 @@ enum Updater {
         return app
     }
 
-    /// The helper waits for this process to quit, puts the new app in the same folder under its own name (so an old
-    /// "RDNS.app" becomes "Nimb.app"), keeping the old bundle until the copy has succeeded, then reopens the app
-    /// and removes the staging folder.
+    /// The helper waits for this process to quit, replaces the app in place, keeping the old bundle until the copy
+    /// has succeeded, then reopens the app and removes the staging folder.
     private static func launchInstaller(newApp: URL, target: URL, stage: URL) throws {
         let script = """
         #!/bin/sh
         PID="$1"; TARGET="$2"; NEW="$3"; STAGE="$4"
         while kill -0 "$PID" 2>/dev/null; do sleep 0.2; done
-        DEST="$(dirname "$TARGET")/$(basename "$NEW")"
         BACKUP="$TARGET.old"
         rm -rf "$BACKUP"
         if mv "$TARGET" "$BACKUP"; then
-            DESTBACKUP=""
-            if [ "$DEST" != "$TARGET" ] && [ -e "$DEST" ]; then
-                DESTBACKUP="$DEST.old"
-                rm -rf "$DESTBACKUP"
-                mv "$DEST" "$DESTBACKUP"
-            fi
-            if /usr/bin/ditto "$NEW" "$DEST"; then
-                xattr -dr com.apple.quarantine "$DEST" 2>/dev/null
+            if /usr/bin/ditto "$NEW" "$TARGET"; then
+                xattr -dr com.apple.quarantine "$TARGET" 2>/dev/null
                 rm -rf "$BACKUP"
-                [ -n "$DESTBACKUP" ] && rm -rf "$DESTBACKUP"
-                open "$DEST"
             else
-                rm -rf "$DEST"
-                [ -n "$DESTBACKUP" ] && mv "$DESTBACKUP" "$DEST"
+                rm -rf "$TARGET"
                 mv "$BACKUP" "$TARGET"
-                open "$TARGET"
             fi
-        else
-            open "$TARGET"
         fi
+        open "$TARGET"
         rm -rf "$STAGE"
         """
         let scriptURL = stage.appendingPathComponent("install.sh")
