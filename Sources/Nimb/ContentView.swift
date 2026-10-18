@@ -948,6 +948,7 @@ private struct FooterBar: View {
             HStack {
                 ChannelLink()
                     .padding(.leading, -6)
+                    .padding(.trailing, -7)
                 Text("Nimb \(Updater.currentVersion)")
                     .font(Typo.mono)
                     .foregroundStyle(Theme.textSecondary)
