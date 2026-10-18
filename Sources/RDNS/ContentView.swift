@@ -149,14 +149,23 @@ final class UpdateViewModel: ObservableObject {
     /// A silent check stays quiet when offline or when GitHub cannot be reached.
     func check(silent: Bool) {
         if case .installing = state { return }
+        if case .checking = state { return }
         state = .checking
         Task {
+            let started = Date()
+            let outcome: State
             do {
                 let release = try await Updater.latestRelease()
-                state = Updater.isNewer(release.version, than: Updater.currentVersion) ? .available(release) : .upToDate
+                outcome = Updater.isNewer(release.version, than: Updater.currentVersion) ? .available(release) : .upToDate
             } catch {
-                state = silent ? .idle : .failed("Не удалось проверить обновления: \(error.localizedDescription)")
+                outcome = silent ? .idle : .failed("Не удалось проверить обновления: \(error.localizedDescription)")
             }
+            // A quick answer would make the icon flicker instead of turning; let it turn for a moment.
+            if !silent {
+                let remaining = 0.9 - Date().timeIntervalSince(started)
+                if remaining > 0 { try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000)) }
+            }
+            state = outcome
         }
     }
 
@@ -193,6 +202,9 @@ struct ContentView: View {
             FooterBar(updates: updates, canInstall: !model.isLocked)
         }
         .frame(width: 400, height: 720)
+        // The hidden title bar adds its height (28 pt) to the window on top of the content, which would leave a black
+        // strip under the footer; the content reports itself that much shorter so that the window fits it exactly.
+        .padding(.bottom, -28)
         // As a background the scenery cannot widen the layout; it is larger than the window.
         .background { NimbBackground(lit: model.active != nil) }
         .ignoresSafeArea()
@@ -623,17 +635,6 @@ private struct FooterBar: View {
                     .foregroundStyle(Theme.textSecondary)
                 Spacer()
                 switch updates.state {
-                case .idle, .failed:
-                    Button("Проверить обновления") { updates.check(silent: false) }
-                        .buttonStyle(.plain)
-                        .font(.system(size: 11.5, weight: .medium))
-                        .foregroundStyle(Theme.textSecondary)
-                case .checking:
-                    ProgressView().controlSize(.small)
-                case .upToDate:
-                    Label("Актуальная версия", systemImage: "checkmark")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(Theme.textSecondary)
                 case .installing(let text):
                     ProgressView().controlSize(.small)
                     Text(text).font(.system(size: 11.5)).foregroundStyle(Theme.textSecondary)
@@ -648,6 +649,8 @@ private struct FooterBar: View {
                     }
                     .buttonStyle(PressableStyle())
                     .disabled(!canInstall)
+                case .idle, .failed, .checking, .upToDate:
+                    CheckUpdatesButton(updates: updates)
                 }
             }
             if case .failed(let message) = updates.state {
@@ -663,5 +666,47 @@ private struct FooterBar: View {
         .padding(.vertical, 12)
         .background(Color.black.opacity(0.28))
         .overlay(alignment: .top) { Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1) }
+    }
+}
+
+/// The status of the version with an update icon. Pressing it checks GitHub: the icon turns while it asks and the
+/// text changes if a new version has come out.
+private struct CheckUpdatesButton: View {
+    @ObservedObject var updates: UpdateViewModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var checking: Bool {
+        if case .checking = updates.state { return true }
+        return false
+    }
+
+    private var text: String {
+        switch updates.state {
+        case .checking: return "Проверяю…"
+        case .upToDate: return "Актуальная версия"
+        default: return "Проверить обновления"
+        }
+    }
+
+    var body: some View {
+        Button { updates.check(silent: false) } label: {
+            HStack(spacing: 6) {
+                TimelineView(.animation(paused: !checking || reduceMotion)) { context in
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 12, weight: .semibold))
+                        .rotationEffect(.degrees(checking && !reduceMotion ? context.date.timeIntervalSinceReferenceDate * 360 : 0))
+                }
+                Text(text)
+                    .font(.system(size: 11.5, weight: .medium))
+            }
+            .foregroundStyle(Theme.textSecondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressableStyle())
+        .disabled(checking)
+        .help("Проверить, вышла ли новая версия")
+        .accessibilityLabel(text)
     }
 }
