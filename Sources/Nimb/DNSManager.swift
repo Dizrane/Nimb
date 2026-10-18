@@ -114,7 +114,7 @@ enum DNSManager {
     /// Sets `provider` on all given services, or resets them to automatic DNS when it is nil.
     /// Every command is checked, and the result is read back afterwards.
     static func apply(_ provider: DNSProvider?, to services: [String]) throws {
-        if isPasswordless {
+        if canApplyWithoutPassword(provider, to: services) {
             try applyWithSudo(provider, to: services)
         } else {
             try runPrivileged(applyScript(provider, to: services))
@@ -164,26 +164,75 @@ enum DNSManager {
 
     static let sudoersPath = "/etc/sudoers.d/nimb"
 
-    /// True if sudo lets this user change DNS without a password. Checked with `-n`, so it never prompts.
-    static var isPasswordless: Bool {
-        (try? run("/usr/bin/sudo", ["-n", "-l", "/usr/sbin/networksetup", "-setdnsservers", "Nimb", "Empty"])) != nil
+    /// What sudo currently allows this user to do without a password, as far as Nimb is concerned.
+    struct PasswordlessState: Equatable {
+        /// The rule is there for at least one service.
+        var enabled = false
+        /// Services the rule does not cover (a connection added after it was installed).
+        var missing: [String] = []
+        /// sudo also lets any DNS address through, not only Nimb's (an old Nimb rule or another sudo rule).
+        var tooBroad = false
+
+        var needsUpdate: Bool { enabled && (!missing.isEmpty || tooBroad) }
     }
 
-    /// The sudoers rule: only these three commands, for this user. Anything else still asks for the password.
-    static func sudoersRule(for user: String) -> [String] {
-        [
-            "# Nimb: lets \(user) change DNS servers without a password. Remove this file to undo.",
-            "\(user) ALL = (root) NOPASSWD: /usr/sbin/networksetup -setdnsservers *, /usr/bin/dscacheutil -flushcache, /usr/bin/killall -HUP mDNSResponder",
+    /// Services the rule can name: plain characters only, so that nothing in a name can change the meaning of the rule.
+    static func isRuleSafe(_ service: String) -> Bool {
+        service.range(of: #"^[A-Za-z0-9][A-Za-z0-9 ._()+/-]*$"#, options: .regularExpression) != nil
+    }
+
+    private static let networksetup = "/usr/sbin/networksetup"
+
+    /// True if sudo would run this command without asking. `-l` with a command only looks, and `-n` never prompts.
+    private static func sudoAllows(_ command: [String]) -> Bool {
+        (try? run("/usr/bin/sudo", ["-n", "-l"] + command)) != nil
+    }
+
+    static func passwordlessState(for services: [String]) -> PasswordlessState {
+        let named = services.filter(isRuleSafe)
+        let covered = named.filter { sudoAllows([networksetup, "-setdnsservers", $0, "Empty"]) }
+        guard !covered.isEmpty else { return PasswordlessState() }
+        return PasswordlessState(
+            enabled: true,
+            missing: named.filter { !covered.contains($0) },
+            tooBroad: sudoAllows([networksetup, "-setdnsservers", "Nimb-probe", "8.8.8.8"])
+        )
+    }
+
+    private static func canApplyWithoutPassword(_ provider: DNSProvider?, to services: [String]) -> Bool {
+        let addresses = provider?.addresses ?? ["Empty"]
+        return !services.isEmpty
+            && services.allSatisfy { sudoAllows([networksetup, "-setdnsservers", $0] + addresses) }
+            && sudoAllows(["/usr/bin/dscacheutil", "-flushcache"])
+            && sudoAllows(["/usr/bin/killall", "-HUP", "mDNSResponder"])
+    }
+
+    /// The sudoers rule: exactly the commands Nimb runs, with its own provider addresses and the services present now.
+    /// No wildcards, so a program cannot use it to set some other DNS. Everything else still asks for the password.
+    static func sudoersRule(for user: String, services: [String]) -> [String] {
+        func escaped(_ service: String) -> String { service.replacingOccurrences(of: " ", with: "\\ ") }
+        var commands: [String] = []
+        for service in services {
+            for addresses in [["Empty"]] + DNSProvider.all.map(\.addresses) {
+                commands.append("\(networksetup) -setdnsservers \(escaped(service)) \(addresses.joined(separator: " "))")
+            }
+        }
+        commands += ["/usr/bin/dscacheutil -flushcache", "/usr/bin/killall -HUP mDNSResponder"]
+        return [
+            "# Nimb: lets \(user) switch DNS between Nimb's providers and automatic without a password. Remove this file to undo.",
+            "\(user) ALL = (root) NOPASSWD: \(commands.joined(separator: ", "))",
         ]
     }
 
-    /// Installs the sudoers rule. Asks for the administrator password once.
+    /// Installs (or renews) the sudoers rule for the services present now. Asks for the administrator password once.
     static func enablePasswordless() throws {
         let user = NSUserName()
         guard user.range(of: #"^[A-Za-z0-9_][A-Za-z0-9._-]*$"#, options: .regularExpression) != nil else {
             throw DNSError.failed("Имя пользователя «\(user)» содержит необычные символы, правило для него не создаю.")
         }
-        let lines = sudoersRule(for: user).map(shellQuote).joined(separator: " ")
+        let services = physicalServices().filter(isRuleSafe)
+        guard !services.isEmpty else { throw DNSError.failed("Не нашёл сетевых подключений, для которых можно составить правило.") }
+        let lines = sudoersRule(for: user, services: services).map(shellQuote).joined(separator: " ")
         let script = [
             "set -e",
             "grep -Eq '^[#@]includedir[[:space:]]+(/private)?/etc/sudoers[.]d' /etc/sudoers || { echo \(shellQuote("В /etc/sudoers не подключена папка sudoers.d.")) >&2; exit 1; }",
@@ -195,13 +244,14 @@ enum DNSManager {
             "/usr/bin/install -m 440 -o root -g wheel \"$tmp\" \(sudoersPath)",
         ].joined(separator: "; ")
         try runPrivileged(script)
-        guard isPasswordless else { throw DNSError.failed("Правило установлено, но sudo всё равно просит пароль.") }
+        let state = passwordlessState(for: services)
+        guard state.enabled, state.missing.isEmpty else { throw DNSError.failed("Правило установлено, но sudo всё равно просит пароль.") }
     }
 
     /// Removes the sudoers rule again. Asks for the administrator password.
     static func disablePasswordless() throws {
         try runPrivileged("/bin/rm -f \(sudoersPath)")
-        if isPasswordless {
+        if passwordlessState(for: physicalServices()).enabled {
             throw DNSError.failed("Правило Nimb удалено, но в системе есть другое правило sudo без пароля.")
         }
     }

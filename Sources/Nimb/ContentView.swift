@@ -11,14 +11,14 @@ final class DNSViewModel: ObservableObject {
     @Published var probeProgress = ""
     @Published var probeFraction = 0.0
     @Published var reports: [ProviderReport] = []
-    @Published var passwordless = false
+    @Published var access = DNSManager.PasswordlessState()
     @Published var isSettingUp = false
     @Published var showSettings = false
 
     init() {
-        passwordless = DNSManager.isPasswordless
         // Read the state synchronously once, so a Mac that already has DNS on opens straight into space.
         let services = DNSManager.physicalServices()
+        access = DNSManager.passwordlessState(for: services)
         let current = DNSManager.activeProvider(on: services)
         active = current
         if let current {
@@ -37,6 +37,8 @@ final class DNSViewModel: ObservableObject {
             NSApp.applicationIconImage = nil
         }
     }
+
+    var passwordless: Bool { access.enabled }
 
     /// True while a DNS change or a service check is running; both need the network undisturbed.
     var isLocked: Bool { isBusy || isProbing || isSettingUp }
@@ -100,10 +102,10 @@ final class DNSViewModel: ObservableObject {
                     + DNSManager.overrideWarnings(for: partial.provider)
             }
             let shownWarnings = warnings
-            let passwordless = DNSManager.isPasswordless
+            let access = DNSManager.passwordlessState(for: services)
             await MainActor.run {
                 guard !self.isLocked else { return }
-                self.passwordless = passwordless
+                self.access = access
                 self.active = active
                 self.warnings = shownWarnings
                 if let active { self.selected = active }
@@ -123,34 +125,36 @@ final class DNSViewModel: ObservableObject {
         if active != nil, active != provider { change(to: provider) }
     }
 
-    /// Installs or removes the sudoers rule that lets DNS change without a password; the risk is explained first.
-    func togglePasswordless() {
+    func togglePasswordless() { setPasswordless(!passwordless, confirm: true) }
+
+    /// Installs, renews or removes the sudoers rule that lets DNS change without a password; the risk is explained first.
+    func setPasswordless(_ enable: Bool, confirm: Bool) {
         guard !isLocked else { return }
-        if !passwordless {
+        if enable && confirm {
+            let names = DNSManager.physicalServices().filter(DNSManager.isRuleSafe).joined(separator: ", ")
             let alert = NSAlert()
             alert.messageText = "Переключать DNS без пароля?"
             alert.informativeText = """
                 Nimb добавит правило в \(DNSManager.sudoersPath). Один раз понадобится пароль администратора.
 
-                Правило разрешает вашей учётной записи менять DNS-серверы и сбрасывать DNS-кэш без пароля. Только эти команды, а не полный доступ к системе.
+                Правило разрешает вашей учётной записи без пароля только три вещи: переключить DNS на подключениях (\(names)) на один из сервисов Nimb или вернуть автоматический DNS, а также сбросить DNS-кэш. Задать произвольный DNS оно не позволяет. Появится новое подключение: для него пароль будет запрашиваться, пока вы не нажмёте «Обновить» в настройках.
 
-                Риск: любая программа, запущенная от вашего имени, сможет подменить DNS на этом Mac без вашего ведома, например чтобы направлять сайты на чужие серверы.
+                Риск остаётся: любая программа, запущенная от вашего имени, сможет без пароля переключить DNS между сервисами Nimb (а они видят ваши DNS-запросы) или вернуть автоматический. Ограничить правило именно приложением Nimb система не умеет.
 
-                Отключить можно в любой момент кнопкой в Nimb: правило удаляется целиком.
+                Забрать разрешение можно в любой момент: правило удаляется целиком.
                 """
-            alert.addButton(withTitle: "Включить")
+            alert.addButton(withTitle: "Дать")
             alert.addButton(withTitle: "Отмена")
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
-        let enable = !passwordless
         isSettingUp = true
         errorMessage = nil
         Task.detached {
             let result = Result { enable ? try DNSManager.enablePasswordless() : try DNSManager.disablePasswordless() }
-            let now = DNSManager.isPasswordless
+            let access = DNSManager.passwordlessState(for: DNSManager.physicalServices())
             await MainActor.run {
                 self.isSettingUp = false
-                self.passwordless = now
+                self.access = access
                 if case .failure(let error) = result {
                     if case DNSError.cancelled = error {} else { self.errorMessage = error.localizedDescription }
                 }
@@ -180,7 +184,7 @@ final class DNSViewModel: ObservableObject {
         errorMessage = nil
         Task.detached {
             let services = DNSManager.servicesUsingProviders()
-            let removeRule = DNSManager.isPasswordless
+            let removeRule = DNSManager.passwordlessState(for: DNSManager.physicalServices()).enabled
             var failure: Error?
             do {
                 if !services.isEmpty || removeRule { try DNSManager.resetBeforeUninstall(services, removingRule: removeRule) }
@@ -388,7 +392,7 @@ private struct Hero: View {
         case .off: return "Используется DNS роутера или провайдера"
         case .on: return ""
         case .probing: return "Спрашиваю DNS и запрашиваю сайты и API"
-        case .busy: return model.passwordless && !model.isSettingUp ? "Меняю DNS на всех подключениях" : "Подтвердите пароль администратора"
+        case .busy: return model.passwordless && model.access.missing.isEmpty && !model.isSettingUp ? "Меняю DNS на всех подключениях" : "Подтвердите пароль администратора"
         }
     }
 }
@@ -442,6 +446,9 @@ private struct PermissionRow: View {
     let detail: String
     let granted: Bool
     let disabled: Bool
+    var note: String? = nil
+    var extraTitle: String? = nil
+    var extraAction: (() -> Void)? = nil
     let action: () -> Void
 
     var body: some View {
@@ -460,8 +467,18 @@ private struct PermissionRow: View {
                 .font(Typo.small)
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
+            if let note {
+                Text(note)
+                    .font(Typo.small)
+                    .foregroundStyle(Theme.warn)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             HStack {
                 Spacer()
+                if let extraTitle, let extraAction {
+                    OutlineButton(title: extraTitle, color: Theme.textPrimary, action: extraAction)
+                        .disabled(disabled)
+                }
                 OutlineButton(title: granted ? "Забрать" : "Дать", color: granted ? Theme.warn : Theme.textPrimary, action: action)
                     .disabled(disabled)
             }
@@ -497,6 +514,18 @@ private struct SettingsView: View {
     @ObservedObject var model: DNSViewModel
     @ObservedObject var updates: UpdateViewModel
 
+    private var accessNote: String? {
+        let access = model.access
+        guard access.enabled else { return nil }
+        if access.tooBroad {
+            return "Правило шире нужного: sudo пропускает и любой другой DNS. Нажмите «Обновить», чтобы заменить его точным (если оно останется широким, его даёт другое правило sudo)."
+        }
+        if !access.missing.isEmpty {
+            return "Для подключений без правила (\(access.missing.joined(separator: ", "))) пароль запрашивается. «Обновить» добавит их."
+        }
+        return nil
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack {
@@ -527,10 +556,13 @@ private struct SettingsView: View {
                     PermissionRow(
                         title: "Смена DNS без пароля",
                         detail: model.passwordless
-                            ? "DNS меняется без запроса пароля. Цена: любая программа, запущенная от вашего имени, тоже может менять DNS на этом Mac. Правило лежит в \(DNSManager.sudoersPath); «Забрать» удаляет его."
-                            : "Сейчас macOS просит пароль администратора или Touch ID при каждом переключении. Можно разрешить менять DNS без этого: Nimb добавит правило sudo только для трёх команд (смена DNS и сброс кэша).",
+                            ? "DNS меняется без пароля. Правило sudo (\(DNSManager.sudoersPath)) разрешает только переключение между сервисами Nimb и автоматическим DNS и сброс кэша: произвольный DNS задать нельзя. Цена: любая программа от вашего имени может это же сделать."
+                            : "Сейчас macOS просит пароль администратора или Touch ID при каждом переключении. Можно разрешить без пароля только переключение между сервисами Nimb и автоматическим DNS (правило sudo из трёх видов команд, без подстановок).",
                         granted: model.passwordless,
                         disabled: model.isLocked,
+                        note: accessNote,
+                        extraTitle: model.access.needsUpdate ? "Обновить" : nil,
+                        extraAction: { model.setPasswordless(true, confirm: false) },
                         action: model.togglePasswordless
                     )
 
