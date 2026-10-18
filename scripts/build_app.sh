@@ -14,6 +14,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/RDNS"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+cp Resources/AppIconActive.icns "$APP/Contents/Resources/AppIconActive.icns"
 cp Resources/world.json "$APP/Contents/Resources/world.json"
 
 cat > "$APP/Contents/Info.plist" <<PLIST

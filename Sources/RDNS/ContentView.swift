@@ -3,7 +3,7 @@ import SwiftUI
 @MainActor
 final class DNSViewModel: ObservableObject {
     @Published var selected: DNSProvider = DNSProvider.all[0]
-    @Published var active: DNSProvider?
+    @Published var active: DNSProvider? { didSet { updateDockIcon() } }
     @Published var isBusy = false
     @Published var errorMessage: String?
     @Published var warnings: [String] = []
@@ -20,6 +20,17 @@ final class DNSViewModel: ObservableObject {
         if let current {
             selected = current
             warnings = DNSManager.overrideWarnings(for: current)
+        }
+        updateDockIcon()
+    }
+
+    /// The Dock shows the halo over the planet while DNS is on and the plain halo otherwise.
+    /// The icon of the file itself (Finder, Launchpad) stays the plain one; the Dock reverts to it when the app quits.
+    private func updateDockIcon() {
+        if active != nil, let url = Bundle.main.url(forResource: "AppIconActive", withExtension: "icns"), let image = NSImage(contentsOf: url) {
+            NSApp.applicationIconImage = image
+        } else {
+            NSApp.applicationIconImage = nil
         }
     }
 
