@@ -332,7 +332,11 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             model.refresh()
         }
-        .onAppear { if updates.checkOnLaunch { updates.check(silent: true) } }
+        .onAppear {
+            if updates.checkOnLaunch { updates.check(silent: true) }
+            // After the window is up, so that the question has something behind it.
+            DispatchQueue.main.async { MoveToApplications.offer() }
+        }
     }
 }
 
