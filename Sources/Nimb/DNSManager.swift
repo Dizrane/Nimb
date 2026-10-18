@@ -128,7 +128,8 @@ enum DNSManager {
     }
 
     /// Shell script that runs as root: it tries every command and exits non-zero if any failed.
-    static func applyScript(_ provider: DNSProvider?, to services: [String]) -> String {
+    /// With `removingRule` the sudoers rule is deleted at the end, but only if every command above succeeded.
+    static func applyScript(_ provider: DNSProvider?, to services: [String], removingRule: Bool = false) -> String {
         let addresses = provider?.addresses.joined(separator: " ") ?? "Empty"
         var script = ["failed=0"]
         for service in services {
@@ -137,8 +138,26 @@ enum DNSManager {
         }
         script.append("/usr/bin/dscacheutil -flushcache || { echo \(shellQuote("Не удалось сбросить кэш DNS (dscacheutil).")) >&2; failed=1; }")
         script.append("/usr/bin/killall -HUP mDNSResponder || { echo \(shellQuote("Не удалось перезапустить mDNSResponder.")) >&2; failed=1; }")
+        if removingRule { script.append("[ $failed -eq 0 ] && /bin/rm -f \(sudoersPath)") }
         script.append("exit $failed")
         return script.joined(separator: "; ")
+    }
+
+    // MARK: Uninstall
+
+    /// Physical services whose DNS is one of ours. Anything the user set by hand is left alone.
+    static func servicesUsingProviders() -> [String] {
+        physicalServices().filter { service in
+            let current = servers(of: service)
+            return DNSProvider.all.contains { $0.addresses == current }
+        }
+    }
+
+    /// Back to automatic DNS on `services` and, if asked, the sudoers rule removed, in one password prompt.
+    static func resetBeforeUninstall(_ services: [String], removingRule: Bool) throws {
+        try runPrivileged(applyScript(nil, to: services, removingRule: removingRule))
+        let left = services.filter { !servers(of: $0).isEmpty }
+        if !left.isEmpty { throw DNSError.failed("DNS не вернулся к автоматическому на: \(left.joined(separator: ", ")).") }
     }
 
     // MARK: Without a password (opt-in)

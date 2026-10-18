@@ -13,6 +13,7 @@ final class DNSViewModel: ObservableObject {
     @Published var reports: [ProviderReport] = []
     @Published var passwordless = false
     @Published var isSettingUp = false
+    @Published var showSettings = false
 
     init() {
         passwordless = DNSManager.isPasswordless
@@ -157,6 +158,49 @@ final class DNSViewModel: ObservableObject {
         }
     }
 
+    /// Puts DNS back to automatic, removes the sudoers rule, then quits and deletes the app with its leftovers.
+    func uninstall() {
+        guard !isLocked else { return }
+        if let reason = Uninstaller.blocker() { errorMessage = reason; return }
+
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Удалить Nimb?"
+        alert.informativeText = """
+            Сначала Nimb отключится от DNS-сервисов: DNS вернётся к автоматическому (от роутера или провайдера), а правило «без пароля», если оно включено, будет удалено. Для этого понадобится пароль администратора.
+
+            Затем приложение закроется и удалит само себя вместе с настройками и кэшем. Действие необратимо.
+            """
+        alert.addButton(withTitle: "Удалить")
+        alert.addButton(withTitle: "Отмена")
+        alert.buttons[0].hasDestructiveAction = true
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        isSettingUp = true
+        errorMessage = nil
+        Task.detached {
+            let services = DNSManager.servicesUsingProviders()
+            let removeRule = DNSManager.isPasswordless
+            var failure: Error?
+            do {
+                if !services.isEmpty || removeRule { try DNSManager.resetBeforeUninstall(services, removingRule: removeRule) }
+                try Uninstaller.scheduleRemoval()
+            } catch {
+                failure = error
+            }
+            let outcome = failure
+            await MainActor.run {
+                self.isSettingUp = false
+                if let outcome {
+                    if case DNSError.cancelled = outcome {} else { self.errorMessage = outcome.localizedDescription }
+                    self.refresh()
+                } else {
+                    NSApp.terminate(nil)
+                }
+            }
+        }
+    }
+
     private func change(to provider: DNSProvider?) {
         guard !isLocked else { return }
         isBusy = true
@@ -185,6 +229,11 @@ final class UpdateViewModel: ObservableObject {
     }
 
     @Published var state: State = .idle
+
+    /// Whether the app asks GitHub for a newer version once at launch. The button in the footer always works.
+    @Published var checkOnLaunch = UserDefaults.standard.object(forKey: "checkUpdatesOnLaunch") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(checkOnLaunch, forKey: "checkUpdatesOnLaunch") }
+    }
 
     /// A silent check stays quiet when offline or when GitHub cannot be reached.
     func check(silent: Bool) {
@@ -232,16 +281,37 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Hero(model: model)
-            ScrollView {
-                ProvidersSection(model: model)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 8)
+            if model.showSettings {
+                SettingsView(model: model, updates: updates)
+                    .transition(.opacity)
+            } else {
+                Hero(model: model)
+                ScrollView {
+                    ProvidersSection(model: model)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 8)
+                }
+                .scrollIndicators(.hidden)
             }
-            .scrollIndicators(.hidden)
             FooterBar(updates: updates, canInstall: !model.isLocked)
         }
         .frame(width: 400, height: 720)
+        .overlay(alignment: .topTrailing) {
+            if !model.showSettings {
+                Button { withAnimation(.easeInOut(duration: 0.3)) { model.showSettings = true } } label: {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundStyle(Theme.textSecondary)
+                        .frame(width: 32, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(PressableStyle())
+                .padding(.top, 6)
+                .padding(.trailing, 10)
+                .help("Настройки")
+                .accessibilityLabel("Настройки")
+            }
+        }
         // The hidden title bar adds its height (28 pt) to the window on top of the content, which would leave a black
         // strip under the footer; the content reports itself that much shorter so that the window fits it exactly.
         .padding(.bottom, -28)
@@ -258,7 +328,7 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             model.refresh()
         }
-        .onAppear { updates.check(silent: true) }
+        .onAppear { if updates.checkOnLaunch { updates.check(silent: true) } }
     }
 }
 
@@ -356,8 +426,6 @@ private struct ProvidersSection: View {
                 }
             }
 
-            PasswordlessRow(model: model)
-
             if !model.warnings.isEmpty {
                 NoticeCard(lines: model.warnings, color: Theme.warn, symbol: "exclamationmark.triangle")
             }
@@ -368,36 +436,157 @@ private struct ProvidersSection: View {
     }
 }
 
-/// The opt-in to switch DNS without the administrator password, with what it costs spelled out.
-private struct PasswordlessRow: View {
-    @ObservedObject var model: DNSViewModel
+/// A permission Nimb can hold: what it is for, what it costs, and a button to give or take it back.
+private struct PermissionRow: View {
+    let title: String
+    let detail: String
+    let granted: Bool
+    let disabled: Bool
+    let action: () -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Без пароля")
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 7) {
+                Circle().fill(granted ? Theme.warn : Color.white.opacity(0.25)).frame(width: 6, height: 6)
+                Text(title)
                     .font(Typo.name)
                     .foregroundStyle(Theme.textPrimary)
-                Text(model.passwordless
-                     ? "Включено: DNS меняется без запроса пароля. Любая программа от вашего имени тоже может его менять."
-                     : "Сейчас macOS просит пароль или Touch ID при каждом переключении. Можно разрешить менять DNS без этого.")
+                Spacer(minLength: 8)
+                Text(granted ? "Разрешено" : "Не разрешено")
                     .font(Typo.small)
                     .foregroundStyle(Theme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer(minLength: 8)
-            Button(model.passwordless ? "Отключить" : "Включить", action: model.togglePasswordless)
-                .buttonStyle(PressableStyle())
-                .font(.system(size: 11.5, weight: .medium))
-                .foregroundStyle(model.passwordless ? Theme.warn : Theme.textPrimary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(Color.white.opacity(0.22), lineWidth: 1))
-                .disabled(model.isLocked)
+            Text(detail)
+                .font(Typo.small)
+                .foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Spacer()
+                OutlineButton(title: granted ? "Забрать" : "Дать", color: granted ? Theme.warn : Theme.textPrimary, action: action)
+                    .disabled(disabled)
+            }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassCard(tint: .white, tintOpacity: 0.02, borderOpacity: 0.16, radius: 10)
+    }
+}
+
+private struct OutlineButton: View {
+    let title: String
+    let color: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 11.5, weight: .medium))
+                .foregroundStyle(color)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
+                .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(color.opacity(0.55), lineWidth: 1))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PressableStyle())
+    }
+}
+
+// MARK: - Settings
+
+private struct SettingsView: View {
+    @ObservedObject var model: DNSViewModel
+    @ObservedObject var updates: UpdateViewModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Настройки")
+                    .font(Typo.status)
+                    .foregroundStyle(Theme.textPrimary)
+                Spacer()
+                Button { withAnimation(.easeInOut(duration: 0.3)) { model.showSettings = false } } label: {
+                    Text("Готово")
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundStyle(Theme.textPrimary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 4)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(PressableStyle())
+                .keyboardShortcut(.cancelAction)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 40)
+            .padding(.bottom, 12)
+
+            ScrollView {
+                VStack(spacing: 10) {
+                    HStack { Text("Разрешения").sectionLabel(); Spacer() }
+                        .padding(.horizontal, 2)
+
+                    PermissionRow(
+                        title: "Смена DNS без пароля",
+                        detail: model.passwordless
+                            ? "DNS меняется без запроса пароля. Цена: любая программа, запущенная от вашего имени, тоже может менять DNS на этом Mac. Правило лежит в \(DNSManager.sudoersPath); «Забрать» удаляет его."
+                            : "Сейчас macOS просит пароль администратора или Touch ID при каждом переключении. Можно разрешить менять DNS без этого: Nimb добавит правило sudo только для трёх команд (смена DNS и сброс кэша).",
+                        granted: model.passwordless,
+                        disabled: model.isLocked,
+                        action: model.togglePasswordless
+                    )
+
+                    PermissionRow(
+                        title: "Обновления при запуске",
+                        detail: "Один запрос к GitHub при запуске, чтобы узнать о новой версии. Кнопка проверки внизу окна работает в любом случае.",
+                        granted: updates.checkOnLaunch,
+                        disabled: false,
+                        action: { updates.checkOnLaunch.toggle() }
+                    )
+
+                    Text("Больше Nimb ни о чём не просит: ни доступа к файлам, ни к камере или микрофону.")
+                        .font(Typo.small)
+                        .foregroundStyle(Theme.textSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 2)
+
+                    HStack { Text("Удаление").sectionLabel(); Spacer() }
+                        .padding(.horizontal, 2)
+                        .padding(.top, 8)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Удалить Nimb")
+                            .font(Typo.name)
+                            .foregroundStyle(Theme.textPrimary)
+                        Text("Вернёт DNS к автоматическому, уберёт правило «без пароля», закроет приложение и удалит его вместе с настройками и кэшем.")
+                            .font(Typo.small)
+                            .foregroundStyle(Theme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        HStack {
+                            Spacer()
+                            OutlineButton(title: "Удалить…", color: Theme.bad, action: model.uninstall)
+                                .disabled(model.isLocked)
+                        }
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .glassCard(tint: Theme.bad, tintOpacity: 0.03, borderOpacity: 0.28, radius: 10)
+
+                    if model.isSettingUp {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text("Подтвердите пароль администратора…")
+                                .font(Typo.small)
+                                .foregroundStyle(Theme.textSecondary)
+                        }
+                    }
+                    if let message = model.errorMessage {
+                        NoticeCard(lines: [message], color: Theme.bad, symbol: "xmark.octagon")
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 8)
+            }
+            .scrollIndicators(.hidden)
+        }
     }
 }
 
