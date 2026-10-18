@@ -206,7 +206,11 @@ struct ContentView: View {
         // strip under the footer; the content reports itself that much shorter so that the window fits it exactly.
         .padding(.bottom, -28)
         // As a background the scenery cannot widen the layout; it is larger than the window.
-        .background { NimbBackground(lit: model.active != nil) }
+        .background(alignment: .top) {
+            // The layout is reported 28 pt shorter than the window (see above); the scenery is drawn at the full height
+            // so that nothing, including the footer, is left standing on bare window background.
+            NimbBackground(lit: model.active != nil).frame(width: 400, height: 720)
+        }
         .ignoresSafeArea()
         .preferredColorScheme(.dark)
         .background(WindowConfigurator())
