@@ -6,13 +6,31 @@ final class DNSViewModel: ObservableObject {
     @Published var active: DNSProvider?
     @Published var isBusy = false
     @Published var errorMessage: String?
+    @Published var warnings: [String] = []
 
     init() { refresh() }
 
+    /// Re-reads the system state off the main thread; skipped while a change is in progress.
     func refresh() {
-        let services = DNSManager.physicalServices()
-        active = DNSManager.activeProvider(on: services)
-        if let active { selected = active }
+        guard !isBusy else { return }
+        Task.detached {
+            let services = DNSManager.physicalServices()
+            let active = DNSManager.activeProvider(on: services)
+            var warnings: [String] = []
+            if let active {
+                warnings = DNSManager.overrideWarnings(for: active)
+            } else if let partial = DNSManager.partialProvider(on: services) {
+                warnings = ["\(partial.provider.name) задан не на всех подключениях (нет на: \(partial.missing.joined(separator: ", "))). Нажмите кнопку, чтобы применить заново."]
+                    + DNSManager.overrideWarnings(for: partial.provider)
+            }
+            let shownWarnings = warnings
+            await MainActor.run {
+                guard !self.isBusy else { return }
+                self.active = active
+                self.warnings = shownWarnings
+                if let active { self.selected = active }
+            }
+        }
     }
 
     /// Turns the selected provider on, or resets to automatic DNS if one is already active.
@@ -89,6 +107,18 @@ struct ContentView: View {
             }
             .disabled(model.isBusy)
 
+            if !model.warnings.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(model.warnings, id: \.self) { warning in
+                        Label(warning, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             if let message = model.errorMessage {
                 Text(message)
                     .font(.caption)
@@ -98,6 +128,9 @@ struct ContentView: View {
         }
         .padding(28)
         .frame(width: 360)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            model.refresh()
+        }
     }
 }
 
