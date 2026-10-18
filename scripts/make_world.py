@@ -1,7 +1,9 @@
-"""Builds a compact world.json (land rings + Russia rings) from Natural Earth GeoJSON.
+"""Builds a compact world.json (land rings + highlightable regions) from Natural Earth GeoJSON.
 
-usage: python3 -I convert.py <land.geojson> <countries.geojson> <out.json>
+usage: python3 -I make_world.py <land.geojson> <countries.geojson> <out.json>
+Output: {"land": [ring, ...], "regions": {"ru": [ring, ...], "eu": [...], "us": [...]}}
 Every ring is a flat list [lon0, lat0, lon1, lat1, ...] rounded to 0.1 degree; holes are dropped.
+Regions: ru = Russia, eu = the European continent except Russia (no overseas territories), us = United States.
 """
 import json
 import sys
@@ -27,24 +29,43 @@ def flatten(ring):
     return flat
 
 
+def rings_for(features):
+    return [flatten(r) for feature in features for r in rings_of(feature["geometry"])]
+
+
+def in_europe(ring):
+    """Keeps the mainland and nearby islands: drops overseas territories (French Guiana) and Svalbard."""
+    lons, lats = ring[0::2], ring[1::2]
+    return -25 <= sum(lons) / len(lons) <= 45 and 34 <= sum(lats) / len(lats) <= 72
+
+
 def main(land_path, countries_path, out_path):
     with open(land_path, encoding="utf-8") as f:
         land = json.load(f)
     with open(countries_path, encoding="utf-8") as f:
-        countries = json.load(f)
+        countries = json.load(f)["features"]
 
-    land_rings = [flatten(r) for feature in land["features"] for r in rings_of(feature["geometry"])]
-    russia = [feature for feature in countries["features"] if feature["properties"].get("ADMIN") == "Russia"]
-    if len(russia) != 1:
-        sys.exit("expected exactly one Russia feature, found %d" % len(russia))
-    russia_rings = [flatten(r) for r in rings_of(russia[0]["geometry"])]
+    def admin(name):
+        found = [c for c in countries if c["properties"].get("ADMIN") == name]
+        if len(found) != 1:
+            sys.exit("expected exactly one %s feature, found %d" % (name, len(found)))
+        return found
+
+    regions = {
+        "ru": rings_for(admin("Russia")),
+        "us": rings_for(admin("United States of America")),
+        "eu": [r for r in rings_for(c for c in countries
+                                    if c["properties"].get("CONTINENT") == "Europe" and c["properties"].get("ADMIN") != "Russia")
+               if in_europe(r)],
+    }
 
     with open(out_path, "w", encoding="utf-8") as f:
-        json.dump({"land": land_rings, "russia": russia_rings}, f, separators=(",", ":"))
+        json.dump({"land": rings_for(land["features"]), "regions": regions}, f, separators=(",", ":"))
 
     points = lambda rings: sum(len(r) // 2 for r in rings)
-    print("land: %d rings, %d points" % (len(land_rings), points(land_rings)))
-    print("russia: %d rings, %d points" % (len(russia_rings), points(russia_rings)))
+    print("land: %d points" % points(rings_for(land["features"])))
+    for key, rings in regions.items():
+        print("%s: %d rings, %d points" % (key, len(rings), points(rings)))
 
 
 if __name__ == "__main__":

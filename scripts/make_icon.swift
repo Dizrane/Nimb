@@ -24,8 +24,10 @@ struct World {
 
     static func load() -> World {
         guard let data = FileManager.default.contents(atPath: "Resources/world.json"),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: [[Double]]],
-              let land = json["land"], let russia = json["russia"] else {
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let land = json["land"] as? [[Double]],
+              let regions = json["regions"] as? [String: [[Double]]],
+              let russia = regions["ru"] else {
             fatalError("Resources/world.json not found: run from the repository root")
         }
         return World(land: land, russia: russia)

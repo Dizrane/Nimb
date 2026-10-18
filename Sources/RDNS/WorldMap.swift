@@ -1,25 +1,27 @@
 import Foundation
 
-/// Coastlines and the outline of Russia from Natural Earth (public domain), 110m scale.
+/// Coastlines and the outlines of the regions the planet can light up, from Natural Earth (public domain), 110m scale.
 /// Each ring is a flat list [lon0, lat0, lon1, lat1, ...] in degrees; see Resources/world.json.
 struct WorldMap {
     let land: [[Double]]
-    let russia: [[Double]]
+    let regions: [String: [[Double]]]
+
+    func rings(for region: Region) -> [[Double]] { regions[region.rawValue] ?? [] }
 
     static let shared = load()
 
     private struct Raw: Decodable {
         let land: [[Double]]
-        let russia: [[Double]]
+        let regions: [String: [[Double]]]
     }
 
     private static func load() -> WorldMap {
         guard let url = Bundle.main.url(forResource: "world", withExtension: "json"),
               let data = try? Data(contentsOf: url),
               let raw = try? JSONDecoder().decode(Raw.self, from: data) else {
-            return WorldMap(land: [], russia: [])
+            return WorldMap(land: [], regions: [:])
         }
-        return WorldMap(land: raw.land, russia: raw.russia)
+        return WorldMap(land: raw.land, regions: raw.regions)
     }
 }
 

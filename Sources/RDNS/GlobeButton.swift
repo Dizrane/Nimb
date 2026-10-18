@@ -5,12 +5,13 @@ import SwiftUI
 struct HeroButton: View {
     let mode: AppMode
     let space: Bool
+    let region: Region
     let action: () -> Void
 
     var body: some View {
         ZStack {
             if space {
-                GlobeButton(mode: mode, action: action)
+                GlobeButton(mode: mode, region: region, action: action)
                     .transition(.opacity.combined(with: .scale(scale: 0.8)))
             } else {
                 OrbButton(mode: mode, action: action)
@@ -22,27 +23,74 @@ struct HeroButton: View {
     }
 }
 
+/// Where the globe is turned to; it eases towards the region of the provider that was picked.
+final class GlobeRotation: ObservableObject {
+    @Published private(set) var rotating = false
+    private var from: (lon: Double, lat: Double)
+    private var to: (lon: Double, lat: Double)
+    private var started = Date.distantPast
+    private let duration = 1.6
+    private let born = Date()
+
+    /// 0 when the globe appears, 1 once the satellite has settled at its station.
+    func arrival(at date: Date) -> Double { min(max(date.timeIntervalSince(born) / 2.6, 0), 1) }
+
+    init(_ region: Region) {
+        from = region.view
+        to = region.view
+    }
+
+    func center(at date: Date) -> (lon: Double, lat: Double) {
+        let p = min(max(date.timeIntervalSince(started) / duration, 0), 1)
+        let eased = p * p * (3 - 2 * p)
+        var dLon = to.lon - from.lon
+        while dLon > 180 { dLon -= 360 }
+        while dLon < -180 { dLon += 360 }
+        return (from.lon + dLon * eased, from.lat + (to.lat - from.lat) * eased)
+    }
+
+    func retarget(_ region: Region) {
+        let now = Date()
+        from = center(at: now)
+        to = region.view
+        started = now
+        rotating = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration + 0.1) { [weak self] in self?.rotating = false }
+    }
+}
+
 struct GlobeButton: View {
     let mode: AppMode
+    let region: Region
     let action: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var hover = Flag()
+    @StateObject private var rotation: GlobeRotation
 
     private let radius: CGFloat = 66
+
+    init(mode: AppMode, region: Region, action: @escaping () -> Void) {
+        self.mode = mode
+        self.region = region
+        self.action = action
+        _rotation = StateObject(wrappedValue: GlobeRotation(region))
+    }
 
     var body: some View {
         Button(action: action) {
             ZStack {
-                // The planet turns almost imperceptibly, so it is redrawn rarely; the signal moves fast.
-                TimelineView(.animation(minimumInterval: 1.0 / 4, paused: reduceMotion || scenePhase != .active)) { context in
+                // The planet turns almost imperceptibly, so it is redrawn rarely, except while it swings to a new region.
+                TimelineView(.animation(minimumInterval: rotation.rotating ? 1.0 / 30 : 1.0 / 4, paused: reduceMotion || scenePhase != .active)) { context in
                     GlobeCanvas(part: .planet, t: reduceMotion ? 0 : context.date.timeIntervalSinceReferenceDate,
-                                mode: mode, radius: radius * (hover.value ? 1.04 : 1))
+                                center: rotation.center(at: context.date), region: region,
+                                arrival: rotation.arrival(at: context.date), mode: mode, radius: radius * (hover.value ? 1.04 : 1))
                 }
                 TimelineView(.animation(minimumInterval: 1.0 / 24, paused: reduceMotion || scenePhase != .active)) { context in
                     GlobeCanvas(part: .signal, t: reduceMotion ? 0 : context.date.timeIntervalSinceReferenceDate,
-                                mode: mode, radius: radius * (hover.value ? 1.04 : 1))
+                                center: rotation.center(at: context.date), region: region,
+                                arrival: rotation.arrival(at: context.date), mode: mode, radius: radius * (hover.value ? 1.04 : 1))
                 }
                 powerBadge
                     .offset(y: radius * 0.56 + 8)
@@ -52,6 +100,7 @@ struct GlobeButton: View {
         }
         .buttonStyle(PressableStyle())
         .onHover { hover.value = $0 }
+        .onChange(of: region) { rotation.retarget($0) }
         .animation(.easeOut(duration: 0.2), value: hover.value)
     }
 
@@ -77,6 +126,9 @@ private struct GlobeCanvas: View {
 
     let part: Part
     let t: Double
+    let center: (lon: Double, lat: Double)
+    let region: Region
+    let arrival: Double
     let mode: AppMode
     let radius: CGFloat
 
@@ -85,7 +137,7 @@ private struct GlobeCanvas: View {
             let c = CGPoint(x: size.width / 2, y: size.height / 2 + 8)
             let r = radius
             let accent = mode.accent
-            let view = Orthographic(lon0: 74 + sin(t * 0.15) * 8, lat0: 52 + sin(t * 0.1) * 3)
+            let view = Orthographic(lon0: center.lon + sin(t * 0.15) * 8, lat0: center.lat + sin(t * 0.1) * 3)
             let world = WorldMap.shared
             let disc = CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)
 
@@ -109,20 +161,6 @@ private struct GlobeCanvas: View {
 
             }
 
-            if part == .signal {
-            // Orbit of the satellite: the upper arc, faint and dotted.
-            let rx = r * 1.62, ry = r * 1.32
-            var orbit = Path()
-            var a = -Double.pi + 0.3
-            orbit.move(to: CGPoint(x: c.x + rx * cos(a), y: c.y + ry * sin(a)))
-            while a < -0.3 {
-                a += 0.05
-                orbit.addLine(to: CGPoint(x: c.x + rx * cos(a), y: c.y + ry * sin(a)))
-            }
-            ctx.stroke(orbit, with: .color(.white.opacity(0.22)), style: StrokeStyle(lineWidth: 1, lineCap: .round, dash: [1, 6]))
-
-            }
-
             // rx/ry are needed again for the satellite below.
             let rx = r * 1.62, ry = r * 1.32
 
@@ -143,12 +181,12 @@ private struct GlobeCanvas: View {
                 l.fill(land, with: .color(Color(red: 0.16, green: 0.33, blue: 0.43)))
                 l.stroke(land, with: .color(.white.opacity(0.20)), lineWidth: 0.5)
 
-                let russia = path(world.russia, view, screen)
+                let highlighted = path(world.rings(for: region), view, screen)
                 l.drawLayer { g in
                     g.addFilter(.shadow(color: accent.opacity(0.95), radius: 7))
-                    g.fill(russia, with: .color(accent.opacity(0.92)))
+                    g.fill(highlighted, with: .color(accent.opacity(0.92)))
                 }
-                l.stroke(russia, with: .color(.white.opacity(0.8)), lineWidth: 0.8)
+                l.stroke(highlighted, with: .color(.white.opacity(0.5)), lineWidth: 0.6)
 
                 // Night side.
                 l.fill(
@@ -169,51 +207,108 @@ private struct GlobeCanvas: View {
             }
 
             if part == .signal {
-            // Moscow: the signal lands here.
-            let moscow = view.project(lon: 37.6, lat: 55.75)
-            let target = moscow.visible ? screen(moscow) : c
+            // The halo floats above the planet: it glows and a bright arc slowly runs around it.
+            drawHalo(&ctx, center: CGPoint(x: c.x, y: c.y - r * 1.1), rx: r * 1.12, ry: r * 0.24, t: t, accent: accent)
 
-            // Satellite sliding along the orbit.
-            let u = sin(t * 0.42)
-            let angle = -Double.pi / 2 + u * 0.95
-            let sat = CGPoint(x: c.x + rx * cos(angle), y: c.y + ry * sin(angle))
+            // The signal lands in a city of the lit-up region.
+            let landing = view.project(lon: region.landing.lon, lat: region.landing.lat)
+            let target = landing.visible ? screen(landing) : c
 
-            // Signal: a soft cone, dashes running down it and pulses.
+            // The satellite flies in once, slows down and then stays at its station.
+            let eased = 1 - pow(1 - arrival, 3)
+            let restAngle = -0.55
+            let angle = -2.7 + (restAngle + 2.7) * eased
+            var sat = CGPoint(x: c.x + rx * cos(angle), y: c.y + ry * sin(angle))
+            sat.y += sin(t * 0.9) * 1.2 * pow(eased, 4)
+            let aim = atan2(target.y - sat.y, target.x - sat.x)
+
+            // Signal: a soft cone, dashes running down it and pulses; it switches on when the satellite is in place.
+            let beam = min(max((arrival - 0.6) / 0.4, 0), 1)
             let dx = target.x - sat.x, dy = target.y - sat.y
             let length = max((dx * dx + dy * dy).squareRoot(), 1)
             let nx = -dy / length * 9, ny = dx / length * 9
-            var cone = Path()
-            cone.move(to: sat)
-            cone.addLine(to: CGPoint(x: target.x + nx, y: target.y + ny))
-            cone.addLine(to: CGPoint(x: target.x - nx, y: target.y - ny))
-            cone.closeSubpath()
-            ctx.fill(cone, with: .linearGradient(Gradient(colors: [accent.opacity(0.42), accent.opacity(0.06)]), startPoint: sat, endPoint: target))
+            ctx.drawLayer { l in
+                l.opacity = beam
+                var cone = Path()
+                cone.move(to: sat)
+                cone.addLine(to: CGPoint(x: target.x + nx, y: target.y + ny))
+                cone.addLine(to: CGPoint(x: target.x - nx, y: target.y - ny))
+                cone.closeSubpath()
+                l.fill(cone, with: .linearGradient(Gradient(colors: [accent.opacity(0.42), accent.opacity(0.06)]), startPoint: sat, endPoint: target))
 
-            var line = Path()
-            line.move(to: sat)
-            line.addLine(to: target)
-            ctx.stroke(line, with: .color(accent.opacity(0.9)), style: StrokeStyle(lineWidth: 1.4, lineCap: .round, dash: [2, 5], dashPhase: -t * 22))
-            for k in 0..<3 {
-                let s = (t * 0.55 + Double(k) / 3).truncatingRemainder(dividingBy: 1)
-                let p = CGPoint(x: sat.x + dx * s, y: sat.y + dy * s)
-                let alpha = sin(s * .pi)
-                ctx.fill(Path(ellipseIn: CGRect(x: p.x - 3, y: p.y - 3, width: 6, height: 6)), with: .color(.white.opacity(alpha * 0.9)))
-            }
-
-            if moscow.visible {
-                let ping = (t * 0.7).truncatingRemainder(dividingBy: 1)
-                let pr = 3 + 13 * ping
-                ctx.stroke(Path(ellipseIn: CGRect(x: target.x - pr, y: target.y - pr, width: pr * 2, height: pr * 2)),
-                           with: .color(.white.opacity((1 - ping) * 0.8)), lineWidth: 1.2)
-                ctx.fill(Path(ellipseIn: CGRect(x: target.x - 2.4, y: target.y - 2.4, width: 4.8, height: 4.8)), with: .color(.white))
+                var line = Path()
+                line.move(to: sat)
+                line.addLine(to: target)
+                l.stroke(line, with: .color(accent.opacity(0.9)), style: StrokeStyle(lineWidth: 1.4, lineCap: .round, dash: [2, 5], dashPhase: -t * 22))
+                for k in 0..<3 {
+                    let s = (t * 0.45 + Double(k) / 3).truncatingRemainder(dividingBy: 1)
+                    let p = CGPoint(x: sat.x + dx * s, y: sat.y + dy * s)
+                    l.fill(Path(ellipseIn: CGRect(x: p.x - 3, y: p.y - 3, width: 6, height: 6)), with: .color(.white.opacity(sin(s * .pi) * 0.9)))
+                }
+                if landing.visible {
+                    let ping = (t * 0.7).truncatingRemainder(dividingBy: 1)
+                    let pr = 3 + 13 * ping
+                    l.stroke(Path(ellipseIn: CGRect(x: target.x - pr, y: target.y - pr, width: pr * 2, height: pr * 2)),
+                             with: .color(.white.opacity((1 - ping) * 0.8)), lineWidth: 1.2)
+                    l.fill(Path(ellipseIn: CGRect(x: target.x - 2.4, y: target.y - 2.4, width: 4.8, height: 4.8)), with: .color(.white))
+                }
             }
 
             ctx.drawLayer { g in
                 g.translateBy(x: sat.x, y: sat.y)
-                g.rotate(by: .radians(angle + .pi / 2))
-                drawSatellite(&g, glow: accent, pulse: 0.5 + 0.5 * sin(t * 4))
+                g.rotate(by: .radians(aim - .pi / 2 + sin(t * 0.6) * 0.04))
+                drawSatellite(&g, glow: accent, pulse: 0.5 + 0.5 * sin(t * 3))
             }
             }
+        }
+    }
+
+    /// A glowing ring seen at a shallow angle. A bright arc with a fading tail runs around it, the nearer half is brighter.
+    private func drawHalo(_ ctx: inout GraphicsContext, center: CGPoint, rx: CGFloat, ry: CGFloat, t: Double, accent: Color) {
+        func point(_ angle: Double) -> CGPoint { CGPoint(x: center.x + rx * cos(angle), y: center.y + ry * sin(angle)) }
+        var ring = Path()
+        for i in 0...96 {
+            let p = point(Double(i) / 96 * 2 * .pi)
+            if i == 0 { ring.move(to: p) } else { ring.addLine(to: p) }
+        }
+        // Two layers of bloom: a wide soft one and a tighter one.
+        ctx.drawLayer { l in
+            l.addFilter(.blur(radius: 12))
+            l.stroke(ring, with: .color(accent.opacity(0.65)), lineWidth: 12)
+        }
+        ctx.drawLayer { l in
+            l.addFilter(.blur(radius: 4))
+            l.stroke(ring, with: .color(.white.opacity(0.55)), lineWidth: 4)
+        }
+        ctx.stroke(ring, with: .color(.white.opacity(0.62)), lineWidth: 1.6)
+
+        let head = t * 0.4
+        let steps = 36
+        for k in 0..<steps {
+            let a1 = head - Double(k) * 0.05, a0 = a1 - 0.05
+            let fade = pow(1 - Double(k) / Double(steps), 1.6)
+            let near = 0.65 + 0.35 * sin(a1)
+            var segment = Path()
+            segment.move(to: point(a0))
+            segment.addLine(to: point(a1))
+            ctx.stroke(segment, with: .color(.white.opacity(fade * near)),
+                       style: StrokeStyle(lineWidth: 1.8 + 2.8 * fade * near, lineCap: .round))
+        }
+
+        let spot = point(head)
+        ctx.fill(Path(ellipseIn: CGRect(x: spot.x - 22, y: spot.y - 22, width: 44, height: 44)),
+                 with: .radialGradient(Gradient(colors: [.white.opacity(0.95), accent.opacity(0.4), .clear]),
+                                       center: spot, startRadius: 0, endRadius: 22))
+        // Light streaks fanning out from the bright spot, like in a long exposure.
+        let lengths: [CGFloat] = [16, 28, 42, 30, 18, 24, 12]
+        for (i, length) in lengths.enumerated() {
+            let angle = head + Double(i - 3) * 0.1
+            let from = point(angle)
+            let outward = CGPoint(x: cos(angle) * 0.9, y: sin(angle) * 0.45)
+            var streak = Path()
+            streak.move(to: from)
+            streak.addLine(to: CGPoint(x: from.x + outward.x * length, y: from.y + outward.y * length))
+            ctx.stroke(streak, with: .color(.white.opacity(0.4 * (1 - abs(Double(i - 3)) / 4))), lineWidth: 0.9)
         }
     }
 

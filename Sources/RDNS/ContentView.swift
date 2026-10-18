@@ -12,7 +12,16 @@ final class DNSViewModel: ObservableObject {
     @Published var probeFraction = 0.0
     @Published var reports: [ProviderReport] = []
 
-    init() { refresh() }
+    init() {
+        // Read the state synchronously once, so a Mac that already has DNS on opens straight into space.
+        let services = DNSManager.physicalServices()
+        let current = DNSManager.activeProvider(on: services)
+        active = current
+        if let current {
+            selected = current
+            warnings = DNSManager.overrideWarnings(for: current)
+        }
+    }
 
     /// True while a DNS change or a service check is running; both need the network undisturbed.
     var isLocked: Bool { isBusy || isProbing }
@@ -193,7 +202,7 @@ private struct Hero: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            HeroButton(mode: model.mode, space: model.active != nil, action: model.toggle)
+            HeroButton(mode: model.mode, space: model.active != nil, region: model.active?.region ?? model.selected.region, action: model.toggle)
                 .disabled(model.isLocked)
                 .padding(.vertical, -22)
                 .accessibilityLabel(model.active == nil ? "Включить Smart DNS" : "Выключить Smart DNS")
