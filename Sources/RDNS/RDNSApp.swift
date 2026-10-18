@@ -3,7 +3,7 @@ import SwiftUI
 @main
 struct RDNSApp: App {
     var body: some Scene {
-        WindowGroup("RDNS") {
+        WindowGroup("Nimb") {
             ContentView()
         }
         .windowStyle(.hiddenTitleBar)

@@ -183,7 +183,7 @@ struct ContentView: View {
         }
         .frame(width: 400, height: 720)
         // As a background the scenery cannot widen the layout; it is larger than the window.
-        .background { WorldBackground(mode: model.mode, space: model.active != nil) }
+        .background { NimbBackground(lit: model.active != nil) }
         .ignoresSafeArea()
         .preferredColorScheme(.dark)
         .background(WindowConfigurator())
@@ -202,13 +202,13 @@ private struct Hero: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            HeroButton(mode: model.mode, space: model.active != nil, region: model.active?.region ?? model.selected.region, action: model.toggle)
+            HeroButton(mode: model.mode, lit: model.active != nil, region: model.active?.region ?? model.selected.region, action: model.toggle)
                 .disabled(model.isLocked)
                 .padding(.vertical, -22)
                 .accessibilityLabel(model.active == nil ? "Включить Smart DNS" : "Выключить Smart DNS")
 
             Text(title)
-                .font(.system(size: 26, weight: .bold, design: .rounded))
+                .font(.system(size: 28, weight: .light))
                 .foregroundStyle(Theme.textPrimary)
                 .shadow(color: .black.opacity(0.35), radius: 6, y: 1)
                 .contentTransition(.opacity)
@@ -217,7 +217,7 @@ private struct Hero: View {
                 if let active = model.active, !model.isLocked {
                     Text(active.name)
                         .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(model.mode.accent)
+                        .foregroundStyle(Theme.textPrimary)
                     Text(active.addresses.joined(separator: "   "))
                         .font(.system(size: 12.5, design: .monospaced))
                         .foregroundStyle(Theme.textSecondary)
@@ -306,7 +306,7 @@ private struct ProbeButton: View {
             ZStack(alignment: .leading) {
                 GeometryReader { geo in
                     Capsule()
-                        .fill(AppMode.probing.accent.opacity(0.38))
+                        .fill(Color.white.opacity(0.22))
                         .frame(width: geo.size.width * model.probeFraction)
                         .animation(.easeOut(duration: 0.25), value: model.probeFraction)
                 }
@@ -344,7 +344,7 @@ private struct ProviderCard: View {
     @StateObject private var hover = Flag()
     @StateObject private var details = Flag()
 
-    private var accent: Color { isActive ? Theme.ok : AppMode.off.accent }
+    private var accent: Color { Theme.accent }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -616,7 +616,7 @@ private struct FooterBar: View {
                     Button("Проверить обновления") { updates.check(silent: false) }
                         .buttonStyle(.plain)
                         .font(.system(size: 11.5, weight: .medium))
-                        .foregroundStyle(AppMode.off.accent)
+                        .foregroundStyle(Theme.textSecondary)
                 case .checking:
                     ProgressView().controlSize(.small)
                 case .upToDate:

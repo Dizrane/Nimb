@@ -1,5 +1,6 @@
 #!/bin/bash
-# Builds build/RDNS.app from the Swift package (ad-hoc signed, no Apple Developer account needed).
+# Builds build/RDNS.app (shown as "Nimb"; the file and bundle id keep their old names so that 0.1.x can still update itself)
+# from the Swift package (ad-hoc signed, no Apple Developer account needed).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -20,8 +21,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key><string>RDNS</string>
-    <key>CFBundleDisplayName</key><string>RDNS</string>
+    <key>CFBundleName</key><string>Nimb</string>
+    <key>CFBundleDisplayName</key><string>Nimb</string>
     <key>CFBundleIdentifier</key><string>com.rdns.app</string>
     <key>CFBundleExecutable</key><string>RDNS</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
