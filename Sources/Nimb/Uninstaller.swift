@@ -49,7 +49,7 @@ enum Uninstaller {
         }
 
         let temp = fm.temporaryDirectory
-        for name in (try? fm.contentsOfDirectory(atPath: temp.path)) ?? [] where name.hasPrefix("Nimb-update-") {
+        for name in (try? fm.contentsOfDirectory(atPath: temp.path)) ?? [] where name.hasPrefix("Nimb-update-") || name.hasPrefix("Nimb-move-") {
             result.append(temp.appendingPathComponent(name).path)
         }
         return result
