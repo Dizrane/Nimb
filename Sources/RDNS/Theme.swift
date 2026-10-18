@@ -11,7 +11,7 @@ enum Theme {
     static let base = Color.black
     static let accent = Color.white
     static let textPrimary = Color.white.opacity(0.96)
-    static let textSecondary = Color.white.opacity(0.62)
+    static let textSecondary = Color.white.opacity(0.74)
     static let ok = Color(red: 0.30, green: 0.92, blue: 0.62)
     static let warn = Color(red: 1.00, green: 0.74, blue: 0.28)
     static let bad = Color(red: 1.00, green: 0.38, blue: 0.45)
@@ -28,7 +28,7 @@ struct GlassCard: ViewModifier {
         content
             .background(
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .fill(Color.black.opacity(0.55))
+                    .fill(Color.black.opacity(0.68))
                     .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).fill(Color.white.opacity(0.04)))
                     .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).fill(tint.opacity(tintOpacity)))
             )

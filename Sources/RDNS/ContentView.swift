@@ -221,7 +221,7 @@ private struct Hero: View {
             Text(title)
                 .font(.system(size: 28, weight: .light))
                 .foregroundStyle(model.mode == .on ? Theme.ok : Theme.textPrimary)
-                .shadow(color: .black.opacity(0.35), radius: 6, y: 1)
+                .shadow(color: .black.opacity(0.6), radius: 8, y: 1)
                 .contentTransition(.opacity)
 
             VStack(spacing: 3) {
@@ -333,8 +333,8 @@ private struct ProbeButton: View {
                 .padding(.horizontal, 12)
             }
             .frame(width: 184, height: 30)
-            .background(Capsule().fill(Color.white.opacity(0.08)))
-            .overlay(Capsule().strokeBorder(Color.white.opacity(0.18)))
+            .background(Capsule().fill(Color.white.opacity(0.14)))
+            .overlay(Capsule().strokeBorder(Color.white.opacity(0.32)))
             .clipShape(Capsule())
         }
         .buttonStyle(PressableStyle())

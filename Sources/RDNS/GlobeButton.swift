@@ -67,23 +67,29 @@ struct HeroButton: View {
         )
     }
 
-    /// The button while DNS is off: large and bright, so that it is plainly the thing to press.
+    /// The button while DNS is off: large and clear, but soft enough not to blow out against the clouds.
     private var bigButton: some View {
         ZStack {
             Circle()
-                .fill(LinearGradient(colors: [.white, Color(white: 0.8)], startPoint: .top, endPoint: .bottom))
-                .overlay(Circle().strokeBorder(Color.white, lineWidth: 1.5))
-                .shadow(color: .white.opacity(hover.value ? 0.6 : 0.38), radius: hover.value ? 28 : 20)
-                .shadow(color: .black.opacity(0.4), radius: 10, y: 6)
+                .fill(LinearGradient(colors: [Color(white: 0.93), Color(white: 0.68)], startPoint: .top, endPoint: .bottom))
+                .overlay(Circle().strokeBorder(Color.white.opacity(0.55), lineWidth: 1.5))
+                .shadow(color: .white.opacity(hover.value ? 0.30 : 0.16), radius: hover.value ? 20 : 12)
+                .shadow(color: .black.opacity(0.5), radius: 10, y: 6)
             if mode == .busy {
                 ProgressView().controlSize(.regular).tint(.black)
             } else {
                 Image(systemName: "power")
                     .font(.system(size: 52, weight: .semibold))
-                    .foregroundStyle(Color(white: 0.08))
+                    .foregroundStyle(Color(white: 0.06))
             }
         }
         .frame(width: 124, height: 124)
+        // A dark pool of shade behind the button keeps its edge crisp against bright clouds; it does not take up layout space.
+        .background(
+            Circle()
+                .fill(RadialGradient(colors: [Color.black.opacity(0.55), .clear], center: .center, startRadius: 50, endRadius: 100))
+                .frame(width: 200, height: 200)
+        )
         .scaleEffect(hover.value ? 1.04 : 1)
     }
 

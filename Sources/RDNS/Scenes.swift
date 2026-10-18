@@ -67,9 +67,9 @@ private struct Cloud {
         var clouds: [Cloud] = []
         // (count, y range, scale range, speed range, alpha range): far, middle and near layers.
         let layers: [(Int, ClosedRange<Double>, ClosedRange<Double>, ClosedRange<Double>, ClosedRange<Double>)] = [
-            (6, 150...520, 0.6...0.9, 2...4, 0.30...0.42),
-            (6, 120...680, 0.9...1.3, 4...7, 0.42...0.58),
-            (5, 380...740, 1.3...1.9, 7...11, 0.58...0.78),
+            (6, 150...520, 0.6...0.9, 2...4, 0.20...0.30),
+            (6, 120...680, 0.9...1.3, 4...7, 0.28...0.40),
+            (5, 380...740, 1.3...1.9, 7...11, 0.34...0.50),
         ]
         for (count, ys, scales, speeds, alphas) in layers {
             for _ in 0..<count {
@@ -98,15 +98,24 @@ private struct SkyScene: View {
             // A grey sky, dark enough at the top for white text, paler towards the horizon.
             LinearGradient(
                 stops: [
-                    .init(color: Color(white: 0.06), location: 0),
-                    .init(color: Color(white: 0.20), location: 0.42),
-                    .init(color: Color(white: 0.46), location: 1),
+                    .init(color: Color(white: 0.05), location: 0),
+                    .init(color: Color(white: 0.15), location: 0.42),
+                    .init(color: Color(white: 0.28), location: 1),
                 ],
                 startPoint: .top, endPoint: .bottom
             )
             clouds
                 .offset(y: lit ? 260 : 0)
                 .opacity(lit ? 0 : 1)
+            // A scrim under the content keeps text and cards readable on top of the brightest clouds.
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: 0.18),
+                    .init(color: Color.black.opacity(0.45), location: 0.45),
+                    .init(color: Color.black.opacity(0.62), location: 1),
+                ],
+                startPoint: .top, endPoint: .bottom
+            )
         }
         .opacity(lit ? 0 : 1)
     }
