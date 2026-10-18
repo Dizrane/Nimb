@@ -530,9 +530,11 @@ private struct BestBanner: View {
                 .frame(width: 34, height: 34)
                 .background(Circle().fill(Theme.warn.opacity(0.16)))
             VStack(alignment: .leading, spacing: 2) {
-                Text("Лучший сейчас: \(report.provider.name)")
+                Text("Лучший: \(report.provider.name)")
                     .font(.system(size: 13.5, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
                 Text("Работает \(report.workingCount) из \(ProbeTarget.services.count) сервисов")
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.textSecondary)
