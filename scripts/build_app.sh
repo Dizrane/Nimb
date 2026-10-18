@@ -20,6 +20,7 @@ make_bundle() {
     cp Resources/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
     cp Resources/AppIconActive.icns "$app/Contents/Resources/AppIconActive.icns"
     cp Resources/world.json "$app/Contents/Resources/world.json"
+    cp Resources/telegram.png "$app/Contents/Resources/telegram.png"
 
     cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

@@ -949,6 +949,7 @@ private struct FooterBar: View {
                 Text("Nimb \(Updater.currentVersion)")
                     .font(Typo.mono)
                     .foregroundStyle(Theme.textSecondary)
+                ChannelLink(showsName: { if case .available = updates.state { return false }; return true }())
                 Spacer()
                 switch updates.state {
                 case .installing(let text):
@@ -982,6 +983,35 @@ private struct FooterBar: View {
         .padding(.vertical, 12)
         .background(Color.black.opacity(0.28))
         .overlay(alignment: .top) { Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1) }
+    }
+}
+
+/// The project's Telegram channel, with the Telegram logo. The name is left out when the footer needs the room.
+private struct ChannelLink: View {
+    let showsName: Bool
+    private static let url = URL(string: "https://t.me/NimbProject")!
+
+    var body: some View {
+        Button { NSWorkspace.shared.open(Self.url) } label: {
+            HStack(spacing: 6) {
+                if let url = Bundle.main.url(forResource: "telegram", withExtension: "png"), let image = NSImage(contentsOf: url) {
+                    Image(nsImage: image).resizable().frame(width: 15, height: 15)
+                } else {
+                    Image(systemName: "paperplane").font(.system(size: 12))
+                }
+                if showsName {
+                    Text("@NimbProject")
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(Theme.textSecondary)
+                }
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressableStyle())
+        .help("Новости и релизы Nimb в Telegram: @NimbProject")
+        .accessibilityLabel("Telegram-канал Nimb Project")
     }
 }
 
