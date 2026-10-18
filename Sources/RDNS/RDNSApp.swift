@@ -6,6 +6,7 @@ struct RDNSApp: App {
         WindowGroup("RDNS") {
             ContentView()
         }
+        .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
     }
 }
