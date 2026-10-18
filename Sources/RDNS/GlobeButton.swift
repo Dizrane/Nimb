@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The main button: a planet with a glowing halo over it. Off, the planet is dark and the halo barely smoulders;
-/// on, the halo blazes, the region of the chosen provider lights up and a satellite sends it a signal.
+/// The main button. Off: one large, bright button among the clouds. On: the planet with a glowing halo over it,
+/// the region of the chosen provider lit up in green and a satellite sending it a signal.
 struct HeroButton: View {
     let mode: AppMode
     let lit: Bool
@@ -33,9 +33,16 @@ struct HeroButton: View {
                 TimelineView(.animation(minimumInterval: 1.0 / 24, paused: reduceMotion || scenePhase != .active)) { context in
                     canvas(.signal, context.date)
                 }
-                powerBadge
-                    .offset(y: lit ? radius * 0.56 + 8 : 8)
-                    .animation(.easeInOut(duration: 1.2), value: lit)
+                bigButton
+                    .opacity(lit ? 0 : 1)
+                    .scaleEffect(lit ? 0.5 : 1)
+                    .offset(y: 8)
+                    .animation(.easeInOut(duration: 0.9), value: lit)
+                badge
+                    .opacity(lit ? 1 : 0)
+                    .scaleEffect(lit ? 1 : 0.5)
+                    .offset(y: radius * 0.56 + 8)
+                    .animation(.easeInOut(duration: 1.2).delay(lit ? 0.5 : 0), value: lit)
             }
             .frame(width: 320, height: 214)
             .contentShape(Path(ellipseIn: CGRect(x: 70, y: 34, width: 180, height: 150)))
@@ -60,18 +67,39 @@ struct HeroButton: View {
         )
     }
 
-    private var powerBadge: some View {
+    /// The button while DNS is off: large and bright, so that it is plainly the thing to press.
+    private var bigButton: some View {
         ZStack {
             Circle()
-                .fill(Color.black.opacity(0.55))
-                .overlay(Circle().strokeBorder(Color.white.opacity(lit ? 0.6 : 0.35), lineWidth: 1))
-                .frame(width: 34, height: 34)
+                .fill(LinearGradient(colors: [.white, Color(white: 0.8)], startPoint: .top, endPoint: .bottom))
+                .overlay(Circle().strokeBorder(Color.white, lineWidth: 1.5))
+                .shadow(color: .white.opacity(hover.value ? 0.6 : 0.38), radius: hover.value ? 28 : 20)
+                .shadow(color: .black.opacity(0.4), radius: 10, y: 6)
+            if mode == .busy {
+                ProgressView().controlSize(.regular).tint(.black)
+            } else {
+                Image(systemName: "power")
+                    .font(.system(size: 52, weight: .semibold))
+                    .foregroundStyle(Color(white: 0.08))
+            }
+        }
+        .frame(width: 124, height: 124)
+        .scaleEffect(hover.value ? 1.04 : 1)
+    }
+
+    /// The small button under the planet while DNS is on.
+    private var badge: some View {
+        ZStack {
+            Circle()
+                .fill(Color.black.opacity(0.6))
+                .overlay(Circle().strokeBorder(Theme.ok.opacity(0.85), lineWidth: 1.3))
+                .frame(width: 40, height: 40)
             if mode == .busy {
                 ProgressView().controlSize(.small).tint(.white)
             } else {
                 Image(systemName: "power")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(.white.opacity(lit ? 1 : 0.7))
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(Theme.ok)
             }
         }
     }
@@ -188,11 +216,12 @@ private struct GlobeCanvas: View {
             let world = WorldMap.shared
             let disc = CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)
             let white = Color.white
+            let green = Theme.ok
 
             // The halo: resting in the middle among the clouds while off, crowning the planet while on.
             let spin: Double = mode == .probing ? 3.0 : mode == .busy ? 2.0 : 1.0
             let pulse = mode == .busy ? 0.75 + 0.25 * sin(t * 5) : 1
-            let strength = (0.42 + 0.58 * max(lit, mode == .probing ? 1 : 0)) * pulse
+            let strength = lit * pulse
             let placement = haloPlacement(c: c, r: r, lit: lit)
 
             func screen(_ p: (x: Double, y: Double, visible: Bool)) -> CGPoint {
@@ -200,7 +229,7 @@ private struct GlobeCanvas: View {
             }
 
             if part == .planet {
-                drawHaloImage(&ctx, HaloImages.shared.back, placement, opacity: strength)
+                if strength > 0.01 { drawHaloImage(&ctx, HaloImages.shared.back, placement, opacity: strength) }
                 ctx.drawLayer { ctx in
                 ctx.opacity = lit
                 // Faint atmosphere, stronger when lit.
@@ -234,10 +263,10 @@ private struct GlobeCanvas: View {
                     // The region of the chosen provider: a faint outline before connecting, solid white after.
                     let highlighted = path(world.rings(for: region), view, screen)
                     l.drawLayer { g in
-                        g.addFilter(.shadow(color: white.opacity(0.9 * lit), radius: 7))
-                        g.fill(highlighted, with: .color(white.opacity(0.12 + 0.8 * lit)))
+                        g.addFilter(.shadow(color: green.opacity(0.9 * lit), radius: 7))
+                        g.fill(highlighted, with: .color(green.opacity(0.14 + 0.78 * lit)))
                     }
-                    l.stroke(highlighted, with: .color(white.opacity(0.4 + 0.2 * lit)), lineWidth: 0.7)
+                    l.stroke(highlighted, with: .color(.white.opacity(0.35 + 0.25 * lit)), lineWidth: 0.7)
 
                     // Night side.
                     l.fill(
@@ -258,9 +287,21 @@ private struct GlobeCanvas: View {
             }
 
             if part == .signal {
+                // Scanning with DNS off: rings spread out from the button.
+                if mode == .probing && lit < 0.5 {
+                    for k in 0..<3 {
+                        let phase = (t * 0.6 + Double(k) / 3).truncatingRemainder(dividingBy: 1)
+                        let ringRadius = 64 + 56 * phase
+                        ctx.stroke(Path(ellipseIn: CGRect(x: c.x - ringRadius, y: c.y - ringRadius, width: ringRadius * 2, height: ringRadius * 2)),
+                                   with: .color(white.opacity((1 - phase) * 0.55 * (1 - lit * 2))), lineWidth: 1.5)
+                    }
+                }
+
                 // The near half of the halo and the sparks that drift along it; scanning speeds them up.
-                drawHaloImage(&ctx, HaloImages.shared.front, placement, opacity: strength)
-                drawSparks(&ctx, placement, t: t, spin: spin, strength: strength)
+                if strength > 0.01 {
+                    drawHaloImage(&ctx, HaloImages.shared.front, placement, opacity: strength)
+                    drawSparks(&ctx, placement, t: t, spin: spin, strength: strength)
+                }
 
                 if satellite > 0.001 {
                     // The signal lands in a city of the lit-up region.
@@ -287,12 +328,12 @@ private struct GlobeCanvas: View {
                         cone.addLine(to: CGPoint(x: target.x + nx, y: target.y + ny))
                         cone.addLine(to: CGPoint(x: target.x - nx, y: target.y - ny))
                         cone.closeSubpath()
-                        l.fill(cone, with: .linearGradient(Gradient(colors: [white.opacity(0.4), white.opacity(0.05)]), startPoint: sat, endPoint: target))
+                        l.fill(cone, with: .linearGradient(Gradient(colors: [green.opacity(0.45), green.opacity(0.05)]), startPoint: sat, endPoint: target))
 
                         var line = Path()
                         line.move(to: sat)
                         line.addLine(to: target)
-                        l.stroke(line, with: .color(white.opacity(0.85)), style: StrokeStyle(lineWidth: 1.3, lineCap: .round, dash: [2, 5], dashPhase: -t * 22))
+                        l.stroke(line, with: .color(green.opacity(0.95)), style: StrokeStyle(lineWidth: 1.3, lineCap: .round, dash: [2, 5], dashPhase: -t * 22))
                         for k in 0..<3 {
                             let s = (t * 0.45 + Double(k) / 3).truncatingRemainder(dividingBy: 1)
                             let p = CGPoint(x: sat.x + dx * s, y: sat.y + dy * s)

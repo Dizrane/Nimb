@@ -220,7 +220,7 @@ private struct Hero: View {
 
             Text(title)
                 .font(.system(size: 28, weight: .light))
-                .foregroundStyle(Theme.textPrimary)
+                .foregroundStyle(model.mode == .on ? Theme.ok : Theme.textPrimary)
                 .shadow(color: .black.opacity(0.35), radius: 6, y: 1)
                 .contentTransition(.opacity)
 

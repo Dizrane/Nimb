@@ -5,15 +5,16 @@ enum AppMode: Equatable {
     case off, on, probing, busy
 }
 
-/// Black and white only: state is told apart by brightness and shape, never by hue.
+/// A quiet black-and-white scene with colour reserved for status: green for on and working, amber for caution
+/// and the best choice, red for failure.
 enum Theme {
     static let base = Color.black
     static let accent = Color.white
     static let textPrimary = Color.white.opacity(0.96)
     static let textSecondary = Color.white.opacity(0.62)
-    static let ok = Color.white
-    static let warn = Color(white: 0.78)
-    static let bad = Color(white: 0.52)
+    static let ok = Color(red: 0.30, green: 0.92, blue: 0.62)
+    static let warn = Color(red: 1.00, green: 0.74, blue: 0.28)
+    static let bad = Color(red: 1.00, green: 0.38, blue: 0.45)
 }
 
 /// Frosted dark card used for providers and notices.
