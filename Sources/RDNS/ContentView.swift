@@ -210,7 +210,7 @@ struct ContentView: View {
         .ignoresSafeArea()
         .preferredColorScheme(.dark)
         .background(WindowConfigurator())
-        .animation(.spring(response: 0.45, dampingFraction: 0.85), value: model.reports.count)
+        .animation(.easeInOut(duration: 0.5), value: model.reports.count)
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             model.refresh()
         }
@@ -224,44 +224,47 @@ private struct Hero: View {
     @ObservedObject var model: DNSViewModel
 
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 6) {
             HeroButton(mode: model.mode, lit: model.active != nil, region: model.active?.region ?? model.selected.region, action: model.toggle)
                 .disabled(model.isLocked)
                 .padding(.vertical, -22)
                 .accessibilityLabel(model.active == nil ? "Включить Smart DNS" : "Выключить Smart DNS")
 
             Text(title)
-                .font(.system(size: 28, weight: .light))
-                .foregroundStyle(model.mode == .on ? Theme.ok : Theme.textPrimary)
-                .shadow(color: .black.opacity(0.6), radius: 8, y: 1)
+                .font(Typo.status)
+                .foregroundStyle(Theme.textPrimary)
+                .shadow(color: .black.opacity(0.55), radius: 8, y: 1)
                 .contentTransition(.opacity)
 
-            VStack(spacing: 3) {
+            VStack(spacing: 4) {
                 if let active = model.active, !model.isLocked {
-                    Text(active.name)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Theme.textPrimary)
+                    HStack(spacing: 7) {
+                        Circle().fill(Theme.ok).frame(width: 6, height: 6)
+                        Text(active.name)
+                            .font(Typo.name)
+                            .foregroundStyle(Theme.textPrimary)
+                    }
                     Text(active.addresses.joined(separator: "   "))
-                        .font(.system(size: 12.5, design: .monospaced))
+                        .font(Typo.mono)
                         .foregroundStyle(Theme.textSecondary)
                 } else {
                     Text(subtitle)
-                        .font(.system(size: 13))
+                        .font(Typo.body)
                         .foregroundStyle(Theme.textSecondary)
                 }
             }
-            .frame(height: 36, alignment: .top)
+            .frame(height: 38, alignment: .top)
         }
         .padding(.top, 20)
         .padding(.bottom, 4)
-        .animation(.easeInOut(duration: 0.35), value: model.mode)
+        .animation(.easeInOut(duration: 0.45), value: model.mode)
     }
 
     private var title: String {
         switch model.mode {
         case .off: return "Выключено"
         case .on: return "Включено"
-        case .probing: return "Проверяю сервисы"
+        case .probing: return "Проверка сервисов"
         case .busy: return "Применяю DNS"
         }
     }
@@ -282,12 +285,10 @@ private struct ProvidersSection: View {
     @ObservedObject var model: DNSViewModel
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 10) {
             HStack {
-                Text("DNS-ПРОВАЙДЕРЫ")
-                    .font(.system(size: 11, weight: .bold))
-                    .tracking(1.3)
-                    .foregroundStyle(Theme.textSecondary)
+                Text("DNS-провайдеры")
+                    .sectionLabel()
                 Spacer()
                 ProbeButton(model: model)
             }
@@ -295,7 +296,7 @@ private struct ProvidersSection: View {
 
             if let best = model.best, best.workingCount > 0 {
                 BestBanner(report: best, isSelected: model.selected == best.provider, locked: model.isLocked, action: model.selectBest)
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .transition(.opacity)
             }
 
             ForEach(DNSProvider.all) { provider in
@@ -312,10 +313,10 @@ private struct ProvidersSection: View {
             }
 
             if !model.warnings.isEmpty {
-                NoticeCard(lines: model.warnings, color: Theme.warn, symbol: "exclamationmark.triangle.fill")
+                NoticeCard(lines: model.warnings, color: Theme.warn, symbol: "exclamationmark.triangle")
             }
             if let message = model.errorMessage {
-                NoticeCard(lines: [message], color: Theme.bad, symbol: "xmark.octagon.fill")
+                NoticeCard(lines: [message], color: Theme.bad, symbol: "xmark.octagon")
             }
         }
     }
@@ -328,26 +329,27 @@ private struct ProbeButton: View {
         Button(action: model.probe) {
             ZStack(alignment: .leading) {
                 GeometryReader { geo in
-                    Capsule()
-                        .fill(Color.white.opacity(0.22))
+                    Rectangle()
+                        .fill(Color.white.opacity(0.14))
                         .frame(width: geo.size.width * model.probeFraction)
                         .animation(.easeOut(duration: 0.25), value: model.probeFraction)
                 }
                 .opacity(model.isProbing ? 1 : 0)
 
-                HStack(spacing: 6) {
-                    Image(systemName: model.isProbing ? "dot.radiowaves.left.and.right" : "waveform.path.ecg")
+                HStack(spacing: 7) {
+                    Image(systemName: "waveform.path.ecg")
+                        .font(.system(size: 11, weight: .regular))
                     Text(model.isProbing ? model.probeProgress : "Проверить сервисы")
                         .lineLimit(1)
                 }
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(Theme.textPrimary)
                 .padding(.horizontal, 12)
             }
-            .frame(width: 184, height: 30)
-            .background(Capsule().fill(Color.white.opacity(0.14)))
-            .overlay(Capsule().strokeBorder(Color.white.opacity(0.32)))
-            .clipShape(Capsule())
+            .frame(width: 184, height: 28)
+            .background(Color.white.opacity(0.05))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.white.opacity(0.22), lineWidth: 1))
         }
         .buttonStyle(PressableStyle())
         .disabled(model.isLocked)
@@ -367,19 +369,17 @@ private struct ProviderCard: View {
     @StateObject private var hover = Flag()
     @StateObject private var details = Flag()
 
-    private var accent: Color { Theme.accent }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 8) {
                 Text(provider.name)
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(Typo.name)
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
                     .fixedSize()
                 if isBest {
-                    Image(systemName: "star.fill")
-                        .font(.system(size: 12))
+                    Image(systemName: "diamond.fill")
+                        .font(.system(size: 7))
                         .foregroundStyle(Theme.warn)
                         .help("Лучший по итогам проверки")
                 }
@@ -389,20 +389,18 @@ private struct ProviderCard: View {
                     SpeedBadge(seconds: report.medianSeconds)
                     Button { details.value.toggle() } label: {
                         Image(systemName: "info.circle")
-                            .font(.system(size: 14))
+                            .font(.system(size: 13, weight: .light))
                             .foregroundStyle(Theme.textSecondary)
                     }
                     .buttonStyle(.plain)
                     .help("Подробности проверки")
                     .popover(isPresented: $details.value, arrowEdge: .trailing) { DetailsView(report: report) }
                 }
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 18))
-                    .foregroundStyle(isSelected ? accent : Color.white.opacity(0.28))
+                RadioMark(selected: isSelected)
             }
 
             Text(provider.addresses.joined(separator: "   "))
-                .font(.system(size: 12, design: .monospaced))
+                .font(Typo.mono)
                 .foregroundStyle(Theme.textSecondary)
 
             if let report {
@@ -414,42 +412,57 @@ private struct ProviderCard: View {
                         ForEach(report.services) { ServicePill(result: $0) }
                     }
                 }
-                .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
+                .transition(.opacity)
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassCard(tint: accent, tintOpacity: isSelected ? 0.10 : hover.value ? 0.04 : 0, borderOpacity: isSelected ? 0.32 : hover.value ? 0.16 : 0.08)
-        .shadow(color: isSelected ? accent.opacity(0.22) : .clear, radius: 16)
-        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .glassCard(tintOpacity: isSelected ? 0.04 : 0, borderOpacity: isSelected ? 0.5 : hover.value ? 0.24 : 0.11)
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .onTapGesture(perform: onSelect)
         .onHover { hover.value = $0 }
         .allowsHitTesting(!locked)
         .opacity(locked ? 0.6 : 1)
-        .animation(.easeOut(duration: 0.18), value: hover.value)
-        .animation(.easeOut(duration: 0.25), value: isSelected)
+        .animation(.easeInOut(duration: 0.3), value: hover.value)
+        .animation(.easeInOut(duration: 0.3), value: isSelected)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
     }
 }
 
+/// A hairline circle, filled with a small dot when chosen.
+private struct RadioMark: View {
+    let selected: Bool
+
+    var body: some View {
+        ZStack {
+            Circle().strokeBorder(Color.white.opacity(selected ? 0.9 : 0.28), lineWidth: 1)
+            Circle().fill(Color.white.opacity(0.95)).frame(width: 8, height: 8).opacity(selected ? 1 : 0)
+        }
+        .frame(width: 16, height: 16)
+        .animation(.easeInOut(duration: 0.3), value: selected)
+    }
+}
+
+/// Small tracked caps in a hairline box instead of a filled pill.
 private struct Badge: View {
     let text: String
     let color: Color
 
     var body: some View {
         Text(text)
-            .font(.system(size: 10.5, weight: .bold))
+            .font(.system(size: 9, weight: .semibold))
+            .tracking(1.1)
+            .textCase(.uppercase)
             .foregroundStyle(color)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(Capsule().fill(color.opacity(0.16)))
-            .overlay(Capsule().strokeBorder(color.opacity(0.35)))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2.5)
+            .overlay(RoundedRectangle(cornerRadius: 4, style: .continuous).strokeBorder(color.opacity(0.5), lineWidth: 1))
     }
 }
 
-/// Three bars that fill up with speed, plus the time to the first byte.
+/// Three thin bars that fill up with speed, plus the time to the first byte.
 private struct SpeedBadge: View {
     let seconds: Double?
 
@@ -462,50 +475,50 @@ private struct SpeedBadge: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            HStack(alignment: .bottom, spacing: 2) {
+            HStack(alignment: .bottom, spacing: 1.5) {
                 ForEach(0..<3, id: \.self) { i in
-                    RoundedRectangle(cornerRadius: 1.5)
-                        .fill(i < level ? color : Color.white.opacity(0.18))
-                        .frame(width: 3.5, height: 6 + CGFloat(i) * 4)
+                    RoundedRectangle(cornerRadius: 0.5)
+                        .fill(i < level ? color : Color.white.opacity(0.16))
+                        .frame(width: 2.5, height: 5 + CGFloat(i) * 3.5)
                 }
             }
-            .frame(height: 14)
+            .frame(height: 12)
             Text(seconds.map { "\($0.formatted(.number.precision(.fractionLength(1)))) с" } ?? "—")
-                .font(.system(size: 12.5, weight: .semibold, design: .rounded).monospacedDigit())
-                .foregroundStyle(Theme.textPrimary)
+                .font(.system(size: 12, weight: .medium).monospacedDigit())
+                .foregroundStyle(Theme.textPrimary.opacity(0.9))
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(seconds.map { "Скорость \($0.formatted(.number.precision(.fractionLength(1)))) секунды" } ?? "Нет ответа")
     }
 }
 
-/// One service with a tick, a warning or a cross.
+/// One service with a bare tick, exclamation mark or cross, in a hairline box.
 private struct ServicePill: View {
     let result: ServiceResult
 
     private var style: (symbol: String, color: Color) {
         switch result.status {
-        case .works: return ("checkmark.circle.fill", Theme.ok)
-        case .unstable: return ("exclamationmark.triangle.fill", Theme.warn)
-        case .down: return ("xmark.circle.fill", Theme.bad)
+        case .works: return ("checkmark", Theme.ok)
+        case .unstable: return ("exclamationmark.triangle", Theme.warn)
+        case .down: return ("xmark", Theme.bad)
         }
     }
 
     var body: some View {
-        HStack(spacing: 3) {
+        HStack(spacing: 5) {
             Image(systemName: style.symbol)
-                .font(.system(size: 10.5, weight: .bold))
+                .font(.system(size: 9.5, weight: .semibold))
                 .foregroundStyle(style.color)
             Text(result.name)
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Theme.textPrimary)
                 .lineLimit(1)
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 7)
+        .padding(.horizontal, 8)
         .padding(.vertical, 5)
-        .background(Capsule().fill(style.color.opacity(0.13)))
-        .overlay(Capsule().strokeBorder(style.color.opacity(0.30)))
+        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(style.color.opacity(0.07)))
+        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(style.color.opacity(0.28), lineWidth: 1))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(result.name): \(result.status == .works ? "работает" : result.status == .unstable ? "нестабильно" : "не отвечает")")
     }
@@ -516,19 +529,19 @@ private struct DetailsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(report.provider.name).font(.system(size: 14, weight: .bold))
+            Text(report.provider.name).font(Typo.name)
             ForEach(ProbeTarget.services, id: \.self) { service in
                 HStack {
-                    Text(service).font(.system(size: 12, weight: .semibold))
+                    Text(service).font(.system(size: 12, weight: .medium))
                     Spacer(minLength: 16)
                     Text("сайт \(count(service, .site)) · API \(count(service, .api))")
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(Typo.mono)
                         .foregroundStyle(.secondary)
                 }
             }
             if !report.deadAddresses.isEmpty {
                 Divider()
-                Label("Не отвечают: \(report.deadAddresses.joined(separator: ", "))", systemImage: "exclamationmark.triangle.fill")
+                Label("Не отвечают: \(report.deadAddresses.joined(separator: ", "))", systemImage: "exclamationmark.triangle")
                     .font(.system(size: 11.5))
                     .foregroundStyle(Theme.warn)
             }
@@ -556,41 +569,42 @@ private struct BestBanner: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(Theme.warn)
-                .frame(width: 34, height: 34)
-                .background(Circle().fill(Theme.warn.opacity(0.16)))
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Лучший: \(report.provider.name)")
-                    .font(.system(size: 13.5, weight: .semibold))
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Рекомендуем")
+                    .sectionLabel()
+                    .foregroundStyle(Theme.warn)
+                Text(report.provider.name)
+                    .font(Typo.name)
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
                 Text("Работает \(report.workingCount) из \(ProbeTarget.services.count) сервисов")
-                    .font(.system(size: 12))
+                    .font(Typo.small)
                     .foregroundStyle(Theme.textSecondary)
             }
             Spacer(minLength: 4)
             if isSelected {
-                Label("Выбран", systemImage: "checkmark")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Theme.ok)
+                HStack(spacing: 5) {
+                    Image(systemName: "checkmark").font(.system(size: 10, weight: .semibold))
+                    Text("Выбран").font(.system(size: 12, weight: .medium))
+                }
+                .foregroundStyle(Theme.ok)
             } else {
                 Button(action: action) {
                     Text("Выбрать")
-                        .font(.system(size: 12.5, weight: .bold))
-                        .foregroundStyle(Color.black.opacity(0.85))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.warn)
                         .padding(.horizontal, 14)
-                        .padding(.vertical, 7)
-                        .background(Capsule().fill(Theme.warn))
+                        .padding(.vertical, 6)
+                        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.warn.opacity(0.65), lineWidth: 1))
                 }
                 .buttonStyle(PressableStyle())
                 .disabled(locked)
             }
         }
-        .padding(12)
-        .glassCard(tint: Theme.warn, tintOpacity: 0.07, borderOpacity: 0.16)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .glassCard(tint: Theme.warn, tintOpacity: 0.04, borderOpacity: 0.32)
     }
 }
 
@@ -602,13 +616,13 @@ private struct NoticeCard: View {
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: symbol)
-                .font(.system(size: 14, weight: .bold))
+                .font(.system(size: 13, weight: .regular))
                 .foregroundStyle(color)
                 .padding(.top, 1)
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(lines, id: \.self) { line in
                     Text(line)
-                        .font(.system(size: 12))
+                        .font(Typo.small)
                         .foregroundStyle(Color.white.opacity(0.86))
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -617,7 +631,7 @@ private struct NoticeCard: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassCard(tint: color, tintOpacity: 0.07, borderOpacity: 0.16, radius: 14)
+        .glassCard(tint: color, tintOpacity: 0.04, borderOpacity: 0.3, radius: 10)
     }
 }
 
@@ -631,7 +645,7 @@ private struct FooterBar: View {
         VStack(spacing: 8) {
             HStack {
                 Text("RDNS \(Updater.currentVersion)")
-                    .font(.system(size: 11.5, weight: .medium))
+                    .font(Typo.mono)
                     .foregroundStyle(Theme.textSecondary)
                 Spacer()
                 switch updates.state {
@@ -641,11 +655,11 @@ private struct FooterBar: View {
                 case .available(let release):
                     Button { updates.install(release) } label: {
                         Label("Обновить до \(release.version)", systemImage: "arrow.down.circle.fill")
-                            .font(.system(size: 12, weight: .bold))
+                            .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(Color.black.opacity(0.85))
                             .padding(.horizontal, 12)
                             .padding(.vertical, 6)
-                            .background(Capsule().fill(Theme.ok))
+                            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.ok))
                     }
                     .buttonStyle(PressableStyle())
                     .disabled(!canInstall)
