@@ -648,7 +648,7 @@ private struct FooterBar: View {
     var body: some View {
         VStack(spacing: 8) {
             HStack {
-                Text("RDNS \(Updater.currentVersion)")
+                Text("Nimb \(Updater.currentVersion)")
                     .font(Typo.mono)
                     .foregroundStyle(Theme.textSecondary)
                 Spacer()

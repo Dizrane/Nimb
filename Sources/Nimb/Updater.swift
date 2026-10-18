@@ -3,6 +3,7 @@ import Foundation
 
 struct Release: Equatable {
     let version: String
+    let assetName: String
     let zipURL: URL
     /// SHA-256 of the zip, taken from the release description.
     let sha256: String?
@@ -17,8 +18,9 @@ struct UpdateError: LocalizedError {
 
 /// Checks GitHub for a newer release and replaces the running app with it.
 enum Updater {
-    static let repository = "Dizrane/rdns-macos"
-    static let bundleIdentifier = "com.rdns.app"
+    static let repository = "Dizrane/Nimb"
+    /// The app used to be called RDNS (com.rdns.app); releases still carry a copy under that name for old installs.
+    static let acceptedIdentifiers: Set<String> = ["com.nimb.app", "com.rdns.app"]
 
     static var currentVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
@@ -46,15 +48,27 @@ enum Updater {
             throw UpdateError("GitHub не отдал информацию о релизе.")
         }
         let github = try JSONDecoder().decode(GitHubRelease.self, from: data)
-        guard let asset = github.assets.first(where: { $0.name.hasPrefix("RDNS") && $0.name.hasSuffix(".zip") }) else {
-            throw UpdateError("В последнем релизе нет файла RDNS-*.zip.")
+        // Prefer the Nimb build; the RDNS one exists only so that installs made before the rename can update.
+        let isZip: (String, String) -> Bool = { name, prefix in name.hasPrefix(prefix) && name.hasSuffix(".zip") }
+        guard let asset = github.assets.first(where: { isZip($0.name, "Nimb") }) ?? github.assets.first(where: { isZip($0.name, "RDNS") }) else {
+            throw UpdateError("В последнем релизе нет файла Nimb-*.zip.")
         }
+        let body = github.body ?? ""
         return Release(
             version: github.tag_name.trimmingCharacters(in: CharacterSet(charactersIn: "vV")),
+            assetName: asset.name,
             zipURL: asset.browser_download_url,
-            sha256: firstSHA256(in: github.body ?? ""),
+            sha256: sha256(for: asset.name, in: body) ?? firstSHA256(in: body),
             pageURL: github.html_url
         )
+    }
+
+    /// The hash written on the same line as the file name, lowercased: the notes list one "hash  file" line per archive.
+    static func sha256(for assetName: String, in text: String) -> String? {
+        for line in text.split(separator: "\n") where line.contains(assetName) {
+            if let hash = firstSHA256(in: String(line)) { return hash }
+        }
+        return nil
     }
 
     /// First 64-digit hex string in the text, lowercased.
@@ -83,10 +97,10 @@ enum Updater {
     static func install(_ release: Release, status: @escaping @Sendable (String) -> Void) async throws {
         let target = Bundle.main.bundleURL
         guard target.pathExtension == "app" else {
-            throw UpdateError("Обновление работает только из собранного RDNS.app.")
+            throw UpdateError("Обновление работает только из собранного приложения Nimb.")
         }
         guard !target.path.contains("/AppTranslocation/") else {
-            throw UpdateError("macOS запустил приложение из временной копии. Переместите RDNS.app в «Программы» и откройте оттуда.")
+            throw UpdateError("macOS запустил приложение из временной копии. Переместите Nimb в «Программы» и откройте оттуда.")
         }
         guard FileManager.default.isWritableFile(atPath: target.deletingLastPathComponent().path) else {
             throw UpdateError("Нет прав на запись в «\(target.deletingLastPathComponent().path)». Переместите приложение в «Программы» или обновите вручную.")
@@ -100,9 +114,9 @@ enum Updater {
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
             throw UpdateError("Не удалось скачать \(release.zipURL.lastPathComponent).")
         }
-        let stage = FileManager.default.temporaryDirectory.appendingPathComponent("RDNS-update-\(UUID().uuidString)")
+        let stage = FileManager.default.temporaryDirectory.appendingPathComponent("Nimb-update-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: stage, withIntermediateDirectories: true)
-        let zip = stage.appendingPathComponent("RDNS.zip")
+        let zip = stage.appendingPathComponent("Nimb.zip")
         try FileManager.default.moveItem(at: downloaded, to: zip)
 
         status("Проверка…")
@@ -121,11 +135,12 @@ enum Updater {
 
         let unpacked = stage.appendingPathComponent("unpacked")
         try run("/usr/bin/ditto", ["-x", "-k", zip.path, unpacked.path])
-        let app = unpacked.appendingPathComponent("RDNS.app")
-        guard let info = NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist")) else {
-            throw UpdateError("В архиве нет RDNS.app.")
+        guard let app = try FileManager.default.contentsOfDirectory(at: unpacked, includingPropertiesForKeys: nil)
+            .first(where: { $0.pathExtension == "app" }),
+              let info = NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist")) else {
+            throw UpdateError("В архиве нет приложения.")
         }
-        guard info["CFBundleIdentifier"] as? String == bundleIdentifier else {
+        guard let identifier = info["CFBundleIdentifier"] as? String, acceptedIdentifiers.contains(identifier) else {
             throw UpdateError("В архиве не то приложение (другой идентификатор).")
         }
         guard info["CFBundleShortVersionString"] as? String == version else {
@@ -135,25 +150,38 @@ enum Updater {
         return app
     }
 
-    /// The helper waits for this process to quit, swaps the bundle (keeping the old one until the copy
-    /// succeeds), reopens the app and removes the staging folder.
+    /// The helper waits for this process to quit, puts the new app in the same folder under its own name (so an old
+    /// "RDNS.app" becomes "Nimb.app"), keeping the old bundle until the copy has succeeded, then reopens the app
+    /// and removes the staging folder.
     private static func launchInstaller(newApp: URL, target: URL, stage: URL) throws {
         let script = """
         #!/bin/sh
         PID="$1"; TARGET="$2"; NEW="$3"; STAGE="$4"
         while kill -0 "$PID" 2>/dev/null; do sleep 0.2; done
+        DEST="$(dirname "$TARGET")/$(basename "$NEW")"
         BACKUP="$TARGET.old"
         rm -rf "$BACKUP"
         if mv "$TARGET" "$BACKUP"; then
-            if /usr/bin/ditto "$NEW" "$TARGET"; then
-                xattr -dr com.apple.quarantine "$TARGET" 2>/dev/null
-                rm -rf "$BACKUP"
-            else
-                rm -rf "$TARGET"
-                mv "$BACKUP" "$TARGET"
+            DESTBACKUP=""
+            if [ "$DEST" != "$TARGET" ] && [ -e "$DEST" ]; then
+                DESTBACKUP="$DEST.old"
+                rm -rf "$DESTBACKUP"
+                mv "$DEST" "$DESTBACKUP"
             fi
+            if /usr/bin/ditto "$NEW" "$DEST"; then
+                xattr -dr com.apple.quarantine "$DEST" 2>/dev/null
+                rm -rf "$BACKUP"
+                [ -n "$DESTBACKUP" ] && rm -rf "$DESTBACKUP"
+                open "$DEST"
+            else
+                rm -rf "$DEST"
+                [ -n "$DESTBACKUP" ] && mv "$DESTBACKUP" "$DEST"
+                mv "$BACKUP" "$TARGET"
+                open "$TARGET"
+            fi
+        else
+            open "$TARGET"
         fi
-        open "$TARGET"
         rm -rf "$STAGE"
         """
         let scriptURL = stage.appendingPathComponent("install.sh")

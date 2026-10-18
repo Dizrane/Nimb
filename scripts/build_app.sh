@@ -1,31 +1,35 @@
 #!/bin/bash
-# Builds build/RDNS.app (shown as "Nimb"; the file and bundle id keep their old names so that 0.1.x can still update itself)
-# from the Swift package (ad-hoc signed, no Apple Developer account needed).
+# Builds build/Nimb.app from the Swift package (ad-hoc signed, no Apple Developer account needed).
+#
+# LEGACY=1 also builds build/RDNS.app: the same app under its old file name and bundle id (com.rdns.app).
+# Releases ship it as RDNS-<version>.zip so that installs made before the rename can still update themselves;
+# the app then moves itself over to Nimb.app on its next update.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-APP="build/RDNS.app"
 VERSION="${VERSION:-0.2.2}"
 
 swift build -c release --arch arm64 --arch x86_64
-BIN="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/RDNS"
+BIN="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/Nimb"
 
-rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN" "$APP/Contents/MacOS/RDNS"
-cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
-cp Resources/AppIconActive.icns "$APP/Contents/Resources/AppIconActive.icns"
-cp Resources/world.json "$APP/Contents/Resources/world.json"
+make_bundle() {
+    local app="build/$1" identifier="$2"
+    rm -rf "$app"
+    mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+    cp "$BIN" "$app/Contents/MacOS/Nimb"
+    cp Resources/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
+    cp Resources/AppIconActive.icns "$app/Contents/Resources/AppIconActive.icns"
+    cp Resources/world.json "$app/Contents/Resources/world.json"
 
-cat > "$APP/Contents/Info.plist" <<PLIST
+    cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key><string>Nimb</string>
     <key>CFBundleDisplayName</key><string>Nimb</string>
-    <key>CFBundleIdentifier</key><string>com.rdns.app</string>
-    <key>CFBundleExecutable</key><string>RDNS</string>
+    <key>CFBundleIdentifier</key><string>${identifier}</string>
+    <key>CFBundleExecutable</key><string>Nimb</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>${VERSION}</string>
@@ -36,5 +40,11 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-codesign --force --deep --sign - "$APP"
-echo "Built $APP"
+    codesign --force --deep --sign - "$app"
+    echo "Built $app"
+}
+
+make_bundle Nimb.app com.nimb.app
+if [ "${LEGACY:-0}" = "1" ]; then
+    make_bundle RDNS.app com.rdns.app
+fi

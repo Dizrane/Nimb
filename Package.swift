@@ -2,9 +2,9 @@
 import PackageDescription
 
 let package = Package(
-    name: "RDNS",
+    name: "Nimb",
     platforms: [.macOS(.v13)],
     targets: [
-        .executableTarget(name: "RDNS", path: "Sources/RDNS")
+        .executableTarget(name: "Nimb", path: "Sources/Nimb")
     ]
 )

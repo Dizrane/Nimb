@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct RDNSApp: App {
+struct NimbApp: App {
     var body: some Scene {
         WindowGroup("Nimb") {
             ContentView()

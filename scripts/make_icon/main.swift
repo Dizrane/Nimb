@@ -3,7 +3,7 @@
 //   Resources/AppIconActive.icns  B: the halo over a dark planet (the Dock icon while DNS is on)
 // Run from the repository root:
 //   scripts/make_icons.sh
-// which compiles this file together with Sources/RDNS/HaloRenderer.swift.
+// which compiles this file together with Sources/Nimb/HaloRenderer.swift.
 import AppKit
 
 let space = CGColorSpaceCreateDeviceRGB()
