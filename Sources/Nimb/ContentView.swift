@@ -949,7 +949,7 @@ private struct FooterBar: View {
                 Text("Nimb \(Updater.currentVersion)")
                     .font(Typo.mono)
                     .foregroundStyle(Theme.textSecondary)
-                ChannelLink(showsName: { if case .available = updates.state { return false }; return true }())
+                ChannelLink()
                 Spacer()
                 switch updates.state {
                 case .installing(let text):
@@ -986,27 +986,20 @@ private struct FooterBar: View {
     }
 }
 
-/// The project's Telegram channel, with the Telegram logo. The name is left out when the footer needs the room.
+/// A small round Telegram logo that opens the project's channel, @NimbProject.
 private struct ChannelLink: View {
-    let showsName: Bool
     private static let url = URL(string: "https://t.me/NimbProject")!
 
     var body: some View {
         Button { NSWorkspace.shared.open(Self.url) } label: {
-            HStack(spacing: 6) {
+            Group {
                 if let url = Bundle.main.url(forResource: "telegram", withExtension: "png"), let image = NSImage(contentsOf: url) {
-                    Image(nsImage: image).resizable().frame(width: 15, height: 15)
+                    Image(nsImage: image).resizable().frame(width: 14, height: 14).opacity(0.75)
                 } else {
-                    Image(systemName: "paperplane").font(.system(size: 12))
-                }
-                if showsName {
-                    Text("@NimbProject")
-                        .font(.system(size: 11.5, weight: .medium))
-                        .foregroundStyle(Theme.textSecondary)
+                    Image(systemName: "paperplane").font(.system(size: 12)).foregroundStyle(Theme.textSecondary)
                 }
             }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 4)
+            .padding(6)
             .contentShape(Rectangle())
         }
         .buttonStyle(PressableStyle())
