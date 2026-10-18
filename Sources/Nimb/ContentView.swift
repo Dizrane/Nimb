@@ -803,6 +803,7 @@ private struct ServicePill: View {
         case .works: return ("checkmark", Theme.ok)
         case .unstable: return ("exclamationmark.triangle", Theme.warn)
         case .down: return ("xmark", Theme.bad)
+        case .blocked: return ("nosign", Theme.bad)
         }
     }
 
@@ -822,7 +823,7 @@ private struct ServicePill: View {
         .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(style.color.opacity(0.07)))
         .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(style.color.opacity(0.28), lineWidth: 1))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(result.name): \(result.status == .works ? "работает" : result.status == .unstable ? "нестабильно" : "не отвечает")")
+        .accessibilityLabel("\(result.name): \(result.status == .works ? "работает" : result.status == .unstable ? "нестабильно" : result.status == .blocked ? "закрыт" : "не отвечает")")
     }
 }
 
@@ -841,14 +842,23 @@ private struct DetailsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            if !report.refusals.isEmpty {
+                Divider()
+                ForEach(report.refusals, id: \.self) { line in
+                    Label(line, systemImage: "nosign")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Theme.bad)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
             if !report.deadAddresses.isEmpty {
                 Divider()
-                Label("Не отвечают: \(report.deadAddresses.joined(separator: ", "))", systemImage: "exclamationmark.triangle")
+                Label("Без нормального ответа: \(report.deadAddresses.joined(separator: ", "))", systemImage: "exclamationmark.triangle")
                     .font(.system(size: 11.5))
                     .foregroundStyle(Theme.warn)
             }
             Divider()
-            Text("Цифры — сколько адресов пула ответило на запрос. Сервис работает, если ответило не менее 75%. Проверка не гарантирует, что откроются приложения.")
+            Text("Цифры — сколько адресов пула ответило как положено. Отказ из-за региона, страница ограничений и ответ 403 не считаются. Сервис работает, если ответило не менее 75%. Проверка не гарантирует, что откроются приложения.")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
