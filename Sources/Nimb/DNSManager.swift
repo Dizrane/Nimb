@@ -183,28 +183,64 @@ enum DNSManager {
 
     private static let networksetup = "/usr/sbin/networksetup"
 
-    /// True if sudo would run this command without asking. `-l` with a command only looks, and `-n` never prompts.
-    private static func sudoAllows(_ command: [String]) -> Bool {
-        (try? run("/usr/bin/sudo", ["-n", "-l"] + command)) != nil
+    /// What `sudo -l` lists as allowed without a password. Listing needs no password once any NOPASSWD entry exists,
+    /// and `sudo -l <command>` also succeeds for commands that would ask for one, so the list itself is read.
+    private struct NoPasswordList {
+        var commands: Set<String> = []
+        var everything = false
+
+        func allows(_ command: String) -> Bool { everything || commands.contains(command) }
+    }
+
+    private static func noPasswordList() -> NoPasswordList {
+        guard let output = try? run("/usr/bin/sudo", ["-n", "-l"]) else { return NoPasswordList() }
+        var list = NoPasswordList()
+        for line in output.split(separator: "\n") {
+            guard let marker = line.range(of: "NOPASSWD:") else { continue }
+            for entry in line[marker.upperBound...].components(separatedBy: ", ") {
+                let command = entry.trimmingCharacters(in: .whitespaces)
+                if command == "ALL" { list.everything = true } else if !command.isEmpty { list.commands.insert(command) }
+            }
+        }
+        return list
+    }
+
+    /// Whether sudo would set an address that is not Nimb's without a password. The probe names a service that does
+    /// not exist, so even if sudo lets it through, networksetup fails and nothing changes.
+    private static func sudoAcceptsAnyDNS() -> Bool {
+        do {
+            _ = try run("/usr/bin/sudo", ["-n", networksetup, "-setdnsservers", "Nimb-probe", "8.8.8.8"])
+            return true
+        } catch DNSError.failed(let message) {
+            return !["password is required", "may not run", "not allowed"].contains { message.contains($0) }
+        } catch {
+            return false
+        }
+    }
+
+    private static func setCommand(_ service: String, _ addresses: [String]) -> String {
+        "\(networksetup) -setdnsservers \(service) \(addresses.joined(separator: " "))"
     }
 
     static func passwordlessState(for services: [String]) -> PasswordlessState {
         let named = services.filter(isRuleSafe)
-        let covered = named.filter { sudoAllows([networksetup, "-setdnsservers", $0, "Empty"]) }
+        let list = noPasswordList()
+        let covered = named.filter { list.allows(setCommand($0, ["Empty"])) }
         guard !covered.isEmpty else { return PasswordlessState() }
         return PasswordlessState(
             enabled: true,
             missing: named.filter { !covered.contains($0) },
-            tooBroad: sudoAllows([networksetup, "-setdnsservers", "Nimb-probe", "8.8.8.8"])
+            tooBroad: sudoAcceptsAnyDNS()
         )
     }
 
     private static func canApplyWithoutPassword(_ provider: DNSProvider?, to services: [String]) -> Bool {
         let addresses = provider?.addresses ?? ["Empty"]
+        let list = noPasswordList()
         return !services.isEmpty
-            && services.allSatisfy { sudoAllows([networksetup, "-setdnsservers", $0] + addresses) }
-            && sudoAllows(["/usr/bin/dscacheutil", "-flushcache"])
-            && sudoAllows(["/usr/bin/killall", "-HUP", "mDNSResponder"])
+            && services.allSatisfy { list.allows(setCommand($0, addresses)) }
+            && list.allows("/usr/bin/dscacheutil -flushcache")
+            && list.allows("/usr/bin/killall -HUP mDNSResponder")
     }
 
     /// The sudoers rule: exactly the commands Nimb runs, with its own provider addresses and the services present now.
@@ -214,7 +250,7 @@ enum DNSManager {
         var commands: [String] = []
         for service in services {
             for addresses in [["Empty"]] + DNSProvider.all.map(\.addresses) {
-                commands.append("\(networksetup) -setdnsservers \(escaped(service)) \(addresses.joined(separator: " "))")
+                commands.append(setCommand(escaped(service), addresses))
             }
         }
         commands += ["/usr/bin/dscacheutil -flushcache", "/usr/bin/killall -HUP mDNSResponder"]
