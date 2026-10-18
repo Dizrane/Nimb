@@ -114,7 +114,11 @@ enum DNSManager {
     /// Sets `provider` on all given services, or resets them to automatic DNS when it is nil.
     /// Every command is checked, and the result is read back afterwards.
     static func apply(_ provider: DNSProvider?, to services: [String]) throws {
-        try runPrivileged(applyScript(provider, to: services))
+        if isPasswordless {
+            try applyWithSudo(provider, to: services)
+        } else {
+            try runPrivileged(applyScript(provider, to: services))
+        }
 
         let expected = provider?.addresses ?? []
         let mismatched = services.filter { servers(of: $0) != expected }
@@ -135,6 +139,71 @@ enum DNSManager {
         script.append("/usr/bin/killall -HUP mDNSResponder || { echo \(shellQuote("Не удалось перезапустить mDNSResponder.")) >&2; failed=1; }")
         script.append("exit $failed")
         return script.joined(separator: "; ")
+    }
+
+    // MARK: Without a password (opt-in)
+
+    static let sudoersPath = "/etc/sudoers.d/nimb"
+
+    /// True if sudo lets this user change DNS without a password. Checked with `-n`, so it never prompts.
+    static var isPasswordless: Bool {
+        (try? run("/usr/bin/sudo", ["-n", "-l", "/usr/sbin/networksetup", "-setdnsservers", "Nimb", "Empty"])) != nil
+    }
+
+    /// The sudoers rule: only these three commands, for this user. Anything else still asks for the password.
+    static func sudoersRule(for user: String) -> [String] {
+        [
+            "# Nimb: lets \(user) change DNS servers without a password. Remove this file to undo.",
+            "\(user) ALL = (root) NOPASSWD: /usr/sbin/networksetup -setdnsservers *, /usr/bin/dscacheutil -flushcache, /usr/bin/killall -HUP mDNSResponder",
+        ]
+    }
+
+    /// Installs the sudoers rule. Asks for the administrator password once.
+    static func enablePasswordless() throws {
+        let user = NSUserName()
+        guard user.range(of: #"^[A-Za-z0-9_][A-Za-z0-9._-]*$"#, options: .regularExpression) != nil else {
+            throw DNSError.failed("Имя пользователя «\(user)» содержит необычные символы, правило для него не создаю.")
+        }
+        let lines = sudoersRule(for: user).map(shellQuote).joined(separator: " ")
+        let script = [
+            "set -e",
+            "grep -Eq '^[#@]includedir[[:space:]]+/etc/sudoers.d' /etc/sudoers || { echo \(shellQuote("В /etc/sudoers не подключена папка sudoers.d.")) >&2; exit 1; }",
+            "mkdir -p /etc/sudoers.d",
+            "tmp=$(/usr/bin/mktemp /tmp/nimb-sudoers.XXXXXX)",
+            "trap 'rm -f \"$tmp\"' EXIT",
+            "printf '%s\\n' \(lines) > \"$tmp\"",
+            "/usr/sbin/visudo -cf \"$tmp\" >/dev/null || { echo \(shellQuote("Правило не прошло проверку visudo, ничего не установлено.")) >&2; exit 1; }",
+            "/usr/bin/install -m 440 -o root -g wheel \"$tmp\" \(sudoersPath)",
+        ].joined(separator: "; ")
+        try runPrivileged(script)
+        guard isPasswordless else { throw DNSError.failed("Правило установлено, но sudo всё равно просит пароль.") }
+    }
+
+    /// Removes the sudoers rule again. Asks for the administrator password.
+    static func disablePasswordless() throws {
+        try runPrivileged("/bin/rm -f \(sudoersPath)")
+        if isPasswordless {
+            throw DNSError.failed("Правило Nimb удалено, но в системе есть другое правило sudo без пароля.")
+        }
+    }
+
+    /// The same commands as `applyScript`, each one through `sudo -n`, so nothing is asked.
+    private static func applyWithSudo(_ provider: DNSProvider?, to services: [String]) throws {
+        let addresses = provider?.addresses ?? ["Empty"]
+        var failures: [String] = []
+        func sudo(_ args: [String], _ failure: String) {
+            do { _ = try run("/usr/bin/sudo", ["-n"] + args) } catch DNSError.failed(let message) {
+                failures.append("\(failure) \(message)")
+            } catch {
+                failures.append(failure)
+            }
+        }
+        for service in services {
+            sudo(["/usr/sbin/networksetup", "-setdnsservers", service] + addresses, "Не удалось изменить DNS: \(service).")
+        }
+        sudo(["/usr/bin/dscacheutil", "-flushcache"], "Не удалось сбросить кэш DNS (dscacheutil).")
+        sudo(["/usr/bin/killall", "-HUP", "mDNSResponder"], "Не удалось перезапустить mDNSResponder.")
+        if !failures.isEmpty { throw DNSError.failed(failures.joined(separator: "\n")) }
     }
 
     private static func runPrivileged(_ script: String) throws {

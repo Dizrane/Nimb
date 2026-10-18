@@ -11,8 +11,11 @@ final class DNSViewModel: ObservableObject {
     @Published var probeProgress = ""
     @Published var probeFraction = 0.0
     @Published var reports: [ProviderReport] = []
+    @Published var passwordless = false
+    @Published var isSettingUp = false
 
     init() {
+        passwordless = DNSManager.isPasswordless
         // Read the state synchronously once, so a Mac that already has DNS on opens straight into space.
         let services = DNSManager.physicalServices()
         let current = DNSManager.activeProvider(on: services)
@@ -35,11 +38,11 @@ final class DNSViewModel: ObservableObject {
     }
 
     /// True while a DNS change or a service check is running; both need the network undisturbed.
-    var isLocked: Bool { isBusy || isProbing }
+    var isLocked: Bool { isBusy || isProbing || isSettingUp }
 
     var mode: AppMode {
         if isProbing { return .probing }
-        if isBusy { return .busy }
+        if isBusy || isSettingUp { return .busy }
         return active == nil ? .off : .on
     }
 
@@ -96,8 +99,10 @@ final class DNSViewModel: ObservableObject {
                     + DNSManager.overrideWarnings(for: partial.provider)
             }
             let shownWarnings = warnings
+            let passwordless = DNSManager.isPasswordless
             await MainActor.run {
                 guard !self.isLocked else { return }
+                self.passwordless = passwordless
                 self.active = active
                 self.warnings = shownWarnings
                 if let active { self.selected = active }
@@ -115,6 +120,41 @@ final class DNSViewModel: ObservableObject {
     func select(_ provider: DNSProvider) {
         selected = provider
         if active != nil, active != provider { change(to: provider) }
+    }
+
+    /// Installs or removes the sudoers rule that lets DNS change without a password; the risk is explained first.
+    func togglePasswordless() {
+        guard !isLocked else { return }
+        if !passwordless {
+            let alert = NSAlert()
+            alert.messageText = "Переключать DNS без пароля?"
+            alert.informativeText = """
+                Nimb добавит правило в \(DNSManager.sudoersPath). Один раз понадобится пароль администратора.
+
+                Правило разрешает вашей учётной записи менять DNS-серверы и сбрасывать DNS-кэш без пароля. Только эти команды, а не полный доступ к системе.
+
+                Риск: любая программа, запущенная от вашего имени, сможет подменить DNS на этом Mac без вашего ведома, например чтобы направлять сайты на чужие серверы.
+
+                Отключить можно в любой момент кнопкой в Nimb: правило удаляется целиком.
+                """
+            alert.addButton(withTitle: "Включить")
+            alert.addButton(withTitle: "Отмена")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+        let enable = !passwordless
+        isSettingUp = true
+        errorMessage = nil
+        Task.detached {
+            let result = Result { enable ? try DNSManager.enablePasswordless() : try DNSManager.disablePasswordless() }
+            let now = DNSManager.isPasswordless
+            await MainActor.run {
+                self.isSettingUp = false
+                self.passwordless = now
+                if case .failure(let error) = result {
+                    if case DNSError.cancelled = error {} else { self.errorMessage = error.localizedDescription }
+                }
+            }
+        }
     }
 
     private func change(to provider: DNSProvider?) {
@@ -269,7 +309,7 @@ private struct Hero: View {
         case .off: return "Выключено"
         case .on: return "Включено"
         case .probing: return "Проверка сервисов"
-        case .busy: return "Применяю DNS"
+        case .busy: return model.isSettingUp ? "Настраиваю доступ" : "Применяю DNS"
         }
     }
 
@@ -278,7 +318,7 @@ private struct Hero: View {
         case .off: return "Используется DNS роутера или провайдера"
         case .on: return ""
         case .probing: return "Спрашиваю DNS и запрашиваю сайты и API"
-        case .busy: return "Подтвердите пароль администратора"
+        case .busy: return model.passwordless && !model.isSettingUp ? "Меняю DNS на всех подключениях" : "Подтвердите пароль администратора"
         }
     }
 }
@@ -316,6 +356,8 @@ private struct ProvidersSection: View {
                 }
             }
 
+            PasswordlessRow(model: model)
+
             if !model.warnings.isEmpty {
                 NoticeCard(lines: model.warnings, color: Theme.warn, symbol: "exclamationmark.triangle")
             }
@@ -323,6 +365,39 @@ private struct ProvidersSection: View {
                 NoticeCard(lines: [message], color: Theme.bad, symbol: "xmark.octagon")
             }
         }
+    }
+}
+
+/// The opt-in to switch DNS without the administrator password, with what it costs spelled out.
+private struct PasswordlessRow: View {
+    @ObservedObject var model: DNSViewModel
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Без пароля")
+                    .font(Typo.name)
+                    .foregroundStyle(Theme.textPrimary)
+                Text(model.passwordless
+                     ? "Включено: DNS меняется без запроса пароля. Любая программа от вашего имени тоже может его менять."
+                     : "Сейчас macOS просит пароль или Touch ID при каждом переключении. Можно разрешить менять DNS без этого.")
+                    .font(Typo.small)
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            Button(model.passwordless ? "Отключить" : "Включить", action: model.togglePasswordless)
+                .buttonStyle(PressableStyle())
+                .font(.system(size: 11.5, weight: .medium))
+                .foregroundStyle(model.passwordless ? Theme.warn : Theme.textPrimary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(Color.white.opacity(0.22), lineWidth: 1))
+                .disabled(model.isLocked)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassCard(tint: .white, tintOpacity: 0.02, borderOpacity: 0.16, radius: 10)
     }
 }
 
