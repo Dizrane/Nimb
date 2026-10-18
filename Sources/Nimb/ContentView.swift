@@ -946,10 +946,11 @@ private struct FooterBar: View {
     var body: some View {
         VStack(spacing: 8) {
             HStack {
+                ChannelLink()
+                    .padding(.leading, -6)
                 Text("Nimb \(Updater.currentVersion)")
                     .font(Typo.mono)
                     .foregroundStyle(Theme.textSecondary)
-                ChannelLink()
                 Spacer()
                 switch updates.state {
                 case .installing(let text):
