@@ -186,7 +186,7 @@ enum DNSManager {
         let lines = sudoersRule(for: user).map(shellQuote).joined(separator: " ")
         let script = [
             "set -e",
-            "grep -Eq '^[#@]includedir[[:space:]]+/etc/sudoers.d' /etc/sudoers || { echo \(shellQuote("В /etc/sudoers не подключена папка sudoers.d.")) >&2; exit 1; }",
+            "grep -Eq '^[#@]includedir[[:space:]]+(/private)?/etc/sudoers[.]d' /etc/sudoers || { echo \(shellQuote("В /etc/sudoers не подключена папка sudoers.d.")) >&2; exit 1; }",
             "mkdir -p /etc/sudoers.d",
             "tmp=$(/usr/bin/mktemp /tmp/nimb-sudoers.XXXXXX)",
             "trap 'rm -f \"$tmp\"' EXIT",
