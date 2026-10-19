@@ -866,7 +866,7 @@ private struct FooterBar: View {
                             .foregroundStyle(Color.black.opacity(0.85))
                             .padding(.horizontal, 12)
                             .padding(.vertical, 6)
-                            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.ok))
+                            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.white.opacity(0.92)))
                     }
                     .buttonStyle(PressableStyle())
                     .disabled(!canInstall)

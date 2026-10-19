@@ -107,7 +107,7 @@ struct OnboardingView: View {
         ) {
             if telegram.isRunning {
                 DoneRow(text: "Прокси работает")
-                OutlineButton(title: "Открыть в Telegram", color: Theme.ok, action: telegram.openInTelegram)
+                OutlineButton(title: "Открыть в Telegram", color: Theme.textPrimary, action: telegram.openInTelegram)
                 PrimaryButton(title: "Далее", action: onboarding.next)
             } else if telegram.isStarting {
                 BusyRow(text: "Запускаю…")
@@ -227,7 +227,7 @@ private struct Bullet: View {
         HStack(alignment: .top, spacing: 9) {
             Image(systemName: "checkmark")
                 .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(Theme.ok)
+                .foregroundStyle(Theme.textSecondary)
                 .padding(.top, 3)
             Text(text)
                 .font(Typo.body)

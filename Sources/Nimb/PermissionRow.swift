@@ -47,10 +47,10 @@ struct PermissionRow: View {
                     OutlineButton(title: extraTitle, color: Theme.textPrimary, action: extraAction)
                         .disabled(disabled)
                 }
-                OutlineButton(title: granted ? "Забрать" : "Разрешить", color: granted ? Theme.warn : Theme.textPrimary, action: action)
+                OutlineButton(title: granted ? "Забрать" : "Разрешить", color: Theme.textPrimary, action: action)
                     .disabled(disabled)
             }
         }
-        .card(granted ? .warn : .neutral)
+        .card()
     }
 }

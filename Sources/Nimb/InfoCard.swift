@@ -4,7 +4,6 @@ import SwiftUI
 struct InfoCard: View {
     let title: String
     let text: String
-    var tint: Color = .white
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -16,6 +15,6 @@ struct InfoCard: View {
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .card(tint == .white ? .neutral : .ok)
+        .card()
     }
 }

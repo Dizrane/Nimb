@@ -98,7 +98,7 @@ struct SettingsView: View {
                                     .disabled(model.isLocked)
                             }
                         }
-                        .card(.bad)
+                        .card()
                     }
 
                     if model.isSettingUp {

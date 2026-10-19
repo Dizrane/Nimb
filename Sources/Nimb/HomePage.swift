@@ -42,7 +42,7 @@ struct HomePage: View {
                 action: allOn ? disableAll : enableAll
             )
 
-            ScrollView {
+            FitOrScroll {
                 VStack(spacing: Space.gap) {
                     FeatureRow(
                         symbol: "sparkles", title: "Нейросети",
@@ -69,7 +69,6 @@ struct HomePage: View {
                 .padding(.horizontal, Space.page)
                 .padding(.vertical, Space.s)
             }
-            .scrollIndicators(.hidden)
         }
     }
 
@@ -123,12 +122,16 @@ private struct FeatureRow: View {
         HStack(spacing: 12) {
             Image(systemName: symbol)
                 .font(.system(size: 17, weight: .light))
-                .foregroundStyle(isOn ? Theme.ok : Theme.textSecondary)
+                .foregroundStyle(Theme.textPrimary.opacity(isOn ? 1 : 0.7))
                 .frame(width: 26)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(Typo.name)
-                    .foregroundStyle(Theme.textPrimary)
+                HStack(spacing: 6) {
+                    Text(title)
+                        .font(Typo.name)
+                        .foregroundStyle(Theme.textPrimary)
+                    // The only colour of the row: a green dot while the service works.
+                    if isOn { Circle().fill(Theme.ok).frame(width: 6, height: 6) }
+                }
                 Text(detail)
                     .font(Typo.small)
                     .foregroundStyle(Theme.textSecondary)
@@ -142,7 +145,7 @@ private struct FeatureRow: View {
                 .tint(Theme.ok)
                 .disabled(disabled)
         }
-        .card(isOn ? .ok : .neutral)
+        .card()
         .opacity(disabled && !isOn ? 0.6 : 1)
         .accessibilityElement(children: .combine)
     }

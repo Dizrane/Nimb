@@ -36,7 +36,7 @@ struct WarpPage: View {
                 action: warp.phase == .notInstalled ? warp.enable : warp.toggle
             )
 
-            ScrollView {
+            FitOrScroll {
                 VStack(spacing: Space.gap) {
                     if warp.isOn {
                         checkCard
@@ -58,7 +58,6 @@ struct WarpPage: View {
                 .padding(.horizontal, Space.page)
                 .padding(.vertical, Space.s)
             }
-            .scrollIndicators(.hidden)
         }
         .onAppear { warp.refresh(); warp.startWatching() }
         .onDisappear { warp.stopWatching() }
@@ -110,7 +109,7 @@ struct WarpPage: View {
                     .disabled(warp.isChecking)
             }
         }
-        .card(.ok)
+        .card()
     }
 
     /// The tunnel asks for the administrator password each time; the person may allow it without.
@@ -121,10 +120,10 @@ struct WarpPage: View {
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 4)
-            OutlineButton(title: "Без пароля", color: Theme.warn) { warp.setPasswordless(true) }
+            OutlineButton(title: "Без пароля", color: Theme.textPrimary) { warp.setPasswordless(true) }
                 .disabled(warp.isSettingAccess)
         }
-        .card(.warn)
+        .card()
     }
 
     private var removeRow: some View {
@@ -134,7 +133,7 @@ struct WarpPage: View {
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
-            OutlineButton(title: "Удалить", color: Theme.bad, action: warp.remove)
+            OutlineButton(title: "Удалить", color: Theme.textSecondary, action: warp.remove)
         }
         .padding(.horizontal, 2)
     }
