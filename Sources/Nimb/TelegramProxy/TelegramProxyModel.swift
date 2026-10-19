@@ -21,6 +21,7 @@ final class TelegramProxyModel: ObservableObject {
     let secretHex: String
     private let engine: TelegramProxyEngine
     private var poller: Task<Void, Never>?
+    private var isRecovering = false
     /// Opens the main window again after it has been closed; set by the window itself.
     var openMainWindow: (() -> Void)?
 
@@ -92,11 +93,45 @@ final class TelegramProxyModel: ObservableObject {
     private func beginPolling() {
         poller?.cancel()
         poller = Task { [weak self] in
+            var ticks = 0
             while !Task.isCancelled {
                 guard let self else { return }
                 self.stats = self.engine.snapshot
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                ticks += 1
+                // Every few seconds: is the port still listening? If not, bring it back by itself.
+                if ticks % 4 == 0, self.isRunning, !self.isRecovering, !self.engine.isListening {
+                    await self.recover()
+                }
+                try? await Task.sleep(for: .seconds(1))
             }
         }
+    }
+
+    /// The port stopped listening (a sleep, a change of the network, another program took it). Starts the proxy again on
+    /// the same port, up to three times; if that fails, says so and switches the proxy off honestly.
+    private func recover() async {
+        isRecovering = true
+        defer { isRecovering = false }
+        let wanted = port
+        engine.stop()
+        for attempt in 1...3 {
+            try? await Task.sleep(for: .seconds(attempt))
+            guard isRunning else { return }
+            do {
+                port = try await engine.start(preferredPort: wanted)
+                UserDefaults.standard.set(Int(port), forKey: Self.portKey)
+                if port != wanted {
+                    errorMessage = "Порт \(wanted) занят другой программой, прокси теперь на порту \(port). Нажмите «Открыть в Telegram», чтобы Telegram запомнил новый."
+                }
+                return
+            } catch {
+                continue
+            }
+        }
+        poller?.cancel()
+        isRunning = false
+        autoStart = false
+        stats = TelegramProxyStats()
+        errorMessage = "Прокси остановился и не смог запуститься снова: порт \(wanted), возможно, занят другой программой. Включите его ещё раз."
     }
 }

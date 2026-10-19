@@ -113,6 +113,10 @@ final class TelegramProxyEngine: @unchecked Sendable {
 
     var isRunning: Bool { locked { !stopped } }
 
+    /// Whether the port is really listening: the engine is on and the listener of the system is ready. After a sleep or a
+    /// change of the network the listener may be gone while the engine still believes it is on.
+    var isListening: Bool { locked { !stopped && listener?.state == .ready } }
+
     // MARK: One client
 
     private func handle(_ connection: NWConnection) async {
