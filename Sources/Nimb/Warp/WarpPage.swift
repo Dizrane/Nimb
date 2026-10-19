@@ -1,12 +1,9 @@
 import SwiftUI
 
-/// The WARP page: bring the tunnel from AmneziaWG over, switch it on and off, check YouTube and Discord.
+/// The WARP page: switch the tunnel on and off, check YouTube and Discord.
 struct WarpPage: View {
     @ObservedObject var warp: WarpTunnelModel
     let close: () -> Void
-    @StateObject private var replacing = Flag()
-    /// The person chose to paste ready settings instead of letting Nimb make its own.
-    @StateObject private var manual = Flag()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -34,9 +31,7 @@ struct WarpPage: View {
                 VStack(spacing: 10) {
                     statusCard
                     if warp.isOn { checkCard }
-                    if (warp.phase == .notInstalled && manual.value) || replacing.value { importCard }
-                    if warp.isInstalled && !replacing.value { manageCard }
-                    if warp.phase == .notInstalled && !manual.value { manualHint }
+                    if warp.isInstalled { manageCard }
                     if let message = warp.errorMessage {
                         NoticeCard(lines: [message], color: Theme.bad, symbol: "xmark.octagon")
                     }
@@ -141,76 +136,6 @@ struct WarpPage: View {
         .glassCard(tint: Theme.ok, tintOpacity: 0.03, borderOpacity: 0.28, radius: 10)
     }
 
-    private var importCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Перенести туннель из AmneziaWG")
-                .font(Typo.name)
-                .foregroundStyle(Theme.textPrimary)
-            Text("В AmneziaWG откройте туннель WARP → «Изменить», выделите весь текст (⌘A), скопируйте (⌘C) и нажмите «Вставить из буфера». Ключ останется на этом Mac, в папке, которую читает только администратор.")
-                .font(Typo.small)
-                .foregroundStyle(Theme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-            TextEditor(text: $warp.draft)
-                .font(Typo.mono)
-                .scrollContentBackground(.hidden)
-                .padding(6)
-                .frame(height: 96)
-                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.black.opacity(0.45)))
-                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.white.opacity(0.14), lineWidth: 1))
-            if let error = warp.parseError {
-                Text(error).font(Typo.small).foregroundStyle(Theme.bad).fixedSize(horizontal: false, vertical: true)
-            }
-            if let summary = warp.preview {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Сервер: \(summary.endpoint)")
-                    Text("Адрес: \(summary.addresses.joined(separator: ", "))")
-                    Text(summary.isFullTunnel ? "Маршрут: весь трафик" : "Маршрут: \(networks(summary.allowedIPs.count))")
-                    if !summary.obfuscation.isEmpty { Text("Камуфляж: \(summary.obfuscation.joined(separator: ", "))") }
-                }
-                .font(Typo.mono)
-                .foregroundStyle(Theme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-                if !summary.ignored.isEmpty {
-                    Text("Не перенесено: \(summary.ignored.joined(separator: ", "))")
-                        .font(Typo.small)
-                        .foregroundStyle(Theme.warn)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            HStack {
-                if replacing.value || manual.value { OutlineButton(title: "Отмена", color: Theme.textSecondary) { replacing.value = false; manual.value = false; warp.draft = "" } }
-                Spacer()
-                OutlineButton(title: "Вставить из буфера", color: Theme.textPrimary, action: warp.pasteFromClipboard)
-                OutlineButton(title: "Установить", color: Theme.ok) {
-                    warp.install()
-                    replacing.value = false
-                }
-                .disabled(warp.preview == nil || warp.isWorking)
-            }
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .glassCard(tint: .white, tintOpacity: 0.02, borderOpacity: 0.16, radius: 10)
-    }
-
-    private func networks(_ count: Int) -> String {
-        let last = count % 10, lastTwo = count % 100
-        let word = last == 1 && lastTwo != 11 ? "сеть" : (2...4).contains(last) && !(12...14).contains(lastTwo) ? "сети" : "сетей"
-        return "\(count) \(word)"
-    }
-
-    private var manualHint: some View {
-        HStack {
-            Text("Уже есть свои настройки WARP или AmneziaWG?")
-                .font(Typo.small)
-                .foregroundStyle(Theme.textSecondary)
-            Spacer(minLength: 8)
-            OutlineButton(title: "Вставить свои", color: Theme.textPrimary) { manual.value = true }
-                .disabled(warp.isWorking)
-        }
-        .padding(.horizontal, 2)
-    }
-
     private var manageCard: some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 3) {
@@ -223,11 +148,8 @@ struct WarpPage: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)
-            VStack(spacing: 6) {
-                OutlineButton(title: "Заменить", color: Theme.textPrimary) { replacing.value = true }
-                OutlineButton(title: "Удалить", color: Theme.bad, action: warp.remove)
-            }
-            .disabled(warp.isWorking)
+            OutlineButton(title: "Удалить", color: Theme.bad, action: warp.remove)
+                .disabled(warp.isWorking)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)

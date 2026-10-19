@@ -37,9 +37,6 @@ final class WarpTunnelModel: ObservableObject {
     }
 
     @Published private(set) var phase: Phase = .off
-    @Published var draft = "" { didSet { updatePreview() } }
-    @Published private(set) var preview: WarpConfig.Summary?
-    @Published private(set) var parseError: String?
     @Published var errorMessage: String?
     @Published private(set) var checks: [SiteCheck] = []
     @Published private(set) var isChecking = false
@@ -91,46 +88,6 @@ final class WarpTunnelModel: ObservableObject {
 
     func stopWatching() { timer?.invalidate(); timer = nil }
 
-    // MARK: Settings
-
-    private func updatePreview() {
-        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { preview = nil; parseError = nil; return }
-        do {
-            preview = try WarpConfig.parse(trimmed).summary
-            parseError = nil
-        } catch {
-            preview = nil
-            parseError = error.localizedDescription
-        }
-    }
-
-    func pasteFromClipboard() {
-        if let text = NSPasteboard.general.string(forType: .string) { draft = text }
-    }
-
-    /// Installs the helper, the daemon and the settings that a person pasted in. One prompt for the administrator password.
-    func install() {
-        guard bundledFiles != nil else { errorMessage = "В этой сборке Nimb нет amneziawg-go."; return }
-        let config: WarpConfig
-        do { config = try WarpConfig.parse(draft) } catch { errorMessage = error.localizedDescription; return }
-        errorMessage = nil
-        phase = .working("Устанавливаю…")
-        let text = config.file
-        Task.detached {
-            let outcome = Result { try Self.installFiles(configText: text, thenStart: false) }
-            await MainActor.run {
-                if case .failure(let error) = outcome {
-                    if case DNSError.cancelled = error {} else { self.errorMessage = error.localizedDescription }
-                } else {
-                    self.draft = ""
-                }
-                self.phase = .off
-                self.refresh()
-            }
-        }
-    }
-
     /// The first start on a Mac, with nothing to enter: makes this Mac's own WARP account (keys and address), puts it together
     /// with the shared preset from the app, installs everything and starts the tunnel, all in one password prompt.
     func enable() {
@@ -161,7 +118,7 @@ final class WarpTunnelModel: ObservableObject {
     }
 
     /// Puts helper, daemon and settings in place as root and, if asked, starts the tunnel in the same prompt.
-    nonisolated private static func installFiles(configText: String, thenStart: Bool) throws {
+    nonisolated private static func installFiles(configText: String, thenStart: Bool = true) throws {
         guard let binary = Bundle.main.url(forResource: "amneziawg-go", withExtension: nil),
               let helper = Bundle.main.url(forResource: "nimb-tunnel", withExtension: "sh") else {
             throw WarpConfigError("В этой сборке Nimb нет amneziawg-go.")
