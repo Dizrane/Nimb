@@ -17,6 +17,12 @@ make_bundle() {
     cp Resources/AppIconActive.icns "$app/Contents/Resources/AppIconActive.icns"
     cp Resources/world.json "$app/Contents/Resources/world.json"
     cp Resources/telegram.png "$app/Contents/Resources/telegram.png"
+    cp Resources/nimb-tunnel.sh "$app/Contents/Resources/nimb-tunnel.sh"
+    if [ -f Resources/amneziawg-go ]; then
+        cp Resources/amneziawg-go "$app/Contents/Resources/amneziawg-go"
+    else
+        echo "Warning: Resources/amneziawg-go is missing, the WARP tunnel will be unavailable (run scripts/build_awg.sh)" >&2
+    fi
 
     cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

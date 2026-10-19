@@ -10,17 +10,21 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
     private var dns: DNSViewModel?
     private var telegram: TelegramProxyModel?
+    private var warp: WarpTunnelModel?
     private var item: NSStatusItem?
     private var subscription: AnyCancellable?
 
-    func configure(dns: DNSViewModel, telegram: TelegramProxyModel) {
+    func configure(dns: DNSViewModel, telegram: TelegramProxyModel, warp: WarpTunnelModel) {
         guard self.dns == nil else { return }
         self.dns = dns
         self.telegram = telegram
-        subscription = Publishers.CombineLatest3(telegram.$isRunning, BackgroundMode.shared.$enabled, dns.$active)
+        self.warp = warp
+        subscription = Publishers.CombineLatest4(telegram.$isRunning, BackgroundMode.shared.$enabled, dns.$active, warp.$phase)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] running, background, active in
-                self?.update(visible: running || background, dnsOn: active != nil)
+            .sink { [weak self] running, background, active, tunnel in
+                var tunnelOn = false
+                if case .on = tunnel { tunnelOn = true }
+                self?.update(visible: running || background || tunnelOn, dnsOn: active != nil)
             }
     }
 
@@ -62,8 +66,9 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     // MARK: Menu
 
     func menuNeedsUpdate(_ menu: NSMenu) {
-        guard let dns, let telegram else { return }
+        guard let dns, let telegram, let warp else { return }
         dns.refresh()
+        warp.refresh()
         menu.removeAllItems()
 
         menu.addItem(label("DNS"))
@@ -97,6 +102,23 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         } else {
             menu.addItem(plain("○ Прокси выключен"))
             menu.addItem(action("Включить прокси", #selector(toggleProxy)))
+        }
+
+        menu.addItem(.separator())
+        menu.addItem(label("WARP"))
+        switch warp.phase {
+        case .on(let interface):
+            menu.addItem(plain("● Туннель работает (\(interface))"))
+            menu.addItem(action("Выключить WARP", #selector(toggleWarp)))
+        case .off:
+            menu.addItem(plain("○ Туннель выключен"))
+            menu.addItem(action("Включить WARP", #selector(toggleWarp)))
+        case .working(let text):
+            menu.addItem(plain("… \(text)"))
+        case .notInstalled:
+            menu.addItem(plain("○ Не настроен (страница WARP в окне)"))
+        case .unavailable:
+            menu.addItem(plain("○ Недоступен в этой сборке"))
         }
 
         menu.addItem(.separator())
@@ -136,6 +158,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     }
 
     @objc private func toggleProxy() { telegram?.toggle() }
+    @objc private func toggleWarp() { warp?.toggle() }
     @objc private func openInTelegram() { telegram?.openInTelegram() }
     @objc private func copyLink() { telegram?.copyLink() }
     @objc private func quit() { AppDelegate.quit() }

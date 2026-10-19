@@ -15,6 +15,7 @@ final class DNSViewModel: ObservableObject {
     @Published var isSettingUp = false
     @Published var showSettings = false
     @Published var showTelegram = false
+    @Published var showWarp = false
 
     init() {
         // Read the state synchronously once, so a Mac that already has DNS on opens straight into space.
@@ -172,7 +173,7 @@ final class DNSViewModel: ObservableObject {
         alert.alertStyle = .warning
         alert.messageText = "Удалить Nimb?"
         alert.informativeText = """
-            Сначала Nimb отключится от DNS-сервисов: DNS вернётся к автоматическому (от роутера или провайдера), а правило «без пароля», если оно включено, будет удалено. Для этого понадобится пароль администратора.
+            Сначала Nimb отключится от DNS-сервисов: DNS вернётся к автоматическому (от роутера или провайдера), а правило «без пароля» и туннель WARP, если они включены, будут удалены. Для этого понадобится пароль администратора.
 
             Затем приложение закроется и удалит само себя вместе с настройками и кэшем. Действие необратимо.
             """
@@ -186,9 +187,12 @@ final class DNSViewModel: ObservableObject {
         Task.detached {
             let services = DNSManager.servicesUsingProviders()
             let removeRule = DNSManager.passwordlessState(for: DNSManager.physicalServices()).enabled
+            let removeTunnel = WarpPaths.isInstalled
             var failure: Error?
             do {
-                if !services.isEmpty || removeRule { try DNSManager.resetBeforeUninstall(services, removingRule: removeRule) }
+                if !services.isEmpty || removeRule || removeTunnel {
+                    try DNSManager.resetBeforeUninstall(services, removingRule: removeRule, removingTunnel: removeTunnel)
+                }
                 try Uninstaller.scheduleRemoval()
             } catch {
                 failure = error
@@ -284,6 +288,7 @@ struct ContentView: View {
     @EnvironmentObject private var model: DNSViewModel
     @StateObject private var updates = UpdateViewModel()
     @EnvironmentObject private var telegram: TelegramProxyModel
+    @EnvironmentObject private var warp: WarpTunnelModel
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -293,6 +298,9 @@ struct ContentView: View {
                     .transition(.opacity)
             } else if model.showTelegram {
                 TelegramPage(telegram: telegram) { withAnimation(.easeInOut(duration: 0.3)) { model.showTelegram = false } }
+                    .transition(.opacity)
+            } else if model.showWarp {
+                WarpPage(warp: warp) { withAnimation(.easeInOut(duration: 0.3)) { model.showWarp = false } }
                     .transition(.opacity)
             } else {
                 Hero(model: model)
@@ -307,8 +315,19 @@ struct ContentView: View {
         }
         .frame(width: 400, height: 720)
         .overlay(alignment: .topTrailing) {
-            if !model.showSettings && !model.showTelegram {
+            if !model.showSettings && !model.showTelegram && !model.showWarp {
                 HStack(spacing: 0) {
+                    Button { withAnimation(.easeInOut(duration: 0.3)) { model.showWarp = true } } label: {
+                        Image(systemName: "shield.lefthalf.filled")
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(warp.isOn ? Theme.ok : Theme.textSecondary)
+                            .frame(width: 32, height: 28)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressableStyle())
+                    .help("Туннель WARP")
+                    .accessibilityLabel("Туннель WARP")
+
                     Button { withAnimation(.easeInOut(duration: 0.3)) { model.showTelegram = true } } label: {
                         Image(systemName: "paperplane")
                             .font(.system(size: 13, weight: .regular))
@@ -354,7 +373,7 @@ struct ContentView: View {
         .onAppear {
             if updates.checkOnLaunch { updates.check(silent: true) }
             telegram.openMainWindow = { openWindow(id: "main") }
-            StatusMenuController.shared.configure(dns: model, telegram: telegram)
+            StatusMenuController.shared.configure(dns: model, telegram: telegram, warp: warp)
             AppDelegate.openMainWindow = { openWindow(id: "main") }
             // After the window is up, so that the question has something behind it.
             DispatchQueue.main.async { MoveToApplications.offer() }

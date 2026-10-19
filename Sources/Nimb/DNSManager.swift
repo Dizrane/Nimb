@@ -129,7 +129,7 @@ enum DNSManager {
 
     /// Shell script that runs as root: it tries every command and exits non-zero if any failed.
     /// With `removingRule` the sudoers rule is deleted at the end, but only if every command above succeeded.
-    static func applyScript(_ provider: DNSProvider?, to services: [String], removingRule: Bool = false) -> String {
+    static func applyScript(_ provider: DNSProvider?, to services: [String], removingRule: Bool = false, removingTunnel: Bool = false) -> String {
         let addresses = provider?.addresses.joined(separator: " ") ?? "Empty"
         var script = ["failed=0"]
         for service in services {
@@ -139,6 +139,7 @@ enum DNSManager {
         script.append("/usr/bin/dscacheutil -flushcache || { echo \(shellQuote("Не удалось сбросить кэш DNS (dscacheutil).")) >&2; failed=1; }")
         script.append("/usr/bin/killall -HUP mDNSResponder || { echo \(shellQuote("Не удалось перезапустить mDNSResponder.")) >&2; failed=1; }")
         if removingRule { script.append("[ $failed -eq 0 ] && /bin/rm -f \(sudoersPath)") }
+        if removingTunnel { script.append("[ $failed -eq 0 ] && { \(WarpPaths.removeScript); }") }
         script.append("exit $failed")
         return script.joined(separator: "; ")
     }
@@ -154,8 +155,8 @@ enum DNSManager {
     }
 
     /// Back to automatic DNS on `services` and, if asked, the sudoers rule removed, in one password prompt.
-    static func resetBeforeUninstall(_ services: [String], removingRule: Bool) throws {
-        try runPrivileged(applyScript(nil, to: services, removingRule: removingRule))
+    static func resetBeforeUninstall(_ services: [String], removingRule: Bool, removingTunnel: Bool = false) throws {
+        try runPrivileged(applyScript(nil, to: services, removingRule: removingRule, removingTunnel: removingTunnel))
         let left = services.filter { !servers(of: $0).isEmpty }
         if !left.isEmpty { throw DNSError.failed("DNS не вернулся к автоматическому на: \(left.joined(separator: ", ")).") }
     }
@@ -311,13 +312,15 @@ enum DNSManager {
         if !failures.isEmpty { throw DNSError.failed(failures.joined(separator: "\n")) }
     }
 
-    private static func runPrivileged(_ script: String) throws {
+    /// Runs a shell script as root after the system's password (or Touch ID) prompt; returns what it printed.
+    @discardableResult
+    static func runPrivileged(_ script: String) throws -> String {
         let escaped = script
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
         let appleScript = "do shell script \"\(escaped)\" with administrator privileges"
         do {
-            _ = try run("/usr/bin/osascript", ["-e", appleScript])
+            return try run("/usr/bin/osascript", ["-e", appleScript]).trimmingCharacters(in: .whitespacesAndNewlines)
         } catch DNSError.failed(let message) {
             if message.contains("-128") || message.localizedCaseInsensitiveContains("User canceled") {
                 throw DNSError.cancelled

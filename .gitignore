@@ -3,3 +3,6 @@ build/
 .DS_Store
 *.xcodeproj
 .swiftpm/
+
+# Built by scripts/build_awg.sh, not stored in git
+Resources/amneziawg-go

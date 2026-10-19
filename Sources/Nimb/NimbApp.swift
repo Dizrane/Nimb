@@ -39,6 +39,7 @@ struct NimbApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var telegram = TelegramProxyModel()
     @StateObject private var dns = DNSViewModel()
+    @StateObject private var warp = WarpTunnelModel()
 
     init() {
         SingleInstance.yieldToRunningCopy()
@@ -49,6 +50,7 @@ struct NimbApp: App {
             ContentView()
                 .environmentObject(telegram)
                 .environmentObject(dns)
+                .environmentObject(warp)
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
