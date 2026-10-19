@@ -577,6 +577,7 @@ private struct SettingsView: View {
             ScrollView {
                 VStack(spacing: 10) {
                     BackgroundCard()
+                    LaunchAtLoginCard()
 
                     HStack { Text("Разрешения").sectionLabel(); Spacer() }
                         .padding(.horizontal, 2)
