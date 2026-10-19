@@ -1,0 +1,7 @@
+# Work in progress and previews are large and personal to the session; only the delivered assets and the notes go to git.
+work/*
+!work/.gitkeep
+previews/*
+!previews/.gitkeep
+*.blend1
+.DS_Store

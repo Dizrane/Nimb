@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Nimb: просмотрщик ресурсов</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #1b1b1d; color: #d8d8dc; font: 13px -apple-system, system-ui, sans-serif; display: flex; gap: 24px; padding: 20px; }
+  #side { width: 300px; flex: none; }
+  h1 { font-size: 15px; font-weight: 600; margin: 0 0 10px; }
+  button, select, input { font: inherit; color: inherit; background: #2a2a2e; border: 1px solid #3a3a40; border-radius: 7px; padding: 5px 10px; margin: 0 6px 6px 0; cursor: pointer; }
+  button.on { background: #e9e9ec; color: #111; }
+  #info { color: #8a8a92; line-height: 1.5; margin-top: 10px; white-space: pre-wrap; }
+  #frameWrap { flex: none; }
+  /* the window of the app: 400 x 720 points, always dark */
+  #win { position: relative; width: 400px; height: 720px; background: #000; border-radius: 12px; overflow: hidden; transform-origin: top left; box-shadow: 0 0 0 1px #333; }
+  #win::before { content: ""; position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 13%, rgba(255,255,255,.12), transparent 60%); }
+  #win.lit::before { background: radial-gradient(ellipse at 50% 13%, rgba(255,255,255,.2), transparent 60%); }
+  #stars { position: absolute; inset: 0; }
+  #stage { position: absolute; left: 20px; top: 150px; width: 360px; height: 218px; }
+  .layer { position: absolute; will-change: transform, opacity; }
+  .title { position: absolute; left: 0; right: 0; top: 400px; text-align: center; font: 31px "New York", Georgia, serif; color: #f0f0f2; }
+  .btn { position: absolute; left: 180px; top: 292px; width: 40px; height: 40px; border-radius: 50%; border: 1px solid rgba(255,255,255,.4); background: rgba(0,0,0,.6); }
+  .btn.on { border-color: rgba(118,204,170,.7); }
+  #err { color: #e08585; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div id="side">
+  <h1>Просмотрщик ресурсов</h1>
+  <div>
+    <input id="dir" size="26" placeholder="../deliver/halo" value="">
+    <button id="load">Открыть</button>
+  </div>
+  <div>Состояние:
+    <button data-state="off">выключено</button><button data-state="on" class="on">включено</button><button data-state="busy">занято</button>
+  </div>
+  <div>Масштаб:
+    <button data-zoom="1" class="on">1×</button><button data-zoom="2">2×</button>
+    <button id="play" class="on">пауза</button>
+  </div>
+  <div>Нимбов в стопке: <button data-stack="1" class="on">1</button><button data-stack="2">2</button><button data-stack="3">3</button></div>
+  <div id="info">Укажи папку с ресурсом (в ней manifest.json). Запуск: tools/serve.sh deliver/halo</div>
+  <div id="err"></div>
+</div>
+<div id="frameWrap"><div id="win"><canvas id="stars" width="400" height="720"></canvas><div id="stage"></div><div class="btn"></div><div class="title" id="word">Включено</div></div></div>
+<script>
+const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
+let manifest = null, state = 'on', playing = true, stack = 1, base = '';
+const layers = [];
+
+(function stars() {
+  const c = $('#stars').getContext('2d'); let s = 21;
+  const rnd = () => (s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  for (let i = 0; i < 70; i++) { c.fillStyle = `rgba(255,255,255,${0.1 + rnd() * 0.3})`; c.fillRect(rnd() * 400, rnd() * 720, 1, 1); }
+})();
+
+async function load(dir) {
+  $('#err').textContent = '';
+  try {
+    base = dir.replace(/\/?$/, '/');
+    manifest = await (await fetch(base + 'manifest.json?' + Date.now())).json();
+  } catch (e) { $('#err').textContent = 'Не удалось прочитать ' + base + 'manifest.json'; return; }
+  build();
+}
+
+function build() {
+  const stage = $('#stage'); stage.innerHTML = ''; layers.length = 0;
+  const [pw, ph] = manifest.pointSize || [336, 194];
+  const center = (manifest.anchors && manifest.anchors.center) || [pw / 2, ph / 2];
+  const count = manifest.name && manifest.name.startsWith('halo') ? stack : 1;
+  const all = [...(manifest.layers || []), ...(manifest.loops || [])];
+  for (let n = 0; n < count; n++) {
+    for (const l of all) {
+      const el = document.createElement(l.kind ? 'video' : 'img');
+      el.className = 'layer'; el.src = base + l.file;
+      if (l.kind) { el.loop = true; el.muted = true; el.autoplay = true; el.playsInline = true; }
+      el.style.width = pw + 'px'; el.style.height = ph + 'px';
+      el.style.left = (180 - center[0]) + 'px'; el.style.top = (109 - center[1] - n * 24) + 'px';
+      el.style.mixBlendMode = l.blend === 'screen' ? 'screen' : 'normal';
+      el.dataset.base = l.opacity ?? 1; el.dataset.n = n;
+      stage.appendChild(el); layers.push({ el, l, n });
+    }
+  }
+  const sizes = all.length;
+  $('#info').textContent = `${manifest.name} v${manifest.version ?? 1}\nхолст ${pw}×${ph} пт, слоёв: ${sizes}\n` + (manifest.notes ? '\n' + manifest.notes : '');
+}
+
+let t0 = performance.now();
+function tick(now) {
+  const t = (now - t0) / 1000;
+  const on = state !== 'off';
+  $('#win').classList.toggle('lit', on); $('.btn').classList.toggle('on', on);
+  $('#word').textContent = { off: 'Выключено', on: 'Включено', busy: 'Подождите' }[state];
+  const speed = state === 'busy' ? 2 : 1;
+  for (const { el, l, n } of layers) {
+    let dy = 0, sc = 1, op = +el.dataset.base, rot = 0;
+    if (!on) op = 0;
+    if (playing) for (const m of manifest.motion || []) {
+      if (m.target !== 'all' && m.target !== l.id) continue;
+      const ph = t * speed / (m.period || 4) * 2 * Math.PI - n * 0.8;
+      if (m.type === 'breathe') { op *= 1 - (m.amount ?? .05) + (m.amount ?? .05) * Math.sin(ph); sc *= 1 + (m.amount ?? .04) * Math.sin(ph) * .3; }
+      if (m.type === 'float') dy += Math.sin(ph) * (m.amount ?? 3);
+      if (m.type === 'sway') rot += Math.sin(ph) * (m.amount ?? 1);
+      if (m.type === 'spin') rot += (t * speed * 360 / (m.period || 8)) % 360;
+    }
+    el.style.opacity = op;
+    el.style.transform = `translateY(${dy}px) scale(${sc}) rotate(${rot}deg)`;
+    if (el.tagName === 'VIDEO') { playing ? el.play().catch(() => {}) : el.pause(); }
+  }
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+
+$('#load').onclick = () => load($('#dir').value || '../deliver/halo');
+$$('[data-state]').forEach(b => b.onclick = () => { state = b.dataset.state; $$('[data-state]').forEach(x => x.classList.toggle('on', x === b)); });
+$$('[data-zoom]').forEach(b => b.onclick = () => { $('#win').style.transform = `scale(${b.dataset.zoom})`; $('#frameWrap').style.width = 400 * b.dataset.zoom + 'px'; $('#frameWrap').style.height = 720 * b.dataset.zoom + 'px'; $$('[data-zoom]').forEach(x => x.classList.toggle('on', x === b)); });
+$$('[data-stack]').forEach(b => b.onclick = () => { stack = +b.dataset.stack; $$('[data-stack]').forEach(x => x.classList.toggle('on', x === b)); if (manifest) build(); });
+$('#play').onclick = e => { playing = !playing; e.target.textContent = playing ? 'пауза' : 'играть'; e.target.classList.toggle('on', playing); };
+const q = new URLSearchParams(location.search).get('dir');
+if (q) { $('#dir').value = q; load(q); }
+</script>
+</body>
+</html>
