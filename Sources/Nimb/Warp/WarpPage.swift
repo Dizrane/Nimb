@@ -93,14 +93,7 @@ struct WarpPage: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             ForEach(warp.checks) { check in
-                HStack(spacing: 7) {
-                    Image(systemName: check.ok ? "checkmark" : "xmark")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(check.ok ? Theme.ok : Theme.bad)
-                    Text(check.name).font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.textPrimary)
-                    Spacer()
-                    Text(check.result).font(Typo.mono).foregroundStyle(Theme.textSecondary)
-                }
+                CheckRow(check: check)
             }
             HStack {
                 Spacer()

@@ -37,13 +37,6 @@ final class WarpTunnelModel: ObservableObject {
         case on(interface: String)
     }
 
-    struct SiteCheck: Identifiable, Equatable {
-        let name: String
-        var result: String
-        var ok: Bool
-        var id: String { name }
-    }
-
     @Published private(set) var phase: Phase = .off
     @Published var errorMessage: String?
     @Published private(set) var checks: [SiteCheck] = []
@@ -322,42 +315,14 @@ final class WarpTunnelModel: ObservableObject {
 
     // MARK: Check
 
-    /// Asks YouTube and Discord for a tiny answer and shows whether they came.
+    /// Asks YouTube and Discord for small answers at several addresses and shows what came.
     func runChecks() {
         guard !isChecking else { return }
         isChecking = true
-        Task.detached {
-            let targets: [(String, String, Set<Int>)] = [
-                ("YouTube", "https://www.youtube.com/generate_204", [204]),
-                ("Discord", "https://discord.com/api/v9/gateway", [200]),
-            ]
-            var results: [SiteCheck] = []
-            for (name, url, good) in targets {
-                results.append(Self.check(name: name, url: url, good: good))
-            }
-            let final = results
-            await MainActor.run {
-                self.checks = final
-                self.isChecking = false
-            }
+        Task {
+            let results = await SiteChecker.run()
+            checks = results
+            isChecking = false
         }
-    }
-
-    nonisolated private static func check(name: String, url: String, good: Set<Int>) -> SiteCheck {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
-        process.arguments = ["-s", "-o", "/dev/null", "-m", "10", "--connect-timeout", "6", "-w", "%{http_code} %{time_total}", url]
-        let out = Pipe()
-        process.standardOutput = out
-        process.standardError = FileHandle.nullDevice
-        let finished = DispatchSemaphore(value: 0)
-        process.terminationHandler = { _ in finished.signal() }
-        guard (try? process.run()) != nil else { return SiteCheck(name: name, result: "не удалось проверить", ok: false) }
-        let data = out.fileHandleForReading.readDataToEndOfFile()
-        finished.wait()
-        let fields = String(decoding: data, as: UTF8.self).split(separator: " ")
-        guard fields.count == 2, let code = Int(fields[0]), code != 0 else { return SiteCheck(name: name, result: "не отвечает", ok: false) }
-        let seconds = Double(fields[1]).map { String(format: "%.1f с", $0) } ?? ""
-        return good.contains(code) ? SiteCheck(name: name, result: "открывается \(seconds)", ok: true) : SiteCheck(name: name, result: "ответ \(code)", ok: false)
     }
 }
