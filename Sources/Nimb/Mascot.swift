@@ -207,7 +207,7 @@ struct HoodArt: View {
     }
 }
 
-/// A black screen with a glowing play button and a pearl chat bubble: YouTube and Discord, in the same material as the dog.
+/// A black screen with a glowing play button and a pearl Discord mark: YouTube and Discord, in the same material as the dog.
 struct ScreenArt: View {
     var body: some View {
         Canvas { ctx, size in
@@ -249,24 +249,27 @@ struct ScreenArt: View {
                 l.stroke(play, with: pearl, style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
             }
 
-            // The chat bubble: pearl, with a dark outline that separates it from the screen, and three dots.
-            let body = CGRect(x: 84, y: 66, width: 62, height: 42)
-            let bubble = Path(roundedRect: body, cornerRadius: 17, style: .continuous)
-            var tail = Path()
-            tail.move(to: CGPoint(x: body.minX + 9, y: body.maxY - 12))
-            tail.addLine(to: CGPoint(x: body.minX + 3, y: body.maxY + 9))
-            tail.addLine(to: CGPoint(x: body.minX + 25, y: body.maxY - 5))
-            tail.closeSubpath()
-            ctx.stroke(bubble, with: .color(.black), style: StrokeStyle(lineWidth: 5, lineJoin: .round))
-            ctx.stroke(tail, with: .color(.black), style: StrokeStyle(lineWidth: 7, lineJoin: .round))
-            let bubbleFill = GraphicsContext.Shading.linearGradient(Satin.pearl, startPoint: CGPoint(x: body.midX, y: body.minY), endPoint: CGPoint(x: body.midX, y: body.maxY))
-            ctx.fill(bubble, with: bubbleFill)
-            ctx.fill(tail, with: bubbleFill)
-            ctx.stroke(tail, with: bubbleFill, style: StrokeStyle(lineWidth: 3, lineJoin: .round))
-            for i in 0..<3 {
-                let x = body.midX + CGFloat(i - 1) * 11
-                ctx.fill(Path(ellipseIn: CGRect(x: x - 3.3, y: body.midY - 3.3 - 1, width: 6.6, height: 6.6)),
-                         with: .linearGradient(Gradient(colors: [Color(white: 0.30), Color(white: 0.04)]), startPoint: CGPoint(x: x, y: body.midY - 4), endPoint: CGPoint(x: x, y: body.midY + 3)))
+            // The Discord mark: pearl, with a dark outline that separates it from the screen, and two dark eyes.
+            let mark = CGRect(x: 82, y: 64, width: 66, height: 50)
+            func M(_ x: Double, _ y: Double) -> CGPoint { CGPoint(x: mark.minX + x / 100 * mark.width, y: mark.minY + y / 76 * mark.height) }
+            var logo = Path()
+            logo.move(to: M(21, 7))
+            logo.addCurve(to: M(41, 9), control1: M(29, 3), control2: M(36, 5))
+            logo.addCurve(to: M(59, 9), control1: M(47, 8), control2: M(53, 8))
+            logo.addCurve(to: M(79, 7), control1: M(64, 5), control2: M(71, 3))
+            logo.addCurve(to: M(98, 58), control1: M(90, 15), control2: M(97, 36))
+            logo.addCurve(to: M(75, 70), control1: M(91, 63), control2: M(83, 67))
+            logo.addCurve(to: M(70, 62), control1: M(73, 67), control2: M(71, 64))
+            logo.addCurve(to: M(30, 62), control1: M(57, 66), control2: M(43, 66))
+            logo.addCurve(to: M(25, 70), control1: M(29, 64), control2: M(27, 67))
+            logo.addCurve(to: M(2, 58), control1: M(17, 67), control2: M(9, 63))
+            logo.addCurve(to: M(21, 7), control1: M(3, 36), control2: M(10, 15))
+            logo.closeSubpath()
+            ctx.stroke(logo, with: .color(.black), style: StrokeStyle(lineWidth: 5, lineJoin: .round))
+            ctx.fill(logo, with: .linearGradient(Satin.pearl, startPoint: CGPoint(x: mark.midX, y: mark.minY), endPoint: CGPoint(x: mark.midX, y: mark.maxY)))
+            for x in [35.0, 65.0] {
+                let eye = CGRect(x: M(x, 0).x - 4.6, y: M(0, 30).y, width: 9.2, height: 12.5)
+                ctx.fill(Path(ellipseIn: eye), with: .linearGradient(Gradient(colors: [Color(white: 0.30), Color(white: 0.04)]), startPoint: CGPoint(x: eye.midX, y: eye.minY), endPoint: CGPoint(x: eye.midX, y: eye.maxY)))
             }
         }
         .frame(width: 152, height: 118)
