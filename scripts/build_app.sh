@@ -49,7 +49,14 @@ make_bundle() {
 </plist>
 PLIST
 
-    codesign --force --deep --sign - "$app"
+    # iCloud Drive and Finder add attributes to folders of a bundle that sits on the Desktop, and codesign refuses a bundle that
+    # has them: clear them right before signing and try again if they came back in between.
+    for attempt in 1 2 3; do
+        xattr -cr "$app" 2>/dev/null || true
+        if codesign --force --deep --sign - "$app"; then break; fi
+        [ "$attempt" = 3 ] && { echo "codesign failed" >&2; exit 1; }
+        sleep 1
+    done
     echo "Built $app"
 }
 
