@@ -18,6 +18,7 @@ make_bundle() {
     cp Resources/world.json "$app/Contents/Resources/world.json"
     cp Resources/telegram.png "$app/Contents/Resources/telegram.png"
     cp Resources/nimb-tunnel.sh "$app/Contents/Resources/nimb-tunnel.sh"
+    cp Resources/warp-preset.conf "$app/Contents/Resources/warp-preset.conf"
     if [ -f Resources/amneziawg-go ]; then
         cp Resources/amneziawg-go "$app/Contents/Resources/amneziawg-go"
     else

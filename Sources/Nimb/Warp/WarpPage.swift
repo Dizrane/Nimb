@@ -5,6 +5,8 @@ struct WarpPage: View {
     @ObservedObject var warp: WarpTunnelModel
     let close: () -> Void
     @StateObject private var replacing = Flag()
+    /// The person chose to paste ready settings instead of letting Nimb make its own.
+    @StateObject private var manual = Flag()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -32,8 +34,9 @@ struct WarpPage: View {
                 VStack(spacing: 10) {
                     statusCard
                     if warp.isOn { checkCard }
-                    if warp.phase == .notInstalled || replacing.value { importCard }
+                    if (warp.phase == .notInstalled && manual.value) || replacing.value { importCard }
                     if warp.isInstalled && !replacing.value { manageCard }
+                    if warp.phase == .notInstalled && !manual.value { manualHint }
                     if let message = warp.errorMessage {
                         NoticeCard(lines: [message], color: Theme.bad, symbol: "xmark.octagon")
                     }
@@ -83,13 +86,21 @@ struct WarpPage: View {
                 .font(Typo.small)
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
+            if warp.phase == .notInstalled {
+                Text("Ничего вводить не нужно. При первом включении Nimb создаст для этого Mac собственный анонимный аккаунт WARP со своими ключами (личных данных он не передаёт) и спросит пароль администратора. Включая, вы принимаете условия Cloudflare WARP.")
+                    .font(Typo.small)
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Link("Условия Cloudflare WARP", destination: URL(string: "https://www.cloudflare.com/application/terms/")!)
+                    .font(Typo.small)
+            }
             HStack {
                 Spacer()
                 if warp.isWorking { ProgressView().controlSize(.small) }
                 OutlineButton(title: warp.isOn ? "Выключить" : "Включить",
                               color: warp.isOn ? Theme.warn : Theme.textPrimary,
-                              action: warp.toggle)
-                    .disabled(!warp.isInstalled || warp.isWorking)
+                              action: warp.phase == .notInstalled ? warp.enable : warp.toggle)
+                    .disabled(warp.phase == .unavailable || warp.isWorking)
             }
         }
         .padding(12)
@@ -167,7 +178,7 @@ struct WarpPage: View {
                 }
             }
             HStack {
-                if replacing.value { OutlineButton(title: "Отмена", color: Theme.textSecondary) { replacing.value = false; warp.draft = "" } }
+                if replacing.value || manual.value { OutlineButton(title: "Отмена", color: Theme.textSecondary) { replacing.value = false; manual.value = false; warp.draft = "" } }
                 Spacer()
                 OutlineButton(title: "Вставить из буфера", color: Theme.textPrimary, action: warp.pasteFromClipboard)
                 OutlineButton(title: "Установить", color: Theme.ok) {
@@ -188,13 +199,25 @@ struct WarpPage: View {
         return "\(count) \(word)"
     }
 
+    private var manualHint: some View {
+        HStack {
+            Text("Уже есть свои настройки WARP или AmneziaWG?")
+                .font(Typo.small)
+                .foregroundStyle(Theme.textSecondary)
+            Spacer(minLength: 8)
+            OutlineButton(title: "Вставить свои", color: Theme.textPrimary) { manual.value = true }
+                .disabled(warp.isWorking)
+        }
+        .padding(.horizontal, 2)
+    }
+
     private var manageCard: some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 3) {
-                Text("Настройки туннеля установлены")
+                Text("Туннель настроен для этого Mac")
                     .font(Typo.name)
                     .foregroundStyle(Theme.textPrimary)
-                Text("Помощник и ключ лежат в /usr/local/libexec/nimb, читать их может только администратор.")
+                Text("Ключи созданы на этом Mac и лежат в /usr/local/libexec/nimb, читать их может только администратор. «Удалить» удаляет и аккаунт WARP.")
                     .font(Typo.small)
                     .foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)

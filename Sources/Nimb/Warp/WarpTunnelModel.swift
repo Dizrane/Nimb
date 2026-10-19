@@ -15,7 +15,7 @@ enum WarpPaths {
     }
 
     /// Stops the tunnel and deletes everything that was installed. Used by "remove" and by the uninstall.
-    static let removeScript = "[ ! -x '\(helper)' ] || '\(helper)' down; /bin/rm -rf '\(dir)' /var/run/nimb-tunnel.state /var/run/nimb-tunnel.log /var/run/nimb-tunnel.name"
+    static let removeScript = "[ ! -x '\(helper)' ] || { '\(helper)' down; '\(helper)' unregister || true; }; /bin/rm -rf '\(dir)' /var/run/nimb-tunnel.state /var/run/nimb-tunnel.log /var/run/nimb-tunnel.name"
 }
 
 /// The WARP tunnel: AmneziaWG (WireGuard with extra camouflage) to Cloudflare, so that YouTube and Discord open.
@@ -109,39 +109,16 @@ final class WarpTunnelModel: ObservableObject {
         if let text = NSPasteboard.general.string(forType: .string) { draft = text }
     }
 
-    /// Installs the helper, the daemon and the settings. One prompt for the administrator password.
+    /// Installs the helper, the daemon and the settings that a person pasted in. One prompt for the administrator password.
     func install() {
-        guard let files = bundledFiles else { errorMessage = "В этой сборке Nimb нет amneziawg-go."; return }
+        guard bundledFiles != nil else { errorMessage = "В этой сборке Nimb нет amneziawg-go."; return }
         let config: WarpConfig
         do { config = try WarpConfig.parse(draft) } catch { errorMessage = error.localizedDescription; return }
         errorMessage = nil
         phase = .working("Устанавливаю…")
         let text = config.file
         Task.detached {
-            let outcome: Result<Void, Error>
-            do {
-                // Staged in the user's temporary folder: root cannot read the app itself if it sits in Desktop or Documents.
-                let stage = FileManager.default.temporaryDirectory.appendingPathComponent("Nimb-warp-\(UUID().uuidString)")
-                try FileManager.default.createDirectory(at: stage, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-                defer { try? FileManager.default.removeItem(at: stage) }
-                try FileManager.default.copyItem(at: files.binary, to: stage.appendingPathComponent("amneziawg-go"))
-                try FileManager.default.copyItem(at: files.helper, to: stage.appendingPathComponent("nimb-tunnel"))
-                try Data(text.utf8).write(to: stage.appendingPathComponent("warp.conf"), options: .atomic)
-                let s = "'\(stage.path)'"
-                let d = "'\(WarpPaths.dir)'"
-                try DNSManager.runPrivileged([
-                    "set -e",
-                    "[ ! -x '\(WarpPaths.helper)' ] || '\(WarpPaths.helper)' down || true",
-                    "/bin/mkdir -p \(d)", "/usr/sbin/chown root:wheel \(d)", "/bin/chmod 755 \(d)",
-                    "/usr/bin/install -m 755 -o root -g wheel \(s)/amneziawg-go \(d)/amneziawg-go",
-                    "/usr/bin/install -m 755 -o root -g wheel \(s)/nimb-tunnel \(d)/nimb-tunnel",
-                    "/usr/bin/install -m 600 -o root -g wheel \(s)/warp.conf \(d)/warp.conf",
-                    "/usr/bin/xattr -cr \(d) 2>/dev/null || true",
-                ].joined(separator: "; "))
-                outcome = .success(())
-            } catch {
-                outcome = .failure(error)
-            }
+            let outcome = Result { try Self.installFiles(configText: text, thenStart: false) }
             await MainActor.run {
                 if case .failure(let error) = outcome {
                     if case DNSError.cancelled = error {} else { self.errorMessage = error.localizedDescription }
@@ -152,6 +129,64 @@ final class WarpTunnelModel: ObservableObject {
                 self.refresh()
             }
         }
+    }
+
+    /// The first start on a Mac, with nothing to enter: makes this Mac's own WARP account (keys and address), puts it together
+    /// with the shared preset from the app, installs everything and starts the tunnel, all in one password prompt.
+    func enable() {
+        guard bundledFiles != nil, !isWorking else { return }
+        errorMessage = nil
+        checks = []
+        phase = .working("Создаю личные ключи WARP…")
+        Task {
+            let account: WarpAccount
+            do {
+                account = try await WarpRegistration.register()
+            } catch {
+                errorMessage = error.localizedDescription
+                phase = .off
+                refresh()
+                return
+            }
+            phase = .working("Включаю…")
+            let outcome = await Task.detached { Result { try Self.installFiles(configText: account.file, thenStart: true) } }.value
+            if case .failure(let error) = outcome {
+                if case DNSError.cancelled = error {} else { errorMessage = error.localizedDescription }
+                // Not installed (the password was refused, say): the account would be left without an owner.
+                if !WarpPaths.isInstalled { await WarpRegistration.delete(account) }
+            }
+            phase = .off
+            refresh()
+        }
+    }
+
+    /// Puts helper, daemon and settings in place as root and, if asked, starts the tunnel in the same prompt.
+    nonisolated private static func installFiles(configText: String, thenStart: Bool) throws {
+        guard let binary = Bundle.main.url(forResource: "amneziawg-go", withExtension: nil),
+              let helper = Bundle.main.url(forResource: "nimb-tunnel", withExtension: "sh") else {
+            throw WarpConfigError("В этой сборке Nimb нет amneziawg-go.")
+        }
+        // Staged in the user's temporary folder: root cannot read the app itself if it sits in Desktop or Documents.
+        let stage = FileManager.default.temporaryDirectory.appendingPathComponent("Nimb-warp-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: stage, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: stage) }
+        try FileManager.default.copyItem(at: binary, to: stage.appendingPathComponent("amneziawg-go"))
+        try FileManager.default.copyItem(at: helper, to: stage.appendingPathComponent("nimb-tunnel"))
+        try Data(configText.utf8).write(to: stage.appendingPathComponent("warp.conf"), options: .atomic)
+        let s = "'\(stage.path)'"
+        let d = "'\(WarpPaths.dir)'"
+        var steps = [
+            "set -e",
+            // The old settings may hold an account of this Mac; it goes away together with them.
+            "if [ -x '\(WarpPaths.helper)' ]; then '\(WarpPaths.helper)' down || true; '\(WarpPaths.helper)' unregister || true; fi",
+            "/bin/mkdir -p \(d)", "/usr/sbin/chown root:wheel \(d)", "/bin/chmod 755 \(d)",
+            "/usr/bin/install -m 755 -o root -g wheel \(s)/amneziawg-go \(d)/amneziawg-go",
+            "/usr/bin/install -m 755 -o root -g wheel \(s)/nimb-tunnel \(d)/nimb-tunnel",
+            "/usr/bin/install -m 600 -o root -g wheel \(s)/warp.conf \(d)/warp.conf",
+            "/usr/bin/xattr -cr \(d) 2>/dev/null || true",
+        ]
+        if thenStart { steps.append("'\(WarpPaths.helper)' up") }
+        _ = try DNSManager.runPrivileged(steps.joined(separator: "; "))
     }
 
     /// Stops the tunnel and deletes the helper and the settings (password prompt).

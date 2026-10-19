@@ -1,11 +1,12 @@
 #!/bin/sh
-# nimb-tunnel 2: brings the Nimb WARP tunnel up and down. It runs as root, from /usr/local/libexec/nimb, which only root
+# nimb-tunnel 3: brings the Nimb WARP tunnel up and down. It runs as root, from /usr/local/libexec/nimb, which only root
 # can write to. The settings are read from warp.conf next to it, a file of plain key=value lines that Nimb wrote after
 # checking every value; nothing in it is ever executed.
 #
 #   nimb-tunnel up      start amneziawg-go, configure it, add the routes, wait for the handshake
 #   nimb-tunnel down    remove the routes and stop it
 #   nimb-tunnel status  print "up <interface> <pid>" or "down"
+#   nimb-tunnel unregister  delete this Mac's anonymous WARP account at Cloudflare (best effort)
 #
 # NIMB_TUNNEL_DIR and NIMB_TUNNEL_RUN exist for tests only and are ignored unless NIMB_TUNNEL_TEST is set.
 PATH=/usr/bin:/bin:/usr/sbin:/sbin
@@ -119,6 +120,9 @@ rekey_after_time|rekey_timeout|reject_after_time|keepalive_timeout|max_handshake
 $key=$value" ;;
         esac
     done < "$CONF"
+    # Without a keepalive nothing is sent until the first packet of the user, and the wait for the handshake below fails.
+    case "$peer_keys" in *persistent_keepalive_interval*) ;; *) peer_keys="$peer_keys
+persistent_keepalive_interval=25" ;; esac
     [ -n "$private_key" ] && [ -n "$public_key" ] && [ -n "$endpoint" ] || fail "в warp.conf не хватает ключа, пира или адреса сервера"
 
     # An endpoint that is a host name is turned into an address now, before the routes change.
@@ -135,7 +139,9 @@ $key=$value" ;;
 
     # 2. Start the daemon; it makes a utun interface of its own.
     rm -f "$RUN.name"
-    WG_TUN_NAME_FILE="$RUN.name" LOG_LEVEL=error "$BIN" -f utun >>"$LOG" 2>&1 &
+    loglevel=error
+    [ -n "${NIMB_TUNNEL_TEST:-}" ] && loglevel=${NIMB_TUNNEL_LOG_LEVEL:-error}
+    WG_TUN_NAME_FILE="$RUN.name" LOG_LEVEL="$loglevel" "$BIN" -f utun >>"$LOG" 2>&1 &
     pid=$!
     i=0; while [ ! -s "$RUN.name" ] && alive "$pid" && [ $i -lt 40 ]; do sleep 0.25; i=$((i + 1)); done
     iface=$(cat "$RUN.name" 2>/dev/null)
@@ -206,11 +212,29 @@ allowed_ip=$cidr"; done
     say "up $iface $pid"
 }
 
+# Deletes the account that Nimb registered for this Mac. Never fails: the account expires by itself if Cloudflare is out of reach.
+cmd_unregister() {
+    id=""; token=""
+    if [ -f "$CONF" ]; then
+        id=$(sed -n 's/^account_id=//p' "$CONF" | head -1)
+        token=$(sed -n 's/^account_token=//p' "$CONF" | head -1)
+    fi
+    case "$id" in ''|*[!0-9a-zA-Z-]*) return 0 ;; esac
+    case "$token" in ''|*[!0-9a-zA-Z-]*) return 0 ;; esac
+    for api in zero-trust-client.cloudflareclient.com api.cloudflareclient.com; do
+        code=$(curl -s -o /dev/null -m 10 --connect-timeout 5 -X DELETE -H "Authorization: Bearer $token" \
+            -w '%{http_code}' "https://$api/v0a2223/reg/$id" 2>/dev/null)
+        case "$code" in 2??|404) return 0 ;; esac
+    done
+    return 0
+}
+
 case "${1:-}" in
+    unregister) cmd_unregister ;;
     up) cmd_up ;;
     down) cmd_down ;;
     status) cmd_status ;;
     retarget-test) [ -n "${NIMB_TUNNEL_TEST:-}" ] && retarget "$2" "$3" ;;
     watch-test) [ -n "${NIMB_TUNNEL_TEST:-}" ] && watch_network "$2" "$3" ;;
-    *) fail "usage: nimb-tunnel up|down|status" ;;
+    *) fail "usage: nimb-tunnel up|down|status|unregister" ;;
 esac
