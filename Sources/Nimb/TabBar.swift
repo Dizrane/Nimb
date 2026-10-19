@@ -10,6 +10,7 @@ struct TabBar: View {
     @ObservedObject private var gate = AnimationGate.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @StateObject private var frames = TabFrames()
+    private static let bleed: CGFloat = 36
 
     var body: some View {
         HStack(spacing: 0) {
@@ -22,9 +23,15 @@ struct TabBar: View {
         .onPreferenceChange(TabFrameKey.self) { frames.set($0); placeRing() }
         .onChange(of: selection) { _ in placeRing() }
         .background {
+            // The canvas reaches beyond the bar by `bleed` on every side: the ring round the last word and its glow go past the
+            // end of the word, and a canvas that stopped at the bar cut them off. Its origin moves by the same amount.
             TimelineView(.animation(minimumInterval: ring.moving ? 1.0 / 30 : 1.0 / 15, paused: !gate.shouldRun(brief: ring.moving))) { context in
-                Canvas { ctx, _ in draw(&ctx, date: context.date) }
+                Canvas { ctx, _ in
+                    ctx.translateBy(x: Self.bleed, y: Self.bleed)
+                    draw(&ctx, date: context.date)
+                }
             }
+            .padding(-Self.bleed)
             .allowsHitTesting(false)
         }
         .padding(.horizontal, 12)

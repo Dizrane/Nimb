@@ -32,7 +32,7 @@ struct HomePage: View {
                 art: .power,
                 isOn: allOn,
                 isBusy: busy,
-                halos: onCount,
+                halos: all.effectiveCount,
                 title: title,
                 subtitle: subtitle,
                 accessibility: allOn ? "Выключить всё" : "Включить всё",

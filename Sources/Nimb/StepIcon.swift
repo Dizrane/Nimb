@@ -19,7 +19,7 @@ struct StepIcon: View {
 
     var body: some View {
         Button { player.play(reduceMotion: reduceMotion) } label: {
-            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !player.isPlaying || reduceMotion || !gate.shouldRun(brief: true))) { context in
+            TimelineView(.animation(minimumInterval: player.isPlaying ? 1.0 / 30 : 1.0 / 15, paused: !(player.isPlaying || halo) || reduceMotion || !gate.shouldRun(brief: player.isPlaying))) { context in
                 Canvas { ctx, canvas in draw(&ctx, canvas, date: context.date) }
             }
             .frame(width: canvasSize.width, height: canvasSize.height)
@@ -37,11 +37,30 @@ struct StepIcon: View {
             drawWelcome(&ctx, middle: middle, k: k, date: date)
             return
         }
-        // The halo at rest above the picture.
+        // The halo at rest above the picture: it breathes and its dust slides along the ring.
         let ring = CGPoint(x: middle.x, y: middle.y + WelcomeScan.rest * k)
-        if halo { HaloArt.draw(.back, in: &ctx, center: ring, scale: WelcomeScan.restScale * k, opacity: 1) }
+        let life = haloLife(date)
+        if halo { HaloArt.draw(.back, in: &ctx, center: ring, scale: WelcomeScan.restScale * k * life.scale, opacity: life.opacity) }
         drawPicture(&ctx, middle: middle, k: k, date: date)
-        if halo { HaloArt.draw(.front, in: &ctx, center: ring, scale: WelcomeScan.restScale * k, opacity: 1) }
+        if halo { drawHaloFront(&ctx, center: ring, scale: WelcomeScan.restScale * k, date: date) }
+    }
+
+    /// The breathing of the small halo: the same as the large ones (opacity 0.93...1, scale within 1.2 %); still with Reduce Motion.
+    private func haloLife(_ date: Date) -> (opacity: Double, scale: CGFloat) {
+        if reduceMotion { return (1, 1) }
+        let t = date.timeIntervalSinceReferenceDate
+        return (0.93 + 0.07 * sin(1.7 * t), 1 + 0.012 * CGFloat(sin(1.3 * t)))
+    }
+
+    /// The near half of the small halo with the loop of dust along it.
+    private func drawHaloFront(_ ctx: inout GraphicsContext, center: CGPoint, scale: CGFloat, date: Date) {
+        let life = haloLife(date)
+        HaloArt.draw(.front, in: &ctx, center: center, scale: scale * life.scale, opacity: life.opacity)
+        if reduceMotion {
+            HaloArt.drawStill(in: &ctx, center: center, scale: scale, opacity: life.opacity)
+        } else {
+            HaloArt.drawSparkle(in: &ctx, center: center, scale: scale * life.scale, opacity: life.opacity, time: date.timeIntervalSinceReferenceDate)
+        }
     }
 
     private func picture(_ file: String) -> CGImage? { ArtLibrary.shared.image(player.kind.folder, file) }
@@ -80,7 +99,8 @@ struct StepIcon: View {
         }
         let ringCenter = CGPoint(x: middle.x + offset.x * k, y: middle.y + (ring.y + offset.y) * k)
 
-        HaloArt.draw(.back, in: &ctx, center: ringCenter, scale: ring.scale * k, opacity: 1)
+        let life = haloLife(date)
+        HaloArt.draw(.back, in: &ctx, center: ringCenter, scale: ring.scale * k * life.scale, opacity: life.opacity)
         drawImage(picture(dimmed ? "disc-off.png" : "disc.png"), in: &ctx, middle: middle, k: k)
 
         if player.showsSecond {
@@ -123,6 +143,6 @@ struct StepIcon: View {
             }
         }
 
-        HaloArt.draw(.front, in: &ctx, center: ringCenter, scale: ring.scale * k, opacity: 1)
+        drawHaloFront(&ctx, center: ringCenter, scale: ring.scale * k, date: date)
     }
 }

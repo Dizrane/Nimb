@@ -54,6 +54,11 @@ final class WarpTunnelModel: ObservableObject {
 
     var isOn: Bool { if case .on = phase { return true } else { return false } }
     var isWorking: Bool { if case .working = phase { return true } else { return false } }
+    /// While it works: is it being switched on (or set up) and not off?
+    var isTurningOn: Bool {
+        if case .working(let text) = phase { return !(text.hasPrefix("Выключаю") || text.hasPrefix("Удаляю")) }
+        return isOn
+    }
     var isInstalled: Bool { phase != .notInstalled && phase != .unavailable }
 
     /// The helper and the daemon travel inside the app; a build without them cannot offer the tunnel.

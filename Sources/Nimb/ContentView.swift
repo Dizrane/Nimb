@@ -299,17 +299,19 @@ struct ContentView: View {
     @EnvironmentObject private var model: DNSViewModel
     @StateObject private var updates = UpdateViewModel()
     @ObservedObject private var onboarding = Onboarding.shared
+    @ObservedObject private var all = AllServices.shared
     @EnvironmentObject private var telegram: TelegramProxyModel
     @EnvironmentObject private var warp: WarpTunnelModel
     @Environment(\.openWindow) private var openWindow
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private func isOn(_ tab: AppTab) -> Bool {
+        let e = all.effective
         switch tab {
-        case .home: return model.active != nil && telegram.isRunning && warp.isOn
-        case .ai: return model.active != nil
-        case .telegram: return telegram.isRunning
-        case .media: return warp.isOn
+        case .home: return e.ai && e.telegram && e.media
+        case .ai: return e.ai
+        case .telegram: return e.telegram
+        case .media: return e.media
         }
     }
 
