@@ -96,13 +96,14 @@ final class TelegramProxyModel: ObservableObject {
             var ticks = 0
             while !Task.isCancelled {
                 guard let self else { return }
-                self.stats = self.engine.snapshot
+                let snapshot = self.engine.snapshot
+                if snapshot != self.stats { self.stats = snapshot }
                 ticks += 1
                 // Every few seconds: is the port still listening? If not, bring it back by itself.
-                if ticks % 4 == 0, self.isRunning, !self.isRecovering, !self.engine.isListening {
+                if ticks % 3 == 0, self.isRunning, !self.isRecovering, !self.engine.isListening {
                     await self.recover()
                 }
-                try? await Task.sleep(for: .seconds(1))
+                try? await Task.sleep(for: .seconds(2))
             }
         }
     }

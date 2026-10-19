@@ -9,7 +9,7 @@ struct HeroButton: View {
     let action: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.scenePhase) private var scenePhase
+    @ObservedObject private var gate = AnimationGate.shared
     @StateObject private var hover = Flag()
     @StateObject private var state: HeroState
 
@@ -27,10 +27,10 @@ struct HeroButton: View {
         Button(action: action) {
             ZStack {
                 // The planet changes slowly, so it is redrawn rarely, except while something is moving.
-                TimelineView(.animation(minimumInterval: state.moving ? 1.0 / 30 : 1.0 / 4, paused: reduceMotion || scenePhase != .active)) { context in
+                TimelineView(.animation(minimumInterval: state.moving ? 1.0 / 30 : 1.0 / 3, paused: reduceMotion || !gate.shouldRun(brief: state.moving))) { context in
                     canvas(.planet, context.date)
                 }
-                TimelineView(.animation(minimumInterval: 1.0 / 24, paused: reduceMotion || scenePhase != .active)) { context in
+                TimelineView(.animation(minimumInterval: 1.0 / 20, paused: reduceMotion || !(lit || mode == .probing || state.moving) || !gate.shouldRun(brief: state.moving))) { context in
                     canvas(.signal, context.date)
                 }
                 bigButton

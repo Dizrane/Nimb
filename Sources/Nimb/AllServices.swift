@@ -12,11 +12,18 @@ final class AllServices: ObservableObject {
     private var dns: DNSViewModel?
     private var telegram: TelegramProxyModel?
     private var warp: WarpTunnelModel?
+    private var refresher: Timer?
 
     func configure(dns: DNSViewModel, telegram: TelegramProxyModel, warp: WarpTunnelModel) {
         self.dns = dns
         self.telegram = telegram
         self.warp = warp
+        // The tunnel is a process of its own: it can end without Nimb doing anything. Read its state often, wherever the
+        // person is looking (the window, the menu bar), not only while the tunnel page is open.
+        refresher?.invalidate()
+        refresher = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak warp] _ in
+            Task { @MainActor in warp?.refresh() }
+        }
     }
 
     var warpAvailable: Bool { warp?.phase != .unavailable }
@@ -46,7 +53,11 @@ final class AllServices: ObservableObject {
         isRunning = true
         Task {
             if !telegram.isRunning { telegram.start(); await settle() }
-            if dns.active == nil { dns.toggle(); await settle() }
+            if dns.active == nil {
+                dns.toggle(); await settle()
+                // The password was refused: do not ask again for the next one.
+                if dns.active == nil { isRunning = false; return }
+            }
             if warpAvailable && !warp.isOn { toggleWarp(); await settle() }
             isRunning = false
         }
@@ -57,7 +68,10 @@ final class AllServices: ObservableObject {
         isRunning = true
         Task {
             if telegram.isRunning { telegram.stop() }
-            if dns.active != nil { dns.toggle(); await settle() }
+            if dns.active != nil {
+                dns.toggle(); await settle()
+                if dns.active != nil { isRunning = false; return }
+            }
             if warp.isOn { warp.disconnect(); await settle() }
             isRunning = false
         }

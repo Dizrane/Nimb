@@ -65,9 +65,18 @@ final class WarpTunnelModel: ObservableObject {
 
     func refresh() {
         if isWorking { return }
-        if bundledFiles == nil && !WarpPaths.isInstalled { phase = .unavailable; return }
-        guard WarpPaths.isInstalled else { phase = .notInstalled; return }
-        if let interface = Self.runningInterface() { phase = .on(interface: interface) } else { phase = .off }
+        let next: Phase
+        if bundledFiles == nil && !WarpPaths.isInstalled {
+            next = .unavailable
+        } else if !WarpPaths.isInstalled {
+            next = .notInstalled
+        } else if let interface = Self.runningInterface() {
+            next = .on(interface: interface)
+        } else {
+            next = .off
+        }
+        // Only a change is published: this runs every few seconds, and an unchanged value would redraw every page.
+        if next != phase { phase = next }
     }
 
     /// The interface of a running tunnel, read from the state file the helper keeps (readable by everyone).
@@ -135,7 +144,7 @@ final class WarpTunnelModel: ObservableObject {
                 self.isSettingAccess = false
                 self.passwordless = allowed
                 if case .failure(let error) = result {
-                    if case DNSError.cancelled = error {} else { self.errorMessage = error.localizedDescription }
+                    if case DNSError.cancelled = error {} else { self.errorMessage = Self.friendly(error) }
                 } else if enable && !allowed {
                     self.errorMessage = "Правило установлено, но sudo всё равно просит пароль."
                 }
@@ -172,7 +181,7 @@ final class WarpTunnelModel: ObservableObject {
             phase = .working("Включаю…")
             let outcome = await Task.detached { Result { try Self.installFiles(configText: account.file, thenStart: true) } }.value
             if case .failure(let error) = outcome {
-                if case DNSError.cancelled = error {} else { errorMessage = error.localizedDescription }
+                if case DNSError.cancelled = error {} else { errorMessage = Self.friendly(error) }
                 // Not installed (the password was refused, say): the account would be left without an owner.
                 if !WarpPaths.isInstalled { await WarpRegistration.delete(account) }
             }
@@ -231,6 +240,13 @@ final class WarpTunnelModel: ObservableObject {
 
     func toggle() { isOn ? disconnect() : connect() }
 
+    /// What the person sees for a failure: the helper's words, and for the common one (no answer from Cloudflare) what to try.
+    nonisolated static func friendly(_ error: Error) -> String {
+        let text = error.localizedDescription
+        guard text.contains("рукопожатия") else { return text }
+        return text + ". Проверьте интернет и попробуйте ещё раз. Если не помогает, нажмите «Удалить» и включите туннель заново: ключи создадутся новые. В некоторых сетях Cloudflare закрыт, тогда поможет другая сеть."
+    }
+
     /// The number in the first lines of a helper script ("# nimb-tunnel 2: ...").
     private static func helperVersion(at path: String) -> Int? {
         guard let text = try? String(contentsOfFile: path, encoding: .utf8), let range = text.range(of: #"# nimb-tunnel (\d+)"#, options: .regularExpression) else { return nil }
@@ -277,7 +293,7 @@ final class WarpTunnelModel: ObservableObject {
             }
             await MainActor.run {
                 if case .failure(let error) = result {
-                    if case DNSError.cancelled = error {} else { self.errorMessage = error.localizedDescription }
+                    if case DNSError.cancelled = error {} else { self.errorMessage = Self.friendly(error) }
                 }
                 self.phase = .off
                 self.refresh()
@@ -295,7 +311,7 @@ final class WarpTunnelModel: ObservableObject {
             let result = Result { withoutPassword ? try Self.runWithoutPassword("down") : try DNSManager.runPrivileged("'\(WarpPaths.helper)' down") }
             await MainActor.run {
                 if case .failure(let error) = result {
-                    if case DNSError.cancelled = error {} else { self.errorMessage = error.localizedDescription }
+                    if case DNSError.cancelled = error {} else { self.errorMessage = Self.friendly(error) }
                 }
                 self.phase = .off
                 self.refresh()

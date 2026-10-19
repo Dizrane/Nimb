@@ -91,7 +91,7 @@ private struct Cloud {
 private struct SkyScene: View {
     let lit: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.scenePhase) private var scenePhase
+    @ObservedObject private var gate = AnimationGate.shared
 
     var body: some View {
         ZStack {
@@ -121,7 +121,7 @@ private struct SkyScene: View {
     }
 
     private var clouds: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 12, paused: lit || reduceMotion || scenePhase != .active)) { context in
+        TimelineView(.animation(minimumInterval: 1.0 / 12, paused: lit || reduceMotion || !gate.shouldRun(brief: false))) { context in
             let t = context.date.timeIntervalSinceReferenceDate
             Canvas { ctx, size in
                 let span = size.width + 560

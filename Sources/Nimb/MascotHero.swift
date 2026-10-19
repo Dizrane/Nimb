@@ -29,7 +29,7 @@ struct MascotHero: View {
     let action: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.scenePhase) private var scenePhase
+    @ObservedObject private var gate = AnimationGate.shared
     @StateObject private var hover = Flag()
     @StateObject private var motion = MascotMotion()
 
@@ -67,8 +67,12 @@ struct MascotHero: View {
         let animated = lit > 0 || isBusy || motion.moving
         VStack(spacing: 6) {
             Button(action: action) {
-                TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !animated || reduceMotion || scenePhase != .active)) { context in
-                    stage(lit: lit, hover: h, date: context.date)
+                // Slow breathing needs few frames; the flight of the plane or the satellite gets more of them.
+                ZStack {
+                    TimelineView(.animation(minimumInterval: motion.moving ? 1.0 / 30 : 1.0 / 12, paused: !animated || reduceMotion || !gate.shouldRun(brief: motion.moving))) { context in
+                        stage(lit: lit, hover: h, date: context.date)
+                    }
+                    badge(hover: h).offset(y: 90)
                 }
                 .frame(width: 360, height: stageHeight)
                 // The glow fades out before the edges of the stage, so that it never reaches the tab bar or the title.
@@ -132,39 +136,57 @@ struct MascotHero: View {
         let moment = Moment(date: date, on: lit > 0, busy: isBusy, still: reduceMotion)
         let stack = haloStack(lit: lit)
         let orbiter = reduceMotion ? (isOn ? 1.0 : 0.0) : motion.orbiter(at: date)
-        return ZStack {
-            Circle()
-                .fill(RadialGradient(colors: [Color.white.opacity(0.05 + 0.13 * lit + 0.04 * hover * lit), .clear], center: .center, startRadius: 8, endRadius: 128))
-                .frame(width: 270, height: 270)
-                .offset(y: figureY + 2)
+        let pictures = MascotImages.shared.pictures(for: art)
+        // One canvas draws everything that moves, bitmap by bitmap; SwiftUI does not lay out a view tree on every frame.
+        return Canvas { ctx, size in
+            let c = CGPoint(x: size.width / 2, y: size.height / 2 + figureY)
 
-            haloLayer(stack, back: true, moment: moment)
+            // The soft light behind the figure.
+            let glow = 0.05 + 0.13 * lit + 0.04 * hover * lit
+            ctx.fill(Path(ellipseIn: CGRect(x: c.x - 135, y: c.y + 2 - 135, width: 270, height: 270)),
+                     with: .radialGradient(Gradient(colors: [Color.white.opacity(glow), .clear]), center: CGPoint(x: c.x, y: c.y + 2), startRadius: 8, endRadius: 128))
 
-            figure(lit: lit, hover: hover)
-                .rotationEffect(.degrees(art == .power ? 0 : moment.sway))
-                .offset(y: figureY + (art == .power ? 0 : moment.bob))
+            drawHalos(&ctx, size: size, stack: stack, moment: moment, back: true)
 
-            haloLayer(stack, back: false, moment: moment)
-
-            Canvas { ctx, size in
-                drawSparks(&ctx, size: size, stack: stack, moment: moment)
-                if art != .power { drawOrbiter(&ctx, size: size, progress: orbiter, moment: moment) }
+            if let pictures {
+                // Off and on are two bitmaps that cross-fade; the figure floats and sways a little while it is on.
+                ctx.drawLayer { layer in
+                    layer.translateBy(x: c.x, y: c.y + moment.bob)
+                    layer.rotate(by: .degrees(moment.sway))
+                    draw(pictures.off, in: &layer, opacity: 1 - lit)
+                    draw(pictures.on, in: &layer, opacity: lit)
+                }
             }
-            .allowsHitTesting(false)
 
-            badge(hover: hover).offset(y: 90)
+            drawHalos(&ctx, size: size, stack: stack, moment: moment, back: false)
+            drawSparks(&ctx, size: size, stack: stack, moment: moment)
+            if art != .power { drawOrbiter(&ctx, size: size, progress: orbiter, moment: moment) }
         }
     }
 
-    private func haloLayer(_ stack: [Halo], back: Bool, moment: Moment) -> some View {
-        ForEach(stack.indices, id: \.self) { i in
+    /// A bitmap centred on the origin of the context.
+    private func draw(_ picture: MascotImages.Picture, in ctx: inout GraphicsContext, opacity: Double) {
+        guard opacity > 0.003 else { return }
+        ctx.drawLayer { layer in
+            layer.opacity = opacity
+            layer.draw(Image(decorative: picture.image, scale: 2), in: CGRect(x: -picture.size.width / 2, y: -picture.size.height / 2, width: picture.size.width, height: picture.size.height))
+        }
+    }
+
+    /// The halos of the stack: the back half before the figure, the front half after it.
+    private func drawHalos(_ ctx: inout GraphicsContext, size: CGSize, stack: [Halo], moment: Moment, back: Bool) {
+        let images = HaloImages.shared
+        let image = Image(decorative: back ? images.back : images.front, scale: images.pixelScale)
+        for (i, halo) in stack.enumerated() where halo.opacity > 0.003 {
             let wave = haloWave(i, moment: moment)
-            haloImage(back ? HaloImages.shared.back : HaloImages.shared.front, scale: stack[i].scale * wave.scale)
-                .opacity(stack[i].opacity * wave.opacity * moment.busyPulse)
-                // The resting place animates when a halo comes or goes; the wave of the clock is added after it, unanimated.
-                .offset(y: stack[i].y)
-                .animation(art == .power ? .spring(response: 0.9, dampingFraction: 0.62) : nil, value: stack[i].y)
-                .offset(y: wave.y)
+            let scale = halo.scale * wave.scale
+            let center = CGPoint(x: size.width / 2, y: size.height / 2 + halo.y + wave.y)
+            let rect = CGRect(x: center.x - images.size.width * scale / 2, y: center.y - images.size.height * scale / 2,
+                              width: images.size.width * scale, height: images.size.height * scale)
+            ctx.drawLayer { layer in
+                layer.opacity = halo.opacity * wave.opacity * moment.busyPulse
+                layer.draw(image, in: rect)
+            }
         }
     }
 
@@ -192,14 +214,6 @@ struct MascotHero: View {
             let resting = halos == 0 && i == 0
             return Halo(opacity: on ? 1 : (resting ? 0.22 : 0), y: haloY - CGFloat(i) * haloSpacing + drop(on || resting), scale: haloScale * (1 - 0.07 * CGFloat(i)))
         }
-    }
-
-    private func haloImage(_ image: CGImage, scale: CGFloat) -> some View {
-        let size = HaloImages.shared.size
-        return Image(decorative: image, scale: HaloImages.shared.pixelScale)
-            .resizable()
-            .frame(width: size.width * scale, height: size.height * scale)
-            .allowsHitTesting(false)
     }
 
     // MARK: Canvas
@@ -261,22 +275,6 @@ struct MascotHero: View {
         }
     }
 
-    // MARK: Figure
-
-    /// The figure itself: dim and plain while off, with a light rim and a glow once on.
-    @ViewBuilder
-    private func figure(lit: Double, hover: Double) -> some View {
-        let rim = 0.22 + 0.45 * lit + 0.15 * hover
-        switch art {
-        case .hood:
-            HoodArt().lit(rim: rim, glow: lit)
-        case .screen:
-            ScreenArt().scaleEffect(0.8).lit(rim: rim, glow: lit)
-        case .power:
-            EmptyView()
-        }
-    }
-
     /// The small power button under the figure, the same as the one under the planet.
     private func badge(hover: Double) -> some View {
         ZStack {
@@ -292,16 +290,5 @@ struct MascotHero: View {
                     .foregroundStyle(isOn ? Theme.ok : Color.white.opacity(0.85))
             }
         }
-    }
-}
-
-private extension View {
-    /// A figure under the halo: dim while off, with a thin light rim and a glow as the halo grows.
-    func lit(rim: Double, glow: Double) -> some View {
-        self
-            .shadow(color: .white.opacity(rim * 0.8), radius: 1)
-            .shadow(color: .white.opacity(0.08 + 0.16 * glow), radius: 10)
-            .opacity(0.62 + 0.38 * glow)
-            .scaleEffect(0.96 + 0.04 * glow)
     }
 }
