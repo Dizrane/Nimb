@@ -348,10 +348,14 @@ enum DNSManager {
         let out = Pipe(), err = Pipe()
         process.standardOutput = out
         process.standardError = err
+        // Not waitUntilExit(): it spins the run loop, and this is called while SwiftUI is still building the window,
+        // where a re-entrant update makes SwiftUI abort.
+        let finished = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in finished.signal() }
         try process.run()
         let outData = out.fileHandleForReading.readDataToEndOfFile()
         let errData = err.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
+        finished.wait()
         let stdout = String(decoding: outData, as: UTF8.self)
         guard process.terminationStatus == 0 else {
             let message = String(decoding: errData, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)

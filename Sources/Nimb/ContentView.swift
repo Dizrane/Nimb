@@ -284,6 +284,7 @@ struct ContentView: View {
     @StateObject private var model = DNSViewModel()
     @StateObject private var updates = UpdateViewModel()
     @EnvironmentObject private var telegram: TelegramProxyModel
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(spacing: 0) {
@@ -352,6 +353,7 @@ struct ContentView: View {
         }
         .onAppear {
             if updates.checkOnLaunch { updates.check(silent: true) }
+            telegram.openMainWindow = { openWindow(id: "main") }
             // After the window is up, so that the question has something behind it.
             DispatchQueue.main.async { MoveToApplications.offer() }
         }

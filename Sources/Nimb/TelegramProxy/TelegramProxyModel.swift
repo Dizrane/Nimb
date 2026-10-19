@@ -20,6 +20,9 @@ final class TelegramProxyModel: ObservableObject {
     let secretHex: String
     private let engine: TelegramProxyEngine
     private var poller: Task<Void, Never>?
+    private var statusItem: TelegramStatusItem?
+    /// Opens the main window again after it has been closed; set by the window itself.
+    var openMainWindow: (() -> Void)?
 
     init() {
         let defaults = UserDefaults.standard
@@ -34,8 +37,14 @@ final class TelegramProxyModel: ObservableObject {
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [engine] _ in
             engine.stop()
         }
-        if autoStart { start() }
+        statusItem = TelegramStatusItem(model: self)
+        // Not inside the first update of the scenes: changing state then makes SwiftUI abort.
+        if autoStart {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.start() }
+        }
     }
+
+    var menuBarIconShown: Bool { statusItem?.isShown ?? false }
 
     /// `tg://proxy` link: Telegram Desktop opens a dialog that adds this proxy.
     var link: String { "tg://proxy?server=127.0.0.1&port=\(port)&secret=dd\(secretHex)" }
