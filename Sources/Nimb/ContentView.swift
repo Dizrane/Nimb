@@ -14,6 +14,7 @@ final class DNSViewModel: ObservableObject {
     @Published var access = DNSManager.PasswordlessState()
     @Published var isSettingUp = false
     @Published var showSettings = false
+    @Published var showTelegram = false
 
     init() {
         // Read the state synchronously once, so a Mac that already has DNS on opens straight into space.
@@ -282,11 +283,15 @@ final class UpdateViewModel: ObservableObject {
 struct ContentView: View {
     @StateObject private var model = DNSViewModel()
     @StateObject private var updates = UpdateViewModel()
+    @EnvironmentObject private var telegram: TelegramProxyModel
 
     var body: some View {
         VStack(spacing: 0) {
             if model.showSettings {
                 SettingsView(model: model, updates: updates)
+                    .transition(.opacity)
+            } else if model.showTelegram {
+                TelegramPage(telegram: telegram) { withAnimation(.easeInOut(duration: 0.3)) { model.showTelegram = false } }
                     .transition(.opacity)
             } else {
                 Hero(model: model)
@@ -301,19 +306,32 @@ struct ContentView: View {
         }
         .frame(width: 400, height: 720)
         .overlay(alignment: .topTrailing) {
-            if !model.showSettings {
-                Button { withAnimation(.easeInOut(duration: 0.3)) { model.showSettings = true } } label: {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 14, weight: .regular))
-                        .foregroundStyle(Theme.textSecondary)
-                        .frame(width: 32, height: 28)
-                        .contentShape(Rectangle())
+            if !model.showSettings && !model.showTelegram {
+                HStack(spacing: 0) {
+                    Button { withAnimation(.easeInOut(duration: 0.3)) { model.showTelegram = true } } label: {
+                        Image(systemName: "paperplane")
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(telegram.isRunning ? Theme.ok : Theme.textSecondary)
+                            .frame(width: 32, height: 28)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressableStyle())
+                    .help("Прокси для Telegram")
+                    .accessibilityLabel("Прокси для Telegram")
+
+                    Button { withAnimation(.easeInOut(duration: 0.3)) { model.showSettings = true } } label: {
+                        Image(systemName: "gearshape")
+                            .font(.system(size: 14, weight: .regular))
+                            .foregroundStyle(Theme.textSecondary)
+                            .frame(width: 32, height: 28)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressableStyle())
+                    .help("Настройки")
+                    .accessibilityLabel("Настройки")
                 }
-                .buttonStyle(PressableStyle())
                 .padding(.top, 6)
                 .padding(.trailing, 10)
-                .help("Настройки")
-                .accessibilityLabel("Настройки")
             }
         }
         // The hidden title bar adds its height (28 pt) to the window on top of the content, which would leave a black
@@ -493,7 +511,7 @@ private struct PermissionRow: View {
     }
 }
 
-private struct OutlineButton: View {
+struct OutlineButton: View {
     let title: String
     let color: Color
     let action: () -> Void
@@ -924,7 +942,7 @@ private struct BestBanner: View {
     }
 }
 
-private struct NoticeCard: View {
+struct NoticeCard: View {
     let lines: [String]
     let color: Color
     let symbol: String
