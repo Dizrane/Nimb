@@ -318,19 +318,22 @@ struct ContentView: View {
                     .padding(.bottom, 4)
                 switch model.tab {
                 case .home:
-                    HomePage(model: model, telegram: telegram, warp: warp)
+                    HomePage(model: model, telegram: telegram, warp: warp).transition(.opacity)
                 case .ai:
-                    Hero(model: model)
-                    ScrollView {
-                        ProvidersSection(model: model)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 8)
+                    VStack(spacing: 0) {
+                        Hero(model: model)
+                        ScrollView {
+                            ProvidersSection(model: model)
+                                .padding(.horizontal, Space.page)
+                                .padding(.vertical, Space.s)
+                        }
+                        .scrollIndicators(.hidden)
                     }
-                    .scrollIndicators(.hidden)
+                    .transition(.opacity)
                 case .telegram:
-                    TelegramPage(telegram: telegram)
+                    TelegramPage(telegram: telegram).transition(.opacity)
                 case .media:
-                    WarpPage(warp: warp)
+                    WarpPage(warp: warp).transition(.opacity)
                 }
             }
             FooterBar(updates: updates, canInstall: !model.isLocked)
@@ -366,6 +369,7 @@ struct ContentView: View {
         .background(WindowConfigurator())
         .animation(.easeInOut(duration: 0.5), value: model.reports.count)
         .animation(.easeInOut(duration: 0.3), value: onboarding.isShown)
+        .animation(.easeOut(duration: 0.15), value: model.tab)
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             model.refresh()
             warp.refreshAccess()
@@ -451,7 +455,7 @@ private struct ProvidersSection: View {
     @ObservedObject var model: DNSViewModel
 
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: Space.gap) {
             HStack {
                 Text("DNS-провайдеры")
                     .sectionLabel()
@@ -488,211 +492,29 @@ private struct ProvidersSection: View {
     }
 }
 
-/// A permission Nimb can hold: what it is for, what it costs, and a button to give or take it back.
-private struct PermissionRow: View {
-    let title: String
-    let detail: String
-    let granted: Bool
-    let disabled: Bool
-    var note: String? = nil
-    var extraTitle: String? = nil
-    var extraAction: (() -> Void)? = nil
-    let action: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 7) {
-                Circle().fill(granted ? Theme.warn : Color.white.opacity(0.25)).frame(width: 6, height: 6)
-                Text(title)
-                    .font(Typo.name)
-                    .foregroundStyle(Theme.textPrimary)
-                Spacer(minLength: 8)
-                Text(granted ? "Разрешено" : "Не разрешено")
-                    .font(Typo.small)
-                    .foregroundStyle(Theme.textSecondary)
-            }
-            Text(detail)
-                .font(Typo.small)
-                .foregroundStyle(Theme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-            if let note {
-                Text(note)
-                    .font(Typo.small)
-                    .foregroundStyle(Theme.warn)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            HStack {
-                Spacer()
-                if let extraTitle, let extraAction {
-                    OutlineButton(title: extraTitle, color: Theme.textPrimary, action: extraAction)
-                        .disabled(disabled)
-                }
-                OutlineButton(title: granted ? "Забрать" : "Дать", color: granted ? Theme.warn : Theme.textPrimary, action: action)
-                    .disabled(disabled)
-            }
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .glassCard(tint: .white, tintOpacity: 0.02, borderOpacity: 0.16, radius: 10)
-    }
-}
-
 struct OutlineButton: View {
     let title: String
     let color: Color
     let action: () -> Void
 
+    @Environment(\.isEnabled) private var isEnabled
+    @StateObject private var hover = Flag()
+
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 11.5, weight: .medium))
+                .font(.system(size: 12.5, weight: .medium))
                 .foregroundStyle(color)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 5)
-                .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(color.opacity(0.55), lineWidth: 1))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+                .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(color.opacity(hover.value ? 0.16 : 0.08)))
+                .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(color.opacity(hover.value ? 0.75 : 0.5), lineWidth: 1))
                 .contentShape(Rectangle())
         }
         .buttonStyle(PressableStyle())
-    }
-}
-
-// MARK: - Settings
-
-private struct SettingsView: View {
-    @ObservedObject var model: DNSViewModel
-    @ObservedObject var onboarding: Onboarding
-    @ObservedObject var warp: WarpTunnelModel
-
-    private var accessNote: String? {
-        let access = model.access
-        guard access.enabled else { return nil }
-        if access.tooBroad {
-            return "Если после замены это сообщение останется, широкий доступ даёт другое правило sudo, не от Nimb."
-        }
-        if !access.missing.isEmpty {
-            return "Для новых подключений (\(access.missing.joined(separator: ", "))) пароль пока запрашивается. «Добавить подключения» включит их в правило (понадобится пароль)."
-        }
-        return nil
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Настройки")
-                    .font(Typo.status)
-                    .foregroundStyle(Theme.textPrimary)
-                Spacer()
-                Button { withAnimation(.easeInOut(duration: 0.3)) { model.showSettings = false } } label: {
-                    Text("Готово")
-                        .font(.system(size: 12.5, weight: .medium))
-                        .foregroundStyle(Theme.textPrimary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 4)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(PressableStyle())
-                .keyboardShortcut(.cancelAction)
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 40)
-            .padding(.bottom, 12)
-
-            ScrollView {
-                VStack(spacing: 10) {
-                    BackgroundCard()
-                    LaunchAtLoginCard()
-
-                    PermissionRow(
-                        title: "Смена DNS без пароля",
-                        detail: model.access.tooBroad
-                            ? "Сейчас у вас старое правило: оно позволяет любой программе от вашего имени поставить любой DNS. Нажмите «Сделать точным»: правило заменится на безопасное, один раз понадобится пароль."
-                            : model.passwordless
-                            ? "DNS меняется без пароля. Правило sudo (\(DNSManager.sudoersPath)) разрешает только переключение между сервисами Nimb и автоматическим DNS и сброс кэша: произвольный DNS задать нельзя. Цена: любая программа от вашего имени может это же сделать."
-                            : "Сейчас macOS просит пароль администратора или Touch ID при каждом переключении. Можно разрешить без пароля только переключение между сервисами Nimb и автоматическим DNS (правило sudo из трёх видов команд, без подстановок).",
-                        granted: model.passwordless,
-                        disabled: model.isLocked,
-                        note: accessNote,
-                        extraTitle: model.access.needsUpdate ? (model.access.tooBroad ? "Сделать точным" : "Добавить подключения") : nil,
-                        extraAction: { model.setPasswordless(true, confirm: false) },
-                        action: model.togglePasswordless
-                    )
-
-                    PermissionRow(
-                        title: "Туннель без пароля",
-                        detail: warp.passwordless
-                            ? "Туннель включается и выключается без пароля. Правило sudo (\(WarpPaths.sudoersPath)) разрешает только две команды помощника Nimb: включить и выключить. Цена: любая программа от вашего имени может сделать то же самое."
-                            : "Сейчас macOS просит пароль администратора или Touch ID при каждом включении туннеля. Можно разрешить без пароля только его включение и выключение (две команды помощника Nimb). Самая первая установка туннеля всё равно спросит пароль один раз.",
-                        granted: warp.passwordless,
-                        disabled: warp.isWorking || warp.isSettingAccess,
-                        action: { warp.setPasswordless(!warp.passwordless) }
-                    )
-
-                    HStack(spacing: 10) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("Первая настройка")
-                                .font(Typo.name)
-                                .foregroundStyle(Theme.textPrimary)
-                            Text("Короткое обучение: по шагам включит нейросети, Telegram, YouTube и Discord.")
-                                .font(Typo.small)
-                                .foregroundStyle(Theme.textSecondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Spacer(minLength: 8)
-                        OutlineButton(title: "Пройти заново", color: Theme.textPrimary) {
-                            model.showSettings = false
-                            onboarding.start()
-                        }
-                        .disabled(model.isLocked)
-                    }
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .glassCard(tint: .white, tintOpacity: 0.02, borderOpacity: 0.16, radius: 10)
-
-                    Text("Больше Nimb ни о чём не просит: ни доступа к файлам, ни к камере или микрофону.")
-                        .font(Typo.small)
-                        .foregroundStyle(Theme.textSecondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 2)
-
-                    HStack { Text("Удаление").sectionLabel(); Spacer() }
-                        .padding(.horizontal, 2)
-                        .padding(.top, 8)
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Удалить Nimb")
-                            .font(Typo.name)
-                            .foregroundStyle(Theme.textPrimary)
-                        Text("Вернёт DNS к автоматическому, уберёт правило «без пароля», закроет приложение и удалит его вместе с настройками и кэшем.")
-                            .font(Typo.small)
-                            .foregroundStyle(Theme.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        HStack {
-                            Spacer()
-                            OutlineButton(title: "Удалить…", color: Theme.bad, action: model.uninstall)
-                                .disabled(model.isLocked)
-                        }
-                    }
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .glassCard(tint: Theme.bad, tintOpacity: 0.03, borderOpacity: 0.28, radius: 10)
-
-                    if model.isSettingUp {
-                        HStack(spacing: 8) {
-                            ProgressView().controlSize(.small)
-                            Text("Подтвердите пароль администратора…")
-                                .font(Typo.small)
-                                .foregroundStyle(Theme.textSecondary)
-                        }
-                    }
-                    if let message = model.errorMessage {
-                        NoticeCard(lines: [message], color: Theme.bad, symbol: "xmark.octagon")
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 8)
-            }
-            .scrollIndicators(.hidden)
-        }
+        .onHover { hover.value = $0 && isEnabled }
+        .opacity(isEnabled ? 1 : 0.45)
+        .animation(.easeOut(duration: 0.15), value: hover.value)
     }
 }
 
@@ -988,7 +810,7 @@ private struct BestBanner: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
-        .glassCard(tint: Theme.warn, tintOpacity: 0.04, borderOpacity: 0.32)
+        .glassCard(tint: Theme.warn, tintOpacity: 0.04, borderOpacity: 0.32, radius: 14)
     }
 }
 
@@ -1013,9 +835,7 @@ struct NoticeCard: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .glassCard(tint: color, tintOpacity: 0.04, borderOpacity: 0.3, radius: 10)
+        .card(tint: color)
     }
 }
 

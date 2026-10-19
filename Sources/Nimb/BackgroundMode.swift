@@ -24,7 +24,7 @@ struct BackgroundCard: View {
                 Text("Работать в фоне")
                     .font(Typo.name)
                     .foregroundStyle(Theme.textPrimary)
-                Text("Значок Nimb остаётся в строке меню (DNS и прокси Telegram), а Command-Q и закрытие окна только прячут окно. Выйти совсем можно из меню значка.")
+                Text("Nimb остаётся в строке меню, а ⌘Q и закрытие окна только прячут окно. Выйти совсем можно из меню значка.")
                     .font(Typo.small)
                     .foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -36,8 +36,6 @@ struct BackgroundCard: View {
                 .labelsHidden()
                 .tint(Theme.ok)
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .glassCard(tint: .white, tintOpacity: 0.02, borderOpacity: 0.16, radius: 10)
+        .card(.neutral)
     }
 }

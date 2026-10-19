@@ -23,9 +23,35 @@ enum Typo {
     /// New York, the system serif. It carries the status word, which is the only large text in the window.
     static let status = Font.system(size: 31, weight: .regular, design: .serif)
     static let name = Font.system(size: 15, weight: .medium)
-    static let body = Font.system(size: 12.5, weight: .regular)
-    static let small = Font.system(size: 11.5, weight: .regular)
+    static let body = Font.system(size: 13, weight: .regular)
+    static let small = Font.system(size: 12, weight: .regular)
     static let mono = Font.system(size: 11.5, weight: .regular, design: .monospaced)
+}
+
+/// One scale for every gap in the window.
+enum Space {
+    static let xs: CGFloat = 4
+    static let s: CGFloat = 8
+    static let m: CGFloat = 12
+    static let l: CGFloat = 16
+    static let xl: CGFloat = 24
+    /// Side margin of every page, and the gap between the blocks of a page.
+    static let page: CGFloat = 20
+    static let gap: CGFloat = 12
+}
+
+/// The meaning of a card: plain, working, to be careful about, broken.
+enum Tone {
+    case neutral, ok, warn, bad
+
+    var color: Color {
+        switch self {
+        case .neutral: return .white
+        case .ok: return Theme.ok
+        case .warn: return Theme.warn
+        case .bad: return Theme.bad
+        }
+    }
 }
 
 extension View {
@@ -61,6 +87,19 @@ struct GlassCard: ViewModifier {
 }
 
 extension View {
+    /// The card of the window: one padding, one radius, a hairline border and a tint for its meaning.
+    func card(_ tone: Tone = .neutral) -> some View {
+        card(tint: tone.color, strength: tone == .neutral ? 0 : 1)
+    }
+
+    /// The same for a colour that is given as it is (the colour of a notice).
+    func card(tint: Color, strength: Double = 1) -> some View {
+        self
+            .padding(Space.l - 2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .glassCard(tint: tint, tintOpacity: 0.02 + 0.02 * strength, borderOpacity: 0.16 + 0.14 * strength, radius: 14)
+    }
+
     func glassCard(tint: Color = .white, tintOpacity: Double = 0, borderOpacity: Double = 0.11, radius: CGFloat = 12) -> some View {
         modifier(GlassCard(tint: tint, tintOpacity: tintOpacity, borderOpacity: borderOpacity, radius: radius))
     }

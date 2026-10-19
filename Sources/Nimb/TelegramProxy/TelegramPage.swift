@@ -21,7 +21,7 @@ struct TelegramPage: View {
             )
 
             ScrollView {
-                VStack(spacing: 10) {
+                VStack(spacing: Space.gap) {
                     if telegram.isRunning {
                         connectCard
                         if !background.enabled { backgroundHint }
@@ -45,8 +45,8 @@ struct TelegramPage: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 2)
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 8)
+                .padding(.horizontal, Space.page)
+                .padding(.vertical, Space.s)
             }
             .scrollIndicators(.hidden)
         }
@@ -67,9 +67,7 @@ struct TelegramPage: View {
                 OutlineButton(title: "Открыть в Telegram", color: Theme.ok, action: telegram.openInTelegram)
             }
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .glassCard(tint: Theme.ok, tintOpacity: 0.03, borderOpacity: 0.28, radius: 10)
+        .card(.ok)
     }
 
     /// Without it, closing the window or pressing Command-Q switches the proxy off, and Telegram stops working.
@@ -82,9 +80,7 @@ struct TelegramPage: View {
             Spacer(minLength: 4)
             OutlineButton(title: "Включить", color: Theme.warn) { background.enabled = true }
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .glassCard(tint: Theme.warn, tintOpacity: 0.03, borderOpacity: 0.28, radius: 10)
+        .card(.warn)
     }
 
     private var statsLine: some View {

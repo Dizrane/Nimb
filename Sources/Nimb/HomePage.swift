@@ -43,7 +43,7 @@ struct HomePage: View {
             )
 
             ScrollView {
-                VStack(spacing: 10) {
+                VStack(spacing: Space.gap) {
                     FeatureRow(
                         symbol: "sparkles", title: "Нейросети",
                         detail: aiOn ? (model.active?.name ?? "Включено") : "ChatGPT, Claude, Gemini и другие",
@@ -65,15 +65,9 @@ struct HomePage: View {
                     ForEach([model.errorMessage, telegram.errorMessage, warp.errorMessage].compactMap { $0 }, id: \.self) { message in
                         NoticeCard(lines: [message], color: Theme.bad, symbol: "xmark.octagon")
                     }
-                    Text("Выключайте то, что не нужно: выключенное ничего не расходует. Настроить каждый пункт заново можно на вкладках выше.")
-                        .font(Typo.small)
-                        .foregroundStyle(Theme.textSecondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 2)
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 8)
+                .padding(.horizontal, Space.page)
+                .padding(.vertical, Space.s)
             }
             .scrollIndicators(.hidden)
         }
@@ -148,10 +142,7 @@ private struct FeatureRow: View {
                 .tint(Theme.ok)
                 .disabled(disabled)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .glassCard(tint: isOn ? Theme.ok : .white, tintOpacity: isOn ? 0.04 : 0, borderOpacity: isOn ? 0.32 : 0.14)
+        .card(isOn ? .ok : .neutral)
         .opacity(disabled && !isOn ? 0.6 : 1)
         .accessibilityElement(children: .combine)
     }

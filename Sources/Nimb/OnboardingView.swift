@@ -27,19 +27,22 @@ struct OnboardingView: View {
             .padding(.top, 40)
             .frame(height: 70)
 
-            ScrollView {
-                VStack(spacing: 14) {
-                    Dots(count: Onboarding.lastStep + 1, current: onboarding.step)
-                        .padding(.bottom, 6)
-                    content
-                        .id(onboarding.step)
-                        .transition(.opacity)
+            // The step sits in the middle of the free height; a long step scrolls.
+            GeometryReader { proxy in
+                ScrollView {
+                    VStack(spacing: 14) {
+                        Dots(count: Onboarding.lastStep + 1, current: onboarding.step)
+                            .padding(.bottom, 6)
+                        content
+                            .id(onboarding.step)
+                            .transition(.opacity)
+                    }
+                    .padding(.horizontal, 28)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, minHeight: proxy.size.height - 28, alignment: .center)
                 }
-                .padding(.horizontal, 28)
-                .padding(.vertical, 8)
-                .frame(maxWidth: .infinity)
+                .scrollIndicators(.hidden)
             }
-            .scrollIndicators(.hidden)
         }
     }
 
@@ -68,8 +71,7 @@ struct OnboardingView: View {
                 Bullet("YouTube и Discord")
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(14)
-            .glassCard(tint: .white, tintOpacity: 0.02, borderOpacity: 0.16, radius: 10)
+            .card()
             PrimaryButton(title: "Начать", action: onboarding.next)
             SkipButton(title: "Настрою потом", action: onboarding.finish)
         }

@@ -16,8 +16,6 @@ struct InfoCard: View {
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .glassCard(tint: tint, tintOpacity: tint == .white ? 0.02 : 0.03, borderOpacity: tint == .white ? 0.16 : 0.28, radius: 10)
+        .card(tint == .white ? .neutral : .ok)
     }
 }

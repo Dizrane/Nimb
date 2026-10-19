@@ -37,7 +37,7 @@ struct WarpPage: View {
             )
 
             ScrollView {
-                VStack(spacing: 10) {
+                VStack(spacing: Space.gap) {
                     if warp.isOn {
                         checkCard
                     } else if warp.phase == .notInstalled {
@@ -55,8 +55,8 @@ struct WarpPage: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 2)
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 8)
+                .padding(.horizontal, Space.page)
+                .padding(.vertical, Space.s)
             }
             .scrollIndicators(.hidden)
         }
@@ -79,9 +79,7 @@ struct WarpPage: View {
             Link("Условия Cloudflare WARP", destination: WarpTerms.url)
                 .font(Typo.small)
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .glassCard(tint: .white, tintOpacity: 0.02, borderOpacity: 0.16, radius: 10)
+        .card(.neutral)
     }
 
     private var checkCard: some View {
@@ -112,9 +110,7 @@ struct WarpPage: View {
                     .disabled(warp.isChecking)
             }
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .glassCard(tint: Theme.ok, tintOpacity: 0.03, borderOpacity: 0.28, radius: 10)
+        .card(.ok)
     }
 
     /// The tunnel asks for the administrator password each time; the person may allow it without.
@@ -128,9 +124,7 @@ struct WarpPage: View {
             OutlineButton(title: "Без пароля", color: Theme.warn) { warp.setPasswordless(true) }
                 .disabled(warp.isSettingAccess)
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .glassCard(tint: Theme.warn, tintOpacity: 0.03, borderOpacity: 0.28, radius: 10)
+        .card(.warn)
     }
 
     private var removeRow: some View {

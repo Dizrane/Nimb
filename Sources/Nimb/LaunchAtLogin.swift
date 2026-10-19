@@ -35,7 +35,7 @@ struct LaunchAtLoginCard: View {
                     Text("Запускать при входе в систему")
                         .font(Typo.name)
                         .foregroundStyle(Theme.textPrimary)
-                    Text("Nimb откроется сам, когда вы включите Mac и войдёте в систему. Вместе с режимом «Работать в фоне» всё заработает без вашего участия.")
+                    Text("Nimb откроется сам, когда вы войдёте в систему. Вместе с работой в фоне всё включится без вас.")
                         .font(Typo.small)
                         .foregroundStyle(Theme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -60,9 +60,7 @@ struct LaunchAtLoginCard: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .glassCard(tint: .white, tintOpacity: 0.02, borderOpacity: 0.16, radius: 10)
+        .card(.neutral)
         .onAppear { launch.refresh() }
     }
 }
