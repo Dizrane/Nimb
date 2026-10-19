@@ -6,14 +6,13 @@ struct HomePage: View {
     @ObservedObject var model: DNSViewModel
     @ObservedObject var telegram: TelegramProxyModel
     @ObservedObject var warp: WarpTunnelModel
-    /// True while "all at once" walks through the three; each may ask for the password in turn.
-    @StateObject private var batch = Flag()
+    @ObservedObject private var all = AllServices.shared
 
     private var aiOn: Bool { model.active != nil }
     private var warpAvailable: Bool { warp.phase != .unavailable }
     private var onCount: Int { [aiOn, telegram.isRunning, warp.isOn].filter { $0 }.count }
     private var allOn: Bool { onCount == (warpAvailable ? 3 : 2) }
-    private var busy: Bool { batch.value || model.isLocked || telegram.isStarting || warp.isWorking }
+    private var busy: Bool { all.isRunning || model.isLocked || telegram.isStarting || warp.isWorking }
 
     private var title: String {
         if busy { return "Подождите" }
@@ -39,7 +38,7 @@ struct HomePage: View {
                 subtitle: subtitle,
                 accessibility: allOn ? "Выключить всё" : "Включить всё",
                 disabled: busy,
-                action: allOn ? disableAll : enableAll
+                action: allOn ? all.disableAll : all.enableAll
             )
 
             FitOrScroll {
@@ -60,7 +59,7 @@ struct HomePage: View {
                         symbol: "play.rectangle", title: "YouTube и Discord",
                         detail: warp.isOn ? "Туннель работает" : (warpAvailable ? "Туннель WARP" : "Недоступно в этой сборке"),
                         isOn: warp.isOn, disabled: busy || !warpAvailable,
-                        set: { _ in toggleWarp() }
+                        set: { _ in all.toggleWarp() }
                     )
                     ForEach([model.errorMessage, telegram.errorMessage, warp.errorMessage].compactMap { $0 }, id: \.self) { message in
                         NoticeCard(lines: [message], color: Theme.bad, symbol: "xmark.octagon")
@@ -69,42 +68,6 @@ struct HomePage: View {
                 .padding(.horizontal, Space.page)
                 .padding(.vertical, Space.s)
             }
-        }
-    }
-
-    // MARK: Actions
-
-    private func toggleWarp() {
-        if warp.isOn { warp.disconnect() } else if warp.phase == .notInstalled { warp.enable() } else { warp.connect() }
-    }
-
-    /// Waits until the previous change is over, so that the password prompts come one after another.
-    private func settle() async {
-        try? await Task.sleep(for: .milliseconds(300))
-        while model.isLocked || warp.isWorking || telegram.isStarting {
-            try? await Task.sleep(for: .milliseconds(200))
-        }
-    }
-
-    private func enableAll() {
-        guard !busy else { return }
-        batch.value = true
-        Task {
-            if !telegram.isRunning { telegram.start(); await settle() }
-            if model.active == nil { model.toggle(); await settle() }
-            if warpAvailable && !warp.isOn { toggleWarp(); await settle() }
-            batch.value = false
-        }
-    }
-
-    private func disableAll() {
-        guard !busy else { return }
-        batch.value = true
-        Task {
-            if telegram.isRunning { telegram.stop() }
-            if model.active != nil { model.toggle(); await settle() }
-            if warp.isOn { warp.disconnect(); await settle() }
-            batch.value = false
         }
     }
 }
