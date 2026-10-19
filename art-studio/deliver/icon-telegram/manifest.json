@@ -1,0 +1,90 @@
+{
+  "name": "icon-telegram",
+  "version": 1,
+  "scale": 2,
+  "pointSize": [
+    80,
+    80
+  ],
+  "layers": [
+    {
+      "id": "plane",
+      "file": "plane.png",
+      "role": "still",
+      "notes": "The icon at rest: a white paper plane on the black glass disc, in the pose of the well-known Telegram icon (nose to the upper right at about 20 degrees, long wing to the left, the other half hanging down). The shape is drawn here, not traced from the logo."
+    },
+    {
+      "id": "plane-off",
+      "file": "plane-off.png",
+      "role": "still",
+      "notes": "The same, dimmed (use where the feature is off, for example in a home row)."
+    },
+    {
+      "id": "face",
+      "file": "face.png",
+      "role": "still",
+      "notes": "The muzzle of the dog (white face, glossy black nose) in the black disc."
+    }
+  ],
+  "loops": [
+    {
+      "id": "out",
+      "kind": "png-sequence",
+      "pattern": "out-%02d.png",
+      "frames": 30,
+      "fps": 24,
+      "seconds": 1.25,
+      "notes": "plane -> muzzle: the plane flies out through the upper right edge of the disc along its own line (nose first, no scaling or fading), the disc is empty for a moment, then the muzzle rises a little (12 pt) and fades in. Frame 0 is plane.png, frame 29 is face.png."
+    },
+    {
+      "id": "rest",
+      "kind": "png-sequence",
+      "pattern": "rest-%02d.png",
+      "frames": 10,
+      "fps": 5,
+      "seconds": 2.0,
+      "notes": "The muzzle resting: it breathes a little (scale +2 percent, 0.6 pt up) and comes back to where it started (first and last frames are face.png). Play once, stretched over 2 s."
+    },
+    {
+      "id": "in",
+      "kind": "png-sequence",
+      "pattern": "in-%02d.png",
+      "frames": 30,
+      "fps": 24,
+      "seconds": 1.25,
+      "notes": "muzzle -> plane: the muzzle fades and sinks a little, then the plane comes in from the lower left edge along its line, slowing down, and settles. Frame 0 is face.png, frame 29 is plane.png. It is NOT the out sequence played backwards (the plane has to fly nose first)."
+    }
+  ],
+  "anchors": {
+    "center": [
+      40,
+      40
+    ],
+    "top": [
+      40,
+      10
+    ]
+  },
+  "disc": {
+    "diameterPt": 60,
+    "notes": "The disc is 60 pt across inside the 80 pt picture; the rest is room for the soft glow."
+  },
+  "states": {
+    "idle": {
+      "show": "plane"
+    },
+    "tapped": {
+      "sequence": [
+        "out (1.25 s)",
+        "rest (2.0 s)",
+        "in (1.25 s)"
+      ],
+      "then": "idle",
+      "notes": "Taps during the sequence are ignored. Total 4.5 s. The plane and the muzzle are never on the disc at the same time (checked on every frame with a 1 pt margin)."
+    },
+    "reduceMotion": {
+      "notes": "No sequence: cross-fade plane -> muzzle over 0.3 s, hold 2 s, cross-fade back."
+    }
+  },
+  "notes": "Icon of the Telegram step and row. Size of the plane: 52 percent of the disc width (like on the Telegram icon); the muzzle sits 2 pt below the middle of the disc. Files: 73 PNG, 905 KB; in memory 73 x 0.1 MB = 7.3 MB. The small halo above is drawn by the app as for the other steps."
+}

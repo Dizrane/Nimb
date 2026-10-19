@@ -1,8 +1,8 @@
 #!/bin/bash
-# Redraws Resources/AppIcon.icns and Resources/AppIconActive.icns.
-# The halo is drawn by the same code as in the window (Sources/Nimb/HaloRenderer.swift).
+# The icons of the app (Resources/AppIcon.icns and Resources/AppIconActive.icns) are made by the art studio and are
+# copied from art-studio/deliver/app-icon. They are no longer drawn by code.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-mkdir -p build
-swiftc -O -o build/make_icons scripts/make_icon/main.swift Sources/Nimb/HaloRenderer.swift
-build/make_icons
+cp art-studio/deliver/app-icon/icon-idle.icns Resources/AppIcon.icns
+cp art-studio/deliver/app-icon/icon-active.icns Resources/AppIconActive.icns
+echo "Icons copied from art-studio/deliver/app-icon"

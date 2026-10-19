@@ -1,0 +1,81 @@
+{
+  "name": "icon-media",
+  "version": 1,
+  "scale": 2,
+  "pointSize": [
+    80,
+    80
+  ],
+  "layers": [
+    {
+      "id": "play",
+      "file": "play.png",
+      "role": "still",
+      "notes": "At rest: a white play button, softly rounded, a little to the right of its box so that it looks centred, on the black glass disc."
+    },
+    {
+      "id": "play-off",
+      "file": "play-off.png",
+      "role": "still",
+      "notes": "The same, dimmed (use where the feature is off, for example in a home row)."
+    },
+    {
+      "id": "mark",
+      "file": "mark.png",
+      "role": "still",
+      "notes": "The Discord mark with two dark eyes, on the disc."
+    }
+  ],
+  "loops": [
+    {
+      "id": "change",
+      "kind": "png-sequence",
+      "pattern": "change-%02d.png",
+      "frames": 24,
+      "fps": 24,
+      "seconds": 1.0,
+      "notes": "play -> mark: the whole icon turns by 90 degrees and folds into a point with a flash, then the mark icon grows out of the point (turning back by 60 degrees) with a little overshoot of size. Frame 0 is play.png, frame 23 is mark.png. Play it BACKWARDS (23 down to 0) for mark -> play."
+    },
+    {
+      "id": "rest",
+      "kind": "png-sequence",
+      "pattern": "rest-%02d.png",
+      "frames": 24,
+      "fps": 12,
+      "seconds": 2.0,
+      "notes": "The mark resting: it blinks twice (at about 0.45 s and 1.0 s). First and last frames are mark.png. Play once, over 2 s."
+    }
+  ],
+  "anchors": {
+    "center": [
+      40,
+      40
+    ],
+    "top": [
+      40,
+      10
+    ]
+  },
+  "disc": {
+    "diameterPt": 60,
+    "notes": "The disc is 60 pt across inside the 80 pt picture; the rest is room for the soft glow."
+  },
+  "states": {
+    "idle": {
+      "show": "play"
+    },
+    "tapped": {
+      "sequence": [
+        "change (1.0 s)",
+        "rest (2.0 s, two blinks)",
+        "change backwards (1.0 s)"
+      ],
+      "then": "idle",
+      "notes": "Taps during the sequence are ignored. Total 4 s, the same as icon-ai."
+    },
+    "reduceMotion": {
+      "notes": "No sequence: cross-fade play -> mark over 0.3 s, hold 2 s, cross-fade back."
+    }
+  },
+  "notes": "Icon of the YouTube and Discord step and row. The motion is the same as the one of the 'icon-ai' icon (same frame counts, same timing, same easing): the white play button (it stands for YouTube, whose own black icon would not show on the black disc) folds into a point with a flash, the Discord mark grows out of the point with a little overshoot, rests for two seconds and blinks twice, and everything runs back (the same frames backwards). The Discord mark has the shape of the one already drawn in the app (ScreenArt.swift). Files: 51 PNG, 539 KB; in memory 51 x 0.1 MB = 5.1 MB."
+}

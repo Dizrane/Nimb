@@ -1,0 +1,25 @@
+{
+  "name": "header",
+  "version": 1,
+  "scale": 2,
+  "pointSize": [336, 194],
+  "layers": [
+    { "id": "ring-back", "file": "ring-back.png", "role": "behind-figure", "blend": "screen",
+      "notes": "Far half of a small halo ring, no rays, no sparks. 672x388 px = 336x194 pt, ring centre at (168, 97), ring semi-axes 80 x 25 pt, tilted about 2 deg. Stretch it to the word: scale x by rx/80 and y by ry/25." },
+    { "id": "ring-front", "file": "ring-front.png", "role": "behind-figure", "blend": "screen",
+      "notes": "Near half of the same ring. In this variant it lies BEHIND the labels too (the word sits inside the light, not under it), so both layers are drawn under the tab labels." }
+  ],
+  "anchors": { "center": [168, 97] },
+  "motion": [
+    { "target": "all", "type": "breathe", "period": 3.7, "amount": 0.07, "notes": "alpha = 0.93 + 0.07 * sin(t * 1.7)" },
+    { "target": "all", "type": "draw-round", "file": "header-motion.js",
+      "notes": "On a tab change the old ring fades in a third of 0.9 s, the new ring is drawn round the new word clockwise from the left (wedge clip, smootherstep) over 0.9 s. See header-motion.js for every number." }
+  ],
+  "states": {
+    "home": { "show": "stack of three small rings in the home tab (26x20 pt), one per service: media on top, then tg, then ai; alpha 1 when the service is on, 0.14 when off" },
+    "tab": { "show": "one ring round the selected word: semi-width = word width / 2 + 15 pt, semi-height 8.8 pt, centre = word centre + 0.5 pt down" },
+    "otherTabHome": { "show": "stack alpha 0.82 for services that are on" },
+    "reduceMotion": { "notes": "No drawing: cross-fade the old ring to the new one in 0.3 s." }
+  },
+  "notes": "Header of the window. Chosen variant: 'Behind the word' (previews/27-tabs-styles, variant 3): the ring keeps its lively slightly irregular oval, and the label letters lie on top of the light with a soft black shadow behind them (three shadows, blur 2/5/8 pt) so that they stay readable. The green status dots next to the services are removed. Measured in the browser on the three words: the light under the letters averages about 1% on the front half and 4-6% on the back half before the shadow. Draw the rings with additive blending (screen / plusLighter). The rings are rendered with the same lens model as ../halo. Memory: two 672x388 px images = 2.1 MB decoded; files 73 KB. Redraw only while the tween runs and, for the breathing, at 15 fps; stop when the window is not visible or not in front."
+}

@@ -1,0 +1,49 @@
+{
+  "name": "icon-welcome",
+  "version": 1,
+  "scale": 2,
+  "pointSize": [
+    80,
+    80
+  ],
+  "layers": [
+    {
+      "id": "disc",
+      "file": "disc.png",
+      "role": "still",
+      "notes": "A plain black glass disc (60 pt across inside the 80 pt picture), the same material as the other step icons. It is the whole icon of the welcome step; the halo above it does the work."
+    },
+    {
+      "id": "disc-off",
+      "file": "disc-off.png",
+      "role": "still",
+      "notes": "The same, dimmed."
+    }
+  ],
+  "motion": [
+    {
+      "target": "halo",
+      "type": "scan",
+      "file": "scan.js",
+      "notes": "On a tap the small halo goes down through the disc and back. Use the halo layers of ../halo (back before the disc, front after it), moved and scaled by ring() of scan.js. The far half of the ring is hidden behind the disc, the near half crosses in front of it. Taps alternate: odd = to the middle with static noise, even = to the edge with the planet appearing behind the ring (sharp edge). See scan.js for every number."
+    }
+  ],
+  "states": {
+    "idle": {
+      "show": "disc with the halo at rest above it"
+    },
+    "tapped": {
+      "sequence": [
+        "down 1.8 s",
+        "hold 2.0 s",
+        "up 1.8 s"
+      ],
+      "then": "idle",
+      "notes": "Total 5.6 s. Taps during the sequence are ignored. Count taps: odd = mid, even = edge. The planet picture is ../icon-ai/planet.png (cut by the mask), noise is generated."
+    },
+    "reduceMotion": {
+      "notes": "No motion: show the disc with the halo at rest; on a tap cross-fade to the planet for 2 s and back."
+    }
+  },
+  "notes": "Welcome step icon. Chosen variant: 'Резкий фронт' (the planet appears exactly along the line of the ring, a sharp border; the noise is classic static with torn lines). Smoothness: the ring follows smootherstep (no jerk) and its width follows a cos-squared bump over the disc; an earlier version used a square-root bump with a kink at the edge of the disc and looked jerky. Memory: two 80x80 pt pictures, files 19 KB. The noise and the mask cost a few thousand points per frame at 30 fps; if that is too much, draw the mask at half resolution."
+}

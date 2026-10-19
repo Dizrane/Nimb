@@ -1,0 +1,53 @@
+{
+  "name": "icon-gear",
+  "version": 1,
+  "scale": 2,
+  "pointSize": [
+    80,
+    80
+  ],
+  "layers": [
+    {
+      "id": "gear",
+      "file": "gear.png",
+      "role": "still",
+      "notes": "A white, embossed gear with eight teeth, an engraved ring on its body and a dark hub, on the black glass disc (60 pt across inside the 80 pt picture). Used for the step 'Чтобы работало само' and for the settings button in the window header."
+    },
+    {
+      "id": "gear-off",
+      "file": "gear-off.png",
+      "role": "still",
+      "notes": "The same, dimmed."
+    }
+  ],
+  "loops": [
+    {
+      "id": "turn",
+      "kind": "png-sequence",
+      "pattern": "turn-%02d.png",
+      "frames": 24,
+      "fps": 24,
+      "seconds": 1.0,
+      "notes": "One tooth: the gear turns by 45 degrees with a soft start and stop. The gear has eight teeth, so frame 23 looks exactly like frame 0: no seam, play it from any point. Frame 0 and frame 23 are gear.png."
+    }
+  ],
+  "states": {
+    "idle": {
+      "show": "gear"
+    },
+    "tapped": {
+      "sequence": [
+        "turn (1.0 s)"
+      ],
+      "then": "idle",
+      "notes": "Plays on a tap in the step. In the header button it can play on hover or on a tap that opens the settings."
+    },
+    "reduceMotion": {
+      "notes": "No turn."
+    }
+  },
+  "headerButton": {
+    "notes": "Draw gear.png at 37 pt (the disc is then about 28 pt), centred in the same frame (about 32 x 28 pt) as the old system symbol; it replaces the 'gearshape' symbol in ContentView."
+  },
+  "notes": "Gear icon, 'Классика'. Files: 26 PNG, 377 KB; in memory 26 x 0.1 MB = 2.6 MB. Drawn here (python + numpy), no outside sources."
+}

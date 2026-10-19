@@ -259,7 +259,7 @@ private struct GlobeCanvas: View {
             }
 
             if part == .planet {
-                if strength > 0.01 { drawHaloImage(&ctx, HaloImages.shared.back, placement, opacity: strength) }
+                if strength > 0.01 { HaloArt.draw(.back, in: &ctx, center: placement.center, scale: placement.scale, opacity: strength) }
                 ctx.drawLayer { ctx in
                 ctx.opacity = lit
                 // Faint atmosphere, stronger when lit.
@@ -329,8 +329,8 @@ private struct GlobeCanvas: View {
 
                 // The near half of the halo and the sparks that drift along it; scanning speeds them up.
                 if strength > 0.01 {
-                    drawHaloImage(&ctx, HaloImages.shared.front, placement, opacity: strength)
-                    drawSparks(&ctx, placement, t: t, spin: spin, strength: strength)
+                    HaloArt.draw(.front, in: &ctx, center: placement.center, scale: placement.scale, opacity: strength)
+                    HaloArt.drawSparkle(in: &ctx, center: placement.center, scale: placement.scale, opacity: strength, time: t * spin)
                 }
 
                 if satellite > 0.001 {
@@ -386,23 +386,8 @@ private struct GlobeCanvas: View {
 
     /// Where the halo sits and how large it is. The images were drawn for a ring of 80 pt; it is larger when it rests among the clouds.
     private func haloPlacement(c: CGPoint, r: CGFloat, lit: Double) -> (center: CGPoint, scale: CGFloat) {
-        let crown = r * 1.22 / HaloImages.shared.rx
+        let crown = r * 1.22 / HaloArt.rx
         return (CGPoint(x: c.x, y: c.y - r * 0.02 - CGFloat(lit) * r * 0.91), crown * (1.55 - 0.55 * CGFloat(lit)))
-    }
-
-    private func drawHaloImage(_ ctx: inout GraphicsContext, _ image: CGImage, _ place: (center: CGPoint, scale: CGFloat), opacity: Double) {
-        let size = HaloImages.shared.size
-        let rect = CGRect(x: place.center.x - size.width * place.scale / 2, y: place.center.y - size.height * place.scale / 2,
-                          width: size.width * place.scale, height: size.height * place.scale)
-        ctx.drawLayer { l in
-            l.opacity = opacity
-            l.draw(Image(decorative: image, scale: HaloImages.shared.pixelScale), in: rect)
-        }
-    }
-
-    /// Sparks and thin arcs drifting along the near half of the ring. The band itself stays evenly lit.
-    private func drawSparks(_ ctx: inout GraphicsContext, _ place: (center: CGPoint, scale: CGFloat), t: Double, spin: Double, strength: Double) {
-        HaloSparks.draw(&ctx, place, t: t, spin: spin, strength: strength)
     }
 
     private func path(_ rings: [[Double]], _ view: Orthographic, _ screen: ((x: Double, y: Double, visible: Bool)) -> CGPoint) -> Path {
@@ -449,69 +434,5 @@ private struct GlobeCanvas: View {
     /// Body, two solar panels and a blinking antenna, around the origin, in grey.
     private func drawSatellite(_ g: inout GraphicsContext, pulse: Double) {
         SatelliteArt.draw(&g, pulse: pulse)
-    }
-}
-
-/// The sparks and thin arcs that drift along the halo, fixed once so they look the same on every launch.
-enum HaloSparks {
-    struct Spark { let base, speed, offset, length, alpha, phase, width: Double }
-    struct Arc { let base, span, scale, speed, alpha, width: Double }
-
-    private static var generator: UInt64 = 33
-    private static func next() -> Double {
-        generator = generator &* 6364136223846793005 &+ 1442695040888963407
-        return Double(generator >> 33) / Double(1 << 31)
-    }
-    private static func random(_ low: Double, _ high: Double) -> Double { low + next() * (high - low) }
-
-    static let sparks: [Spark] = (0..<64).map { _ in
-        Spark(base: random(0, 2 * .pi), speed: random(0.05, 0.16), offset: random(0, 0.07), length: random(1.5, 11),
-              alpha: random(0.25, 0.85), phase: random(0, 6.28), width: random(0.5, 1.3))
-    }
-
-    static let arcs: [Arc] = (0..<10).map { _ in
-        Arc(base: random(0, 2 * .pi), span: random(0.35, 1.1), scale: random(0.9, 0.99), speed: random(0.04, 0.1),
-            alpha: random(0.15, 0.4), width: random(0.5, 1.1))
-    }
-}
-
-extension HaloSparks {
-    /// Sparks and thin arcs drifting along the near half of the halo, drawn over its front half.
-    static func draw(_ ctx: inout GraphicsContext, _ place: (center: CGPoint, scale: CGFloat), t: Double, spin: Double, strength: Double) {
-        let rx = HaloImages.shared.rx * place.scale, ry = HaloImages.shared.ry * place.scale
-        func point(_ angle: Double, _ scale: Double) -> CGPoint {
-            CGPoint(x: place.center.x + rx * scale * cos(angle), y: place.center.y - ry * scale * sin(angle))
-        }
-        /// 1 on the near half, fading to 0 at the horizon where the ring turns away.
-        func visibility(_ angle: Double) -> Double {
-            let v = min(max((sin(angle) + 0.15) / 0.35, 0), 1)
-            return v * v * (3 - 2 * v)
-        }
-
-        for spark in HaloSparks.sparks {
-            let angle = spark.base - t * spark.speed * spin
-            let seen = visibility(angle)
-            guard seen > 0.01 else { continue }
-            let p = point(angle, 1 + spark.offset)
-            let tangent = CGPoint(x: rx * sin(angle), y: ry * cos(angle))
-            let length = max((tangent.x * tangent.x + tangent.y * tangent.y).squareRoot(), 1)
-            let alpha = spark.alpha * seen * strength * (0.55 + 0.45 * sin(t * 1.4 + spark.phase))
-            var line = Path()
-            line.move(to: p)
-            line.addLine(to: CGPoint(x: p.x + tangent.x / length * spark.length * place.scale, y: p.y + tangent.y / length * spark.length * place.scale))
-            ctx.stroke(line, with: .color(.white.opacity(alpha)), lineWidth: spark.width)
-        }
-
-        for arc in HaloSparks.arcs {
-            let start = arc.base - t * arc.speed * spin
-            let seen = visibility(start + arc.span / 2)
-            guard seen > 0.01 else { continue }
-            var path = Path()
-            for i in 0...8 {
-                let p = point(start + arc.span * Double(i) / 8, arc.scale)
-                if i == 0 { path.move(to: p) } else { path.addLine(to: p) }
-            }
-            ctx.stroke(path, with: .color(.white.opacity(arc.alpha * seen * strength)), lineWidth: arc.width)
-        }
     }
 }

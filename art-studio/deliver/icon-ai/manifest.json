@@ -1,0 +1,81 @@
+{
+  "name": "icon-ai",
+  "version": 1,
+  "scale": 2,
+  "pointSize": [
+    80,
+    80
+  ],
+  "layers": [
+    {
+      "id": "flower",
+      "file": "flower.png",
+      "role": "still",
+      "notes": "The icon at rest: a flower of six petals with a burst of rays, in a black glass disc."
+    },
+    {
+      "id": "flower-off",
+      "file": "flower-off.png",
+      "role": "still",
+      "notes": "The same, dimmed (use where the feature is off, for example in a home row)."
+    },
+    {
+      "id": "planet",
+      "file": "planet.png",
+      "role": "still",
+      "notes": "The planet: the whole disc is a globe with dotted continents."
+    }
+  ],
+  "loops": [
+    {
+      "id": "change",
+      "kind": "png-sequence",
+      "pattern": "change-%02d.png",
+      "frames": 24,
+      "fps": 24,
+      "seconds": 1.0,
+      "notes": "flower -> planet: the flower turns and folds into a point with a flash, the planet grows out of the point with a little overshoot. Play it BACKWARDS (frame 23 down to 0) for planet -> flower. Frame 0 is exactly flower.png, frame 23 exactly planet.png."
+    },
+    {
+      "id": "rest",
+      "kind": "png-sequence",
+      "pattern": "rest-%02d.png",
+      "frames": 48,
+      "fps": 24,
+      "seconds": 2.0,
+      "notes": "The planet resting: the globe rocks slowly (about 20 degrees of rotation, smooth, 24 frames per second) and comes back to where it started (first and last frames are planet.png). Play once over 2 s. It used to be 12 frames at 6 fps, which looked jerky."
+    }
+  ],
+  "anchors": {
+    "center": [
+      40,
+      40
+    ],
+    "top": [
+      40,
+      10
+    ]
+  },
+  "disc": {
+    "diameterPt": 60,
+    "notes": "The disc is 60 pt across inside the 80 pt picture; the rest is room for the soft glow."
+  },
+  "states": {
+    "idle": {
+      "show": "flower"
+    },
+    "tapped": {
+      "sequence": [
+        "change forward (1.0 s)",
+        "rest (2.0 s)",
+        "change backwards (1.0 s)"
+      ],
+      "then": "idle",
+      "notes": "Taps during the sequence are ignored. Total 4 s."
+    },
+    "reduceMotion": {
+      "notes": "No sequence: cross-fade flower -> planet over 0.3 s, hold 2 s, cross-fade back."
+    }
+  },
+  "notes": "Icon of the 'Нейросети' step and row. The flower is an original mark (a rosette and a burst); it is not a copy of any company logo. The globe is made up (noise continents), not a map. The small halo above it is drawn by the app as for the other steps. Files: 75 PNG, 1053 KB; in memory 75 x 0.1 MB = 7.5 MB."
+}

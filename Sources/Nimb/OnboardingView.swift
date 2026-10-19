@@ -61,7 +61,7 @@ struct OnboardingView: View {
 
     private var welcome: some View {
         StepFrame(
-            symbol: "sparkles",
+            kind: .welcome,
             title: "Добро пожаловать в Nimb",
             text: "За пару минут настроим всё, чтобы работали нейросети, Telegram, YouTube и Discord. Ничего устанавливать и вводить не нужно: Nimb делает всё сам. Когда понадобится пароль от вашего Mac, он попросит."
         ) {
@@ -80,7 +80,7 @@ struct OnboardingView: View {
     private var aiStep: some View {
         let done = model.active != nil
         return StepFrame(
-            symbol: "sparkles",
+            kind: .ai,
             title: "Нейросети",
             text: "Из-за региона ChatGPT, Claude и другие нейросети могут не открываться. Nimb переключит DNS на специальный сервис, и они заработают. Лучший сервис он подберёт сам."
         ) {
@@ -101,7 +101,7 @@ struct OnboardingView: View {
 
     private var telegramStep: some View {
         StepFrame(
-            symbol: "paperplane",
+            kind: .telegram,
             title: "Telegram",
             text: "Nimb запустит на этом Mac небольшой прокси, а Telegram будет ходить через него. После включения нажмите «Открыть в Telegram» и подтвердите окно «Добавить прокси»."
         ) {
@@ -123,7 +123,7 @@ struct OnboardingView: View {
 
     private var mediaStep: some View {
         StepFrame(
-            symbol: "play.rectangle",
+            kind: .media,
             title: "YouTube и Discord",
             text: "Nimb создаст для этого Mac собственный анонимный аккаунт Cloudflare WARP и включит туннель. Личных данных он не передаёт. Понадобится пароль от Mac."
         ) {
@@ -154,7 +154,7 @@ struct OnboardingView: View {
 
     private var backgroundStep: some View {
         StepFrame(
-            symbol: "gearshape",
+            kind: .gear,
             title: "Чтобы работало само",
             text: "Рекомендуем включить оба пункта: тогда Nimb запускается вместе с Mac и продолжает работать при закрытом окне, а Telegram не отваливается."
         ) {
@@ -172,19 +172,15 @@ struct OnboardingView: View {
 // MARK: - Pieces
 
 private struct StepFrame<Content: View>: View {
-    let symbol: String
+    let kind: StepIconKind
     let title: String
     let text: String
     @ViewBuilder let content: Content
 
     var body: some View {
         VStack(spacing: 14) {
-            HaloCrown {
-                Image(systemName: symbol)
-                    .font(.system(size: 34, weight: .light))
-                    .foregroundStyle(Theme.textPrimary)
-            }
-            .padding(.top, 14)
+            StepIcon(player: StepIconPlayers.shared.player(kind), size: 80, halo: true)
+                .padding(.top, 4)
             Text(title)
                 .font(Typo.status)
                 .foregroundStyle(Theme.textPrimary)

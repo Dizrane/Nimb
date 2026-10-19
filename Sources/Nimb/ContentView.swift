@@ -302,6 +302,7 @@ struct ContentView: View {
     @EnvironmentObject private var telegram: TelegramProxyModel
     @EnvironmentObject private var warp: WarpTunnelModel
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private func isOn(_ tab: AppTab) -> Bool {
         switch tab {
@@ -349,10 +350,12 @@ struct ContentView: View {
         .frame(width: 400, height: 720)
         .overlay(alignment: .topTrailing) {
             if !model.showSettings && !onboarding.isShown {
-                Button { withAnimation(.easeInOut(duration: 0.3)) { model.showSettings = true } } label: {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 14, weight: .regular))
-                        .foregroundStyle(Theme.textSecondary)
+                Button {
+                    StepIconPlayers.shared.player(.gear).play(reduceMotion: reduceMotion)
+                    withAnimation(.easeInOut(duration: 0.3)) { model.showSettings = true }
+                } label: {
+                    // The gear of the art studio, 37 pt in the frame of the old symbol; it turns by one tooth as the page opens.
+                    GearIcon()
                         .frame(width: 32, height: 28)
                         .contentShape(Rectangle())
                 }

@@ -32,7 +32,6 @@ struct HomePage: View {
                 art: .power,
                 isOn: allOn,
                 isBusy: busy,
-                level: Double(onCount) / Double(warpAvailable ? 3 : 2),
                 halos: onCount,
                 title: title,
                 subtitle: subtitle,
@@ -44,19 +43,19 @@ struct HomePage: View {
             FitOrScroll {
                 VStack(spacing: Space.gap) {
                     FeatureRow(
-                        symbol: "sparkles", title: "Нейросети",
+                        kind: .ai, title: "Нейросети",
                         detail: aiOn ? (model.active?.name ?? "Включено") : "ChatGPT, Claude, Gemini и другие",
                         isOn: aiOn, pending: model.isBusy || model.isProbing || model.isSettingUp, disabled: busy,
                         set: { _ in model.toggle() }
                     )
                     FeatureRow(
-                        symbol: "paperplane", title: "Telegram",
+                        kind: .telegram, title: "Telegram",
                         detail: telegram.isRunning ? "Прокси работает" : "Прокси для Telegram Desktop",
                         isOn: telegram.isRunning, pending: telegram.isStarting, disabled: busy,
                         set: { _ in telegram.toggle() }
                     )
                     FeatureRow(
-                        symbol: "play.rectangle", title: "YouTube и Discord",
+                        kind: .media, title: "YouTube и Discord",
                         detail: warp.isOn ? "Туннель работает" : (warpAvailable ? "Туннель WARP" : "Недоступно в этой сборке"),
                         isOn: warp.isOn, pending: warp.isWorking, disabled: busy || !warpAvailable,
                         set: { _ in all.toggleWarp() }
@@ -74,7 +73,7 @@ struct HomePage: View {
 
 /// One thing Nimb does, with its switch.
 private struct FeatureRow: View {
-    let symbol: String
+    let kind: StepIconKind
     let title: String
     let detail: String
     let isOn: Bool
@@ -85,10 +84,8 @@ private struct FeatureRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: symbol)
-                .font(.system(size: 17, weight: .light))
-                .foregroundStyle(Theme.textPrimary.opacity(isOn ? 1 : 0.7))
-                .frame(width: 26)
+            StepIcon(player: StepIconPlayers.shared.player(kind), size: 38, dimmed: !isOn)
+                .frame(width: 34, height: 34)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(title)

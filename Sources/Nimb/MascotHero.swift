@@ -2,25 +2,22 @@ import SwiftUI
 
 /// What stands under the halo on a page.
 enum MascotArt: Equatable {
-    /// The hooded dog of the Telegram page.
+    /// The hooded dog of the Telegram page, with a paper plane that wanders around it.
     case hood
-    /// A black screen with a play button and the Discord mark: YouTube and Discord.
+    /// A black screen with a play button and the Discord mark: YouTube and Discord. Sound arcs, a glint and a blink say it works.
     case screen
     /// Nothing but the halos: the home page, a tower of them, one for each service that is on.
     case power
 }
 
-/// The big switch of the Telegram, YouTube/Discord and home pages, made like the one of the DNS page: a figure under the
-/// halo of Nimb. The halo comes down and the figure lights up when the service is on; a small flying thing (the satellite,
-/// a paper plane) comes in and sends a beam to the figure; a small power button sits below.
+/// The big switch of the home, Telegram and YouTube/Discord pages: a figure under the halo of Nimb. The halo comes down and
+/// the figure lights up when the service is on, a small power button sits below. Every picture comes from the art studio
+/// (`Art/halo`, `Art/hood`, `Art/media-scene`, `Art/paper-plane`) and everything moving is drawn by one canvas from a clock.
 struct MascotHero: View {
     let art: MascotArt
     let isOn: Bool
     let isBusy: Bool
-    /// How much of the halo shines, 0 to 1. By default all of it while on, none while off; the home page uses the
-    /// part of the services that are on.
-    var level: Double? = nil
-    /// The home page stacks one halo for each service that is on (up to three). Nil: one halo that fades in and out.
+    /// The home page stacks one halo for each service that is on (up to three).
     var halos: Int? = nil
     let title: String
     let subtitle: String
@@ -34,43 +31,14 @@ struct MascotHero: View {
     @StateObject private var motion = MascotMotion()
 
     private let stageHeight: CGFloat = 218
-    /// Where the middle of the figure (on the home page, of the tower of halos) is below the middle of the stage.
-    private var figureY: CGFloat { art == .power ? -8 : 2 }
-    private let haloSpacing: CGFloat = 24
-    /// Where the crown of the figure is, relative to the middle of the stage, and how large the halo is around it.
-    private var haloY: CGFloat {
-        switch art {
-        case .hood: -49
-        case .screen: -36
-        case .power: 18
-        }
-    }
-    private var haloScale: CGFloat {
-        switch art {
-        case .hood: 0.80
-        case .screen: 0.80
-        case .power: 0.96
-        }
-    }
-    /// What the beam of the flying thing lands on, relative to the middle of the figure: the nose, the play button.
-    private var beamTarget: CGPoint {
-        switch art {
-        case .hood: CGPoint(x: 0, y: 33)
-        case .screen: CGPoint(x: -2, y: -8)
-        case .power: .zero
-        }
-    }
 
     var body: some View {
-        let lit: Double = level ?? (isOn ? 1 : 0)
         let h: Double = hover.value ? 1 : 0
-        let animated = lit > 0 || isBusy || motion.moving
         VStack(spacing: 6) {
             Button(action: action) {
-                // Slow breathing needs few frames; the flight of the plane or the satellite gets more of them.
                 ZStack {
-                    TimelineView(.animation(minimumInterval: motion.moving ? 1.0 / 30 : 1.0 / 12, paused: !animated || reduceMotion || !gate.shouldRun(brief: motion.moving))) { context in
-                        stage(lit: lit, hover: h, date: context.date)
+                    TimelineView(.animation(minimumInterval: motion.moving ? 1.0 / 30 : 1.0 / 20, paused: !animated || reduceMotion && !motion.moving || !gate.shouldRun(brief: motion.moving))) { context in
+                        stage(hover: h, date: context.date)
                     }
                     badge(hover: h).offset(y: 90)
                 }
@@ -84,11 +52,11 @@ struct MascotHero: View {
             .buttonStyle(PressableStyle())
             .disabled(disabled)
             .onHover { hover.value = $0 }
-            .animation(.easeInOut(duration: 1.0), value: lit)
             .animation(.easeInOut(duration: 0.4), value: hover.value)
             .accessibilityLabel(accessibility)
-            .onAppear { if isOn { motion.set(on: true) } }
-            .onChange(of: isOn) { motion.set(on: $0) }
+            .onAppear { sync(initial: true) }
+            .onChange(of: isOn) { _ in sync(initial: false) }
+            .onChange(of: halos) { _ in sync(initial: false) }
 
             Text(title)
                 .font(Typo.status)
@@ -108,174 +76,193 @@ struct MascotHero: View {
         .animation(.easeInOut(duration: 0.35), value: title)
     }
 
+    private var animated: Bool { isOn || (halos ?? 0) > 0 || isBusy || motion.moving }
+
+    private func sync(initial: Bool) {
+        if let halos { motion.set(rings: halos) } else { motion.set(on: isOn) }
+    }
+
+    // MARK: Geometry
+
+    /// Where the ring of the halo is relative to the middle of the stage, and how large the halo is (`art-studio/deliver/*/manifest.json`).
+    private var haloCenterY: CGFloat { art == .hood ? -61 : -61 }
+    private var haloScale: CGFloat { 0.8 }
+    private let figureY: CGFloat = 2
+
     // MARK: Stage
 
-    /// One halo as it is drawn: how much it shines, where it rests and how large it is. The movement of the moment comes on top.
-    private struct Halo {
-        var opacity: Double
-        var y: CGFloat
-        var scale: CGFloat
+    /// The things of one frame that depend on the clock.
+    private struct Frame {
+        let date: Date
+        let t: Double
+        let size: CGSize
+        let hover: Double
+        /// The pulse of a service that is switching.
+        let pulse: Double
+        let sparkleSpeed: Double
+        var middle: CGPoint { CGPoint(x: size.width / 2, y: size.height / 2) }
     }
 
-    /// The moving parts at a moment: they are not animated by SwiftUI, they are drawn from the clock.
-    private struct Moment {
-        let t: Double
-        let bob: CGFloat
-        let sway: Double
-        let busyPulse: Double
-
-        init(date: Date, on: Bool, busy: Bool, still: Bool) {
-            t = still ? 0 : date.timeIntervalSinceReferenceDate
-            bob = on && !still ? CGFloat(sin(t * 0.9) * 2.2) : 0
-            sway = on && !still ? sin(t * 0.6) * 0.9 : 0
-            busyPulse = busy && !still ? 0.75 + 0.25 * sin(t * 5) : 1
+    private func stage(hover: Double, date: Date) -> some View {
+        let still = reduceMotion
+        let t = still ? 0 : date.timeIntervalSinceReferenceDate
+        let pulse = isBusy && !still ? 0.75 + 0.25 * sin(t * 5) : 1
+        if art == .hood && !still { motion.advance(to: date, speed: isBusy ? 1.5 : 1.0) }
+        return Canvas { ctx, size in
+            let frame = Frame(date: date, t: t, size: size, hover: hover, pulse: pulse, sparkleSpeed: isBusy ? 2 : 1)
+            draw(&ctx, frame)
         }
     }
 
-    private func stage(lit: Double, hover: Double, date: Date) -> some View {
-        let moment = Moment(date: date, on: lit > 0, busy: isBusy, still: reduceMotion)
-        let stack = haloStack(lit: lit)
-        let orbiter = reduceMotion ? (isOn ? 1.0 : 0.0) : motion.orbiter(at: date)
-        let pictures = MascotImages.shared.pictures(for: art)
-        // One canvas draws everything that moves, bitmap by bitmap; SwiftUI does not lay out a view tree on every frame.
-        return Canvas { ctx, size in
-            let c = CGPoint(x: size.width / 2, y: size.height / 2 + figureY)
+    private func draw(_ ctx: inout GraphicsContext, _ f: Frame) {
+        let lit = motion.lit(at: f.date)
+        let bob = lit > 0 && !reduceMotion && art != .power ? CGFloat(sin(f.t * 0.9) * 2.2) * CGFloat(lit) : 0
+        let sway = lit > 0 && !reduceMotion && art == .hood ? sin(f.t * 0.6) * 0.9 * lit : 0
+        let figure = CGPoint(x: f.middle.x, y: f.middle.y + figureY + bob)
 
-            // The soft light behind the figure.
-            let glow = 0.05 + 0.13 * lit + 0.04 * hover * lit
-            ctx.fill(Path(ellipseIn: CGRect(x: c.x - 135, y: c.y + 2 - 135, width: 270, height: 270)),
-                     with: .radialGradient(Gradient(colors: [Color.white.opacity(glow), .clear]), center: CGPoint(x: c.x, y: c.y + 2), startRadius: 8, endRadius: 128))
+        // The soft light behind the figure.
+        let glow = 0.05 + 0.13 * lit + 0.04 * f.hover * lit
+        let glowCenter = CGPoint(x: f.middle.x, y: f.middle.y + (art == .power ? 0 : figureY + 2))
+        ctx.fill(Path(ellipseIn: CGRect(x: glowCenter.x - 135, y: glowCenter.y - 135, width: 270, height: 270)),
+                 with: .radialGradient(Gradient(colors: [Color.white.opacity(glow), .clear]), center: glowCenter, startRadius: 8, endRadius: 128))
 
-            drawHalos(&ctx, size: size, stack: stack, moment: moment, back: true)
+        let halos = haloList(f, lit: lit, bob: bob)
+        let planeOpacity = art == .hood && !reduceMotion ? motion.appear(at: f.date, delay: 0.4, duration: 1.8) : 0
 
-            if let pictures {
-                // Off and on are two bitmaps that cross-fade; the figure floats and sways a little while it is on.
-                ctx.drawLayer { layer in
-                    layer.translateBy(x: c.x, y: c.y + moment.bob)
-                    layer.rotate(by: .degrees(moment.sway))
-                    draw(pictures.off, in: &layer, opacity: 1 - lit)
-                    draw(pictures.on, in: &layer, opacity: lit)
+        drawPlane(&ctx, f, figure: figure, band: 0, opacity: planeOpacity)
+        for halo in halos { drawBack(&ctx, halo) }
+        drawPlane(&ctx, f, figure: figure, band: 1, opacity: planeOpacity)
+
+        drawFigure(&ctx, figure: figure, lit: lit, sway: sway)
+        if art == .screen && !reduceMotion {
+            let appear = motion.appear(at: f.date, delay: 0.5, duration: 1.5)
+            MediaMotion.draw(in: &ctx, origin: CGPoint(x: figure.x - 80, y: figure.y - 66), t: f.t * (isBusy ? 1.6 : 1), lit: appear)
+        }
+
+        drawPlane(&ctx, f, figure: figure, band: 2, opacity: planeOpacity)
+        for halo in halos { drawFront(&ctx, halo, f) }
+        drawPlane(&ctx, f, figure: figure, band: 3, opacity: planeOpacity)
+    }
+
+    // MARK: Halos
+
+    private struct HaloSpec {
+        var center: CGPoint
+        var scale: CGFloat
+        var opacity: Double
+        /// How much of the near half is the full one (with the bright spot); the rest is the plain one.
+        var full: Double
+        /// The loop of sparkles of each halo of a stack is shifted in time.
+        var shift: Double
+    }
+
+    /// The halos to draw this frame: one on the pages of a figure, a stack on the home page.
+    private func haloList(_ f: Frame, lit: Double, bob: CGFloat) -> [HaloSpec] {
+        let t = f.t
+        func breathe(_ phase: Double) -> (opacity: Double, scale: CGFloat) {
+            reduceMotion ? (1, 1) : ((0.93 + 0.07 * sin(1.7 * t - phase)) * f.pulse, 1 + 0.012 * CGFloat(sin(1.3 * t - phase)))
+        }
+        guard halos != nil else {
+            let b = breathe(0)
+            let drop = reduceMotion ? 0 : CGFloat(lit - 1) * 18
+            let center = CGPoint(x: f.middle.x, y: f.middle.y + haloCenterY + drop + bob * 0.7)
+            return [HaloSpec(center: center, scale: haloScale * b.scale, opacity: lit * b.opacity, full: 1, shift: 0)]
+        }
+        // The stack of the home page: lowest first. The top one that shines has the bright spot; the rings below it are plain,
+        // otherwise their bright spots line up in a column and the rings look glued together.
+        let values = (0..<3).map { motion.ring($0, at: f.date) }
+        let multiplier = [0.80, 0.92, 1.0]
+        return (0..<3).map { i in
+            let b = breathe(0.8 * Double(i))
+            var value = values[i]
+            if i == 0 { value = max(value, 0.22 * (1 - lit)) }
+            let above = (i + 1..<3).reduce(0.0) { $0 + values[$1] }
+            let drop = reduceMotion ? 0 : CGFloat(values[i] - 1) * 18
+            let wave = reduceMotion ? 0 : CGFloat(sin(1.5 * t - 0.8 * Double(i)) * 1.6)
+            return HaloSpec(center: CGPoint(x: f.middle.x, y: f.middle.y + 22 - 28 * CGFloat(i) + drop + wave),
+                            scale: 0.96 * (1 - 0.07 * CGFloat(i)) * b.scale,
+                            opacity: value * multiplier[i] * b.opacity,
+                            full: max(0, 1 - above),
+                            shift: Double(i) * 0.37)
+        }
+    }
+
+    private func drawBack(_ ctx: inout GraphicsContext, _ halo: HaloSpec) {
+        HaloArt.draw(.back, in: &ctx, center: halo.center, scale: halo.scale, opacity: halo.opacity)
+    }
+
+    private func drawFront(_ ctx: inout GraphicsContext, _ halo: HaloSpec, _ f: Frame) {
+        HaloArt.draw(.front, in: &ctx, center: halo.center, scale: halo.scale, opacity: halo.opacity * halo.full)
+        HaloArt.draw(.frontPlain, in: &ctx, center: halo.center, scale: halo.scale, opacity: halo.opacity * (1 - halo.full))
+        if reduceMotion {
+            HaloArt.drawStill(in: &ctx, center: halo.center, scale: halo.scale, opacity: halo.opacity)
+        } else {
+            HaloArt.drawSparkle(in: &ctx, center: halo.center, scale: halo.scale, opacity: halo.opacity, time: f.t * f.sparkleSpeed + halo.shift)
+        }
+    }
+
+    // MARK: Figure
+
+    /// The picture of the page, off and on cross-fading; it floats and, for the dog, sways a little.
+    private func drawFigure(_ ctx: inout GraphicsContext, figure: CGPoint, lit: Double, sway: Double) {
+        let folder: String, size: CGSize
+        switch art {
+        case .hood: folder = "hood"; size = CGSize(width: 128, height: 154)
+        case .screen: folder = "media-scene"; size = CGSize(width: 160, height: 132)
+        case .power: return
+        }
+        let rect = CGRect(x: -size.width / 2, y: -size.height / 2, width: size.width, height: size.height)
+        ctx.drawLayer { layer in
+            layer.translateBy(x: figure.x, y: figure.y)
+            layer.rotate(by: .degrees(sway))
+            if let off = ArtLibrary.shared.image(folder, "off.png"), lit < 0.999 {
+                layer.opacity = 1
+                layer.draw(Image(decorative: off, scale: 2), in: rect)
+            }
+            if let on = ArtLibrary.shared.image(folder, "on.png"), lit > 0.003 {
+                layer.opacity = lit
+                layer.draw(Image(decorative: on, scale: 2), in: rect)
+            }
+        }
+    }
+
+    // MARK: Plane
+
+    /// The paper plane that wanders round the dog, in one of four layers, with depth.
+    private func drawPlane(_ ctx: inout GraphicsContext, _ f: Frame, figure: CGPoint, band: Int, opacity: Double) {
+        let plane = motion.plane
+        guard art == .hood, plane.band == band, opacity > 0.003 else { return }
+        let frames = ArtLibrary.shared.sequence("paper-plane", pattern: "bank-%02d.png", frames: 13)
+        guard frames.count == 13 else { return }
+        let z = plane.z
+        let k = 1 + 0.08 * z
+        let cy = -8.0
+        let position = CGPoint(x: figure.x + plane.x * k, y: figure.y + (plane.y - cy) * k + cy + 0.8 * sin(1.3 * f.t))
+        let scale = 0.88 * (1 + 0.17 * z) * (1 + 0.04 * sin(0.21 * f.t))
+        let alpha = (0.72 + 0.28 * (z + 1) / 2) * opacity
+        let index = min(max((plane.bank + 36) / 6, 0), 12)
+        let lower = min(Int(index.rounded(.down)), 11), mix = index - Double(lower)
+        var outer = ctx
+        outer.opacity = alpha
+        outer.drawLayer { layer in
+            layer.translateBy(x: position.x, y: position.y)
+            layer.rotate(by: .radians(plane.heading + .pi / 2))
+            layer.scaleBy(x: scale, y: scale)
+            let rect = CGRect(x: -32, y: -32, width: 64, height: 64)
+            // The neighbouring bank pictures dissolve over an opaque lower one, so that the plane never gets thinner for a moment.
+            layer.draw(Image(decorative: frames[lower], scale: 2), in: rect)
+            if mix > 0.002 {
+                layer.drawLayer { upper in
+                    upper.opacity = mix
+                    upper.draw(Image(decorative: frames[lower + 1], scale: 2), in: rect)
                 }
             }
-
-            drawHalos(&ctx, size: size, stack: stack, moment: moment, back: false)
-            drawSparks(&ctx, size: size, stack: stack, moment: moment)
-            if art != .power { drawOrbiter(&ctx, size: size, progress: orbiter, moment: moment) }
         }
     }
 
-    /// A bitmap centred on the origin of the context.
-    private func draw(_ picture: MascotImages.Picture, in ctx: inout GraphicsContext, opacity: Double) {
-        guard opacity > 0.003 else { return }
-        ctx.drawLayer { layer in
-            layer.opacity = opacity
-            layer.draw(Image(decorative: picture.image, scale: 2), in: CGRect(x: -picture.size.width / 2, y: -picture.size.height / 2, width: picture.size.width, height: picture.size.height))
-        }
-    }
+    // MARK: Button
 
-    /// The halos of the stack: the back half before the figure, the front half after it.
-    private func drawHalos(_ ctx: inout GraphicsContext, size: CGSize, stack: [Halo], moment: Moment, back: Bool) {
-        let images = HaloImages.shared
-        let image = Image(decorative: back ? images.back : images.front, scale: images.pixelScale)
-        for (i, halo) in stack.enumerated() where halo.opacity > 0.003 {
-            let wave = haloWave(i, moment: moment)
-            let scale = halo.scale * wave.scale
-            let center = CGPoint(x: size.width / 2, y: size.height / 2 + halo.y + wave.y)
-            let rect = CGRect(x: center.x - images.size.width * scale / 2, y: center.y - images.size.height * scale / 2,
-                              width: images.size.width * scale, height: images.size.height * scale)
-            ctx.drawLayer { layer in
-                layer.opacity = halo.opacity * wave.opacity * moment.busyPulse
-                layer.draw(image, in: rect)
-            }
-        }
-    }
-
-    /// The breathing of a halo. On the home page the halos move in a wave, each a moment after the one below it.
-    private func haloWave(_ index: Int, moment: Moment) -> (y: CGFloat, opacity: Double, scale: CGFloat) {
-        let t = moment.t
-        if art == .power {
-            let phase = Double(index)
-            return (CGFloat(sin(t * 1.5 - phase * 0.8) * 2.6), 0.9 + 0.1 * sin(t * 2.0 - phase * 1.1), 1 + 0.015 * CGFloat(sin(t * 1.5 - phase * 0.8)))
-        }
-        return (moment.bob * 0.7, 0.93 + 0.07 * sin(t * 1.7), 1 + 0.012 * CGFloat(sin(t * 1.3)))
-    }
-
-    /// The halos to draw: one that fades in over the figure, or on the home page one for every service that is on,
-    /// each a little smaller and higher than the one below it.
-    private func haloStack(lit: Double) -> [Halo] {
-        // Without Reduce Motion a halo comes down from above as it appears.
-        let drop: (Bool) -> CGFloat = { on in on || reduceMotion ? 0 : -18 }
-        guard let halos else {
-            return [Halo(opacity: lit, y: haloY + (reduceMotion ? 0 : CGFloat(lit - 1) * 18), scale: haloScale)]
-        }
-        return (0..<3).map { i in
-            let on = i < halos
-            // With nothing on, the lowest halo rests, faint, so that the page is not empty.
-            let resting = halos == 0 && i == 0
-            return Halo(opacity: on ? 1 : (resting ? 0.22 : 0), y: haloY - CGFloat(i) * haloSpacing + drop(on || resting), scale: haloScale * (1 - 0.07 * CGFloat(i)))
-        }
-    }
-
-    // MARK: Canvas
-
-    /// Sparks run around every halo that is on; neighbouring halos turn in opposite directions.
-    private func drawSparks(_ ctx: inout GraphicsContext, size: CGSize, stack: [Halo], moment: Moment) {
-        for (i, halo) in stack.enumerated() where halo.opacity > 0.01 {
-            let wave = haloWave(i, moment: moment)
-            let direction: Double = i % 2 == 0 ? 1 : -1
-            let place = (center: CGPoint(x: size.width / 2, y: size.height / 2 + halo.y + wave.y), scale: halo.scale * wave.scale)
-            HaloSparks.draw(&ctx, place, t: moment.t + Double(i) * 3.1, spin: direction * (isBusy ? 2 : 1),
-                            strength: halo.opacity * wave.opacity * moment.busyPulse)
-        }
-    }
-
-    /// The flying thing: comes in on an arc after the figure is lit, stops at its station and sends a dashed beam to the figure.
-    private func drawOrbiter(_ ctx: inout GraphicsContext, size: CGSize, progress p: Double, moment: Moment) {
-        guard p > 0.001 else { return }
-        let t = moment.t
-        let c = CGPoint(x: size.width / 2, y: size.height / 2 + figureY)
-        let target = CGPoint(x: c.x + beamTarget.x, y: c.y + beamTarget.y + moment.bob)
-        let eased = 1 - pow(1 - p, 3)
-        let angle = -2.7 + (-0.55 + 2.7) * eased
-        var spot = CGPoint(x: c.x + 112 * cos(angle), y: c.y + 78 * sin(angle))
-        spot.y += sin(t * 0.9) * 1.2 * pow(eased, 4)
-        let aim = atan2(target.y - spot.y, target.x - spot.x)
-
-        let beam = min(max((p - 0.6) / 0.4, 0), 1)
-        let dx = target.x - spot.x, dy = target.y - spot.y
-        let length = max((dx * dx + dy * dy).squareRoot(), 1)
-        let nx = -dy / length * 8, ny = dx / length * 8
-        ctx.drawLayer { l in
-            l.opacity = beam
-            var cone = Path()
-            cone.move(to: spot)
-            cone.addLine(to: CGPoint(x: target.x + nx, y: target.y + ny))
-            cone.addLine(to: CGPoint(x: target.x - nx, y: target.y - ny))
-            cone.closeSubpath()
-            l.fill(cone, with: .linearGradient(Gradient(colors: [Theme.ok.opacity(0.28), Theme.ok.opacity(0.02)]), startPoint: spot, endPoint: target))
-            var line = Path()
-            line.move(to: spot)
-            line.addLine(to: target)
-            l.stroke(line, with: .color(Theme.ok.opacity(0.8)), style: StrokeStyle(lineWidth: 0.9, lineCap: .round, dash: [1.5, 4], dashPhase: -t * 8))
-            let ping = (t * 0.33).truncatingRemainder(dividingBy: 1)
-            let pr = 2.5 + 11 * ping
-            l.stroke(Path(ellipseIn: CGRect(x: target.x - pr, y: target.y - pr, width: pr * 2, height: pr * 2)),
-                     with: .color(.white.opacity((1 - ping) * 0.6)), lineWidth: 0.9)
-            l.fill(Path(ellipseIn: CGRect(x: target.x - 1.8, y: target.y - 1.8, width: 3.6, height: 3.6)), with: .color(.white))
-        }
-        ctx.drawLayer { g in
-            g.opacity = min(p * 5, 1)
-            g.translateBy(x: spot.x, y: spot.y)
-            g.rotate(by: .radians(aim - .pi / 2 + sin(t * 0.6) * 0.04))
-            if art == .hood {
-                PaperPlaneArt.draw(&g, pulse: 0.5 + 0.5 * sin(t * 3))
-            } else {
-                SatelliteArt.draw(&g, pulse: 0.5 + 0.5 * sin(t * 3))
-            }
-        }
-    }
-
-    /// The small power button under the figure, the same as the one under the planet.
+    /// The small power button under the figure.
     private func badge(hover: Double) -> some View {
         ZStack {
             Circle()

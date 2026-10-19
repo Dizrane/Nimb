@@ -19,6 +19,11 @@ make_bundle() {
     cp Resources/telegram.png "$app/Contents/Resources/telegram.png"
     cp Resources/nimb-tunnel.sh "$app/Contents/Resources/nimb-tunnel.sh"
     cp Resources/warp-preset.conf "$app/Contents/Resources/warp-preset.conf"
+    # The pictures of the interface (art-studio/deliver): only what the app draws, not the sources and the masters.
+    for art in halo hood paper-plane media-scene header icon-ai icon-telegram icon-media icon-welcome icon-gear; do
+        mkdir -p "$app/Contents/Resources/Art/$art"
+        cp art-studio/deliver/$art/*.png "$app/Contents/Resources/Art/$art/"
+    done
     if [ -f Resources/amneziawg-go ]; then
         cp Resources/amneziawg-go "$app/Contents/Resources/amneziawg-go"
     else
