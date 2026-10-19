@@ -108,8 +108,8 @@ struct MascotHero: View {
             case .screen: ScreenArt()
             }
         }
-        .shadow(color: .white.opacity(rim), radius: 1.5)
-        .shadow(color: .white.opacity(0.10 + 0.22 * lit), radius: 12)
+        .shadow(color: .white.opacity(rim * 0.8), radius: 1)
+        .shadow(color: .white.opacity(0.08 + 0.16 * lit), radius: 10)
         .opacity(0.62 + 0.38 * lit)
         .scaleEffect(0.96 + 0.04 * lit)
     }
@@ -134,141 +134,141 @@ struct MascotHero: View {
 
 // MARK: - Art
 
-/// The hooded dog. The drawing is transparent around the hood and in the face; the face is filled with white in the file.
+/// Shared look of the figures: black satin lit from the upper left, a thin light rim, pearl white for the faces.
+private enum Satin {
+    static let pearl = Gradient(colors: [Color(white: 0.99), Color(white: 0.86), Color(white: 0.66)])
+
+    static func black(from: CGPoint, to: CGPoint) -> GraphicsContext.Shading {
+        .linearGradient(Gradient(stops: [.init(color: Color(white: 0.22), location: 0), .init(color: Color(white: 0.075), location: 0.45), .init(color: Color(white: 0.015), location: 1)]),
+                        startPoint: from, endPoint: to)
+    }
+
+    static func rim(from: CGPoint, to: CGPoint, strength: Double = 1) -> GraphicsContext.Shading {
+        .linearGradient(Gradient(colors: [Color.white.opacity(0.65 * strength), Color.white.opacity(0.10 * strength), Color.white.opacity(0.22 * strength)]),
+                        startPoint: from, endPoint: to)
+    }
+}
+
+/// The hooded dog of the Telegram page: a satin black hood, a pearl face and a glossy nose, drawn from curves.
 struct HoodArt: View {
-    private static let image: NSImage? = Bundle.main.url(forResource: "hood", withExtension: "png").flatMap { NSImage(contentsOf: $0) }
-
     var body: some View {
-        if let image = Self.image {
-            Image(nsImage: image)
-                .resizable()
-                .interpolation(.high)
-                .aspectRatio(contentMode: .fit)
-                .frame(height: 116)
-        } else {
-            Image(systemName: "pawprint.fill").font(.system(size: 60)).foregroundStyle(.white.opacity(0.8))
+        Canvas { ctx, size in
+            let w = size.width, h = size.height
+            func P(_ x: Double, _ y: Double) -> CGPoint { CGPoint(x: x * w, y: y * h) }
+
+            var hood = Path()
+            hood.move(to: P(0.52, 0.012))
+            hood.addCurve(to: P(0.955, 0.60), control1: P(0.60, 0.012), control2: P(0.90, 0.25))
+            hood.addCurve(to: P(0.99, 0.945), control1: P(0.985, 0.72), control2: P(1.0, 0.85))
+            hood.addCurve(to: P(0.01, 0.945), control1: P(0.80, 1.012), control2: P(0.20, 1.012))
+            hood.addCurve(to: P(0.045, 0.60), control1: P(0.0, 0.85), control2: P(0.015, 0.72))
+            hood.addCurve(to: P(0.52, 0.012), control1: P(0.10, 0.25), control2: P(0.43, 0.012))
+            hood.closeSubpath()
+
+            var face = Path()
+            face.move(to: P(0.50, 0.585))
+            face.addCurve(to: P(0.185, 0.66), control1: P(0.42, 0.485), control2: P(0.22, 0.49))
+            face.addCurve(to: P(0.50, 0.935), control1: P(0.15, 0.81), control2: P(0.28, 0.90))
+            face.addCurve(to: P(0.815, 0.66), control1: P(0.72, 0.90), control2: P(0.85, 0.81))
+            face.addCurve(to: P(0.50, 0.585), control1: P(0.78, 0.49), control2: P(0.58, 0.485))
+            face.closeSubpath()
+
+            // The hood: a clean black shape lit from the upper left, with one thin rim of light.
+            ctx.fill(hood, with: Satin.black(from: P(0.15, 0.05), to: P(0.95, 1.0)))
+            ctx.drawLayer { l in
+                l.clip(to: hood)
+                l.fill(Path(ellipseIn: CGRect(x: -0.1 * w, y: -0.05 * h, width: 0.95 * w, height: 0.75 * h)),
+                       with: .radialGradient(Gradient(colors: [Color.white.opacity(0.13), .clear]), center: P(0.32, 0.22), startRadius: 0, endRadius: 0.5 * w))
+            }
+            ctx.stroke(hood, with: Satin.rim(from: P(0.1, 0.1), to: P(0.95, 0.95)), lineWidth: 1)
+
+            // The face: pearl, with the shadow of the hood falling on its upper edge.
+            ctx.fill(face, with: .linearGradient(Satin.pearl, startPoint: P(0.5, 0.52), endPoint: P(0.5, 0.95)))
+            ctx.drawLayer { l in
+                l.clip(to: face)
+                l.translateBy(x: 0, y: 0.03 * h)
+                l.addFilter(.blur(radius: 0.03 * h))
+                l.stroke(face, with: .color(.black.opacity(0.5)), lineWidth: 0.09 * w)
+            }
+            ctx.stroke(face, with: .color(.black.opacity(0.55)), lineWidth: 0.8)
+
+            // The nose: glossy black with a small light on it.
+            let nose = CGRect(x: 0.35 * w, y: 0.685 * h, width: 0.30 * w, height: 0.19 * h)
+            ctx.fill(Path(ellipseIn: nose), with: .radialGradient(
+                Gradient(colors: [Color(white: 0.34), Color(white: 0.05), Color(white: 0.0)]),
+                center: CGPoint(x: nose.minX + nose.width * 0.38, y: nose.minY + nose.height * 0.25), startRadius: 0, endRadius: nose.width * 0.7))
+            ctx.drawLayer { l in
+                l.addFilter(.blur(radius: 1))
+                l.fill(Path(ellipseIn: CGRect(x: nose.minX + nose.width * 0.2, y: nose.minY + nose.height * 0.12, width: nose.width * 0.34, height: nose.height * 0.22)),
+                       with: .color(.white.opacity(0.5)))
+            }
         }
+        .frame(width: 94, height: 118)
     }
 }
 
-/// A screen with a play button and a chat bubble. Black ink, a white face and a black "nose" like the dog, with edges
-/// that wobble a little as if drawn with a marker.
+/// A black screen with a glowing play button and a pearl chat bubble: YouTube and Discord, in the same material as the dog.
 struct ScreenArt: View {
-    private static let ink = Color(white: 0.045)
-
     var body: some View {
-        ZStack {
-            // The black frame, the white screen and the black play button.
-            InkShape(kind: .roundedRect(radius: 26), seed: 1, wobble: 1.3).fill(Self.ink)
-                .frame(width: 128, height: 92)
-            InkShape(kind: .roundedRect(radius: 17), seed: 2, wobble: 1.0).fill(Color(white: 0.95))
-                .frame(width: 100, height: 64)
-                .offset(x: -2, y: -2)
-            InkShape(kind: .triangle, seed: 7, wobble: 0.8).fill(Self.ink)
-                .frame(width: 30, height: 34)
-                .offset(x: 1, y: -2)
+        Canvas { ctx, size in
+            let screen = CGRect(x: 6, y: 6, width: 126, height: 88)
+            let bezel = Path(roundedRect: screen, cornerRadius: 24, style: .continuous)
+            let display = Path(roundedRect: screen.insetBy(dx: 7, dy: 7), cornerRadius: 17, style: .continuous)
 
-            // The chat bubble with three dots.
-            ZStack {
-                InkShape(kind: .bubble, seed: 4, wobble: 1.1).fill(Self.ink)
-                    .overlay(InkShape(kind: .bubble, seed: 4, wobble: 1.1).stroke(Color(white: 0.95), lineWidth: 2.2))
-                HStack(spacing: 5) {
-                    ForEach(0..<3, id: \.self) { _ in Circle().fill(Color(white: 0.95)).frame(width: 5.5, height: 5.5) }
-                }
-                .offset(y: -3)
+            // The bezel.
+            ctx.fill(bezel, with: Satin.black(from: CGPoint(x: screen.minX, y: screen.minY), to: CGPoint(x: screen.maxX, y: screen.maxY)))
+            ctx.stroke(bezel, with: Satin.rim(from: CGPoint(x: screen.minX, y: screen.minY), to: CGPoint(x: screen.maxX, y: screen.maxY)), lineWidth: 1)
+
+            // The glass: dark, with a faint light from above and a diagonal reflection.
+            ctx.fill(display, with: .linearGradient(Gradient(colors: [Color(white: 0.115), Color(white: 0.02)]),
+                                                    startPoint: CGPoint(x: screen.midX, y: screen.minY), endPoint: CGPoint(x: screen.midX, y: screen.maxY)))
+            ctx.drawLayer { l in
+                l.clip(to: display)
+                var band = Path()
+                band.move(to: CGPoint(x: screen.minX + 14, y: screen.maxY))
+                band.addLine(to: CGPoint(x: screen.minX + 52, y: screen.minY))
+                band.addLine(to: CGPoint(x: screen.minX + 76, y: screen.minY))
+                band.addLine(to: CGPoint(x: screen.minX + 38, y: screen.maxY))
+                band.closeSubpath()
+                l.fill(band, with: .linearGradient(Gradient(colors: [Color.white.opacity(0.0), Color.white.opacity(0.07), Color.white.opacity(0.0)]),
+                                                   startPoint: CGPoint(x: screen.minX + 20, y: screen.maxY), endPoint: CGPoint(x: screen.minX + 70, y: screen.minY)))
             }
-            .frame(width: 58, height: 46)
-            .offset(x: 46, y: 38)
-        }
-        .frame(width: 140, height: 124)
-        .rotationEffect(.degrees(-3))
-    }
-}
+            ctx.stroke(display, with: .color(.white.opacity(0.10)), lineWidth: 0.8)
 
-// MARK: - Ink shapes
-
-/// A closed outline sampled along its edge, nudged by a deterministic amount and smoothed, so that it looks drawn by hand.
-struct InkShape: Shape {
-    enum Kind { case roundedRect(radius: CGFloat), triangle, bubble }
-    let kind: Kind
-    let seed: Int
-    var wobble: CGFloat = 1
-
-    func path(in rect: CGRect) -> Path {
-        var points = outline(in: rect)
-        for i in points.indices {
-            points[i].x += noise(i * 2) * wobble
-            points[i].y += noise(i * 2 + 1) * wobble
-        }
-        return smoothClosed(points)
-    }
-
-    private func noise(_ index: Int) -> CGFloat {
-        var x = UInt64(truncatingIfNeeded: index &* 7919 &+ seed &* 104729) &+ 0x9E3779B97F4A7C15
-        x = (x ^ (x >> 30)) &* 0xBF58476D1CE4E5B9
-        x = (x ^ (x >> 27)) &* 0x94D049BB133111EB
-        x ^= x >> 31
-        return CGFloat(Double(x % 2001) / 1000.0 - 1.0)
-    }
-
-    private func outline(in rect: CGRect) -> [CGPoint] {
-        switch kind {
-        case .roundedRect(let radius):
-            return roundedRectPoints(rect, radius: min(radius, min(rect.width, rect.height) / 2))
-        case .triangle:
-            // A play button: the point to the right.
-            return subdivide([CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.midY), CGPoint(x: rect.minX, y: rect.maxY)], parts: 4)
-        case .bubble:
-            let body = CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: rect.height * 0.80)
-            var points = roundedRectPoints(body, radius: body.height / 2.2)
-            // The tail: pull the lower left of the outline down to a point.
-            if let i = points.indices.min(by: { distance(points[$0], CGPoint(x: rect.minX + rect.width * 0.22, y: body.maxY)) < distance(points[$1], CGPoint(x: rect.minX + rect.width * 0.22, y: body.maxY)) }) {
-                points[i] = CGPoint(x: rect.minX + rect.width * 0.10, y: rect.maxY)
+            // The play button: a pearl triangle with rounded corners, glowing.
+            let c = CGPoint(x: screen.midX - 3, y: screen.midY - 1)
+            var play = Path()
+            play.move(to: CGPoint(x: c.x - 11, y: c.y - 17))
+            play.addLine(to: CGPoint(x: c.x + 17, y: c.y))
+            play.addLine(to: CGPoint(x: c.x - 11, y: c.y + 17))
+            play.closeSubpath()
+            let pearl = GraphicsContext.Shading.linearGradient(Satin.pearl, startPoint: CGPoint(x: c.x, y: c.y - 17), endPoint: CGPoint(x: c.x, y: c.y + 17))
+            ctx.drawLayer { l in
+                l.addFilter(.shadow(color: .white.opacity(0.55), radius: 9))
+                l.fill(play, with: pearl)
+                l.stroke(play, with: pearl, style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
             }
-            return points
-        }
-    }
 
-    private func distance(_ a: CGPoint, _ b: CGPoint) -> CGFloat { hypot(a.x - b.x, a.y - b.y) }
-
-    private func roundedRectPoints(_ rect: CGRect, radius r: CGFloat) -> [CGPoint] {
-        var points: [CGPoint] = []
-        func side(_ from: CGPoint, _ to: CGPoint) {
-            for k in 0..<5 { let f = CGFloat(k) / 5; points.append(CGPoint(x: from.x + (to.x - from.x) * f, y: from.y + (to.y - from.y) * f)) }
+            // The chat bubble: pearl, with a dark outline that separates it from the screen, and three dots.
+            let body = CGRect(x: 84, y: 66, width: 62, height: 42)
+            let bubble = Path(roundedRect: body, cornerRadius: 17, style: .continuous)
+            var tail = Path()
+            tail.move(to: CGPoint(x: body.minX + 9, y: body.maxY - 12))
+            tail.addLine(to: CGPoint(x: body.minX + 3, y: body.maxY + 9))
+            tail.addLine(to: CGPoint(x: body.minX + 25, y: body.maxY - 5))
+            tail.closeSubpath()
+            ctx.stroke(bubble, with: .color(.black), style: StrokeStyle(lineWidth: 5, lineJoin: .round))
+            ctx.stroke(tail, with: .color(.black), style: StrokeStyle(lineWidth: 7, lineJoin: .round))
+            let bubbleFill = GraphicsContext.Shading.linearGradient(Satin.pearl, startPoint: CGPoint(x: body.midX, y: body.minY), endPoint: CGPoint(x: body.midX, y: body.maxY))
+            ctx.fill(bubble, with: bubbleFill)
+            ctx.fill(tail, with: bubbleFill)
+            ctx.stroke(tail, with: bubbleFill, style: StrokeStyle(lineWidth: 3, lineJoin: .round))
+            for i in 0..<3 {
+                let x = body.midX + CGFloat(i - 1) * 11
+                ctx.fill(Path(ellipseIn: CGRect(x: x - 3.3, y: body.midY - 3.3 - 1, width: 6.6, height: 6.6)),
+                         with: .linearGradient(Gradient(colors: [Color(white: 0.30), Color(white: 0.04)]), startPoint: CGPoint(x: x, y: body.midY - 4), endPoint: CGPoint(x: x, y: body.midY + 3)))
+            }
         }
-        func corner(_ center: CGPoint, _ start: CGFloat) {
-            for k in 0..<5 { let a = start + CGFloat(k) / 5 * (.pi / 2); points.append(CGPoint(x: center.x + r * cos(a), y: center.y + r * sin(a))) }
-        }
-        side(CGPoint(x: rect.minX + r, y: rect.minY), CGPoint(x: rect.maxX - r, y: rect.minY))
-        corner(CGPoint(x: rect.maxX - r, y: rect.minY + r), -.pi / 2)
-        side(CGPoint(x: rect.maxX, y: rect.minY + r), CGPoint(x: rect.maxX, y: rect.maxY - r))
-        corner(CGPoint(x: rect.maxX - r, y: rect.maxY - r), 0)
-        side(CGPoint(x: rect.maxX - r, y: rect.maxY), CGPoint(x: rect.minX + r, y: rect.maxY))
-        corner(CGPoint(x: rect.minX + r, y: rect.maxY - r), .pi / 2)
-        side(CGPoint(x: rect.minX, y: rect.maxY - r), CGPoint(x: rect.minX, y: rect.minY + r))
-        corner(CGPoint(x: rect.minX + r, y: rect.minY + r), .pi)
-        return points
-    }
-
-    private func subdivide(_ corners: [CGPoint], parts: Int) -> [CGPoint] {
-        var points: [CGPoint] = []
-        for i in corners.indices {
-            let a = corners[i], b = corners[(i + 1) % corners.count]
-            for k in 0..<parts { let f = CGFloat(k) / CGFloat(parts); points.append(CGPoint(x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f)) }
-        }
-        return points
-    }
-
-    /// Quadratic curves between the midpoints of neighbouring points, the points being the controls: no corners left.
-    private func smoothClosed(_ points: [CGPoint]) -> Path {
-        var path = Path()
-        guard points.count > 2 else { return path }
-        func mid(_ a: CGPoint, _ b: CGPoint) -> CGPoint { CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2) }
-        path.move(to: mid(points[points.count - 1], points[0]))
-        for i in points.indices {
-            path.addQuadCurve(to: mid(points[i], points[(i + 1) % points.count]), control: points[i])
-        }
-        path.closeSubpath()
-        return path
+        .frame(width: 152, height: 118)
     }
 }
