@@ -7,7 +7,8 @@ struct TelegramPage: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            PowerHero(
+            MascotHero(
+                art: .hood,
                 isOn: telegram.isRunning,
                 isBusy: telegram.isStarting,
                 title: telegram.isRunning ? "Включено" : (telegram.isStarting ? "Запускаю" : "Выключено"),

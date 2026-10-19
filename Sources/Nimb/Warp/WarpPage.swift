@@ -25,7 +25,8 @@ struct WarpPage: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            PowerHero(
+            MascotHero(
+                art: .screen,
                 isOn: warp.isOn,
                 isBusy: warp.isWorking,
                 title: title,
