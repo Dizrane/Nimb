@@ -1,6 +1,11 @@
 import AppKit
 import Foundation
 
+/// The terms a person agrees to by turning WARP on.
+enum WarpTerms {
+    static let url = URL(string: "https://www.cloudflare.com/application/terms/") ?? URL(fileURLWithPath: "/")
+}
+
 /// Where the helper lives. The directory belongs to root, so a program running as the user cannot swap what runs as root.
 enum WarpPaths {
     static let dir = "/usr/local/libexec/nimb"

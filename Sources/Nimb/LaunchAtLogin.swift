@@ -41,7 +41,7 @@ struct LaunchAtLoginCard: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 8)
-                Toggle("", isOn: Binding(get: { launch.isOn }, set: { launch.set($0) }))
+                Toggle("Запускать при входе в систему", isOn: Binding(get: { launch.isOn }, set: { launch.set($0) }))
                     .toggleStyle(.switch)
                     .controlSize(.small)
                     .labelsHidden()

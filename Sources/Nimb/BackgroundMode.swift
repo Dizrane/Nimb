@@ -30,7 +30,7 @@ struct BackgroundCard: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)
-            Toggle("", isOn: $background.enabled)
+            Toggle("Работать в фоне", isOn: $background.enabled)
                 .toggleStyle(.switch)
                 .controlSize(.small)
                 .labelsHidden()

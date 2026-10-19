@@ -75,7 +75,7 @@ struct WarpPage: View {
                 .font(Typo.small)
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Link("Условия Cloudflare WARP", destination: URL(string: "https://www.cloudflare.com/application/terms/")!)
+            Link("Условия Cloudflare WARP", destination: WarpTerms.url)
                 .font(Typo.small)
         }
         .padding(12)

@@ -84,9 +84,9 @@ struct HomePage: View {
 
     /// Waits until the previous change is over, so that the password prompts come one after another.
     private func settle() async {
-        try? await Task.sleep(nanoseconds: 300_000_000)
+        try? await Task.sleep(for: .milliseconds(300))
         while model.isLocked || warp.isWorking || telegram.isStarting {
-            try? await Task.sleep(nanoseconds: 200_000_000)
+            try? await Task.sleep(for: .milliseconds(200))
         }
     }
 
@@ -138,7 +138,7 @@ private struct FeatureRow: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 8)
-            Toggle("", isOn: Binding(get: { isOn }, set: set))
+            Toggle(title, isOn: Binding(get: { isOn }, set: set))
                 .toggleStyle(.switch)
                 .controlSize(.small)
                 .labelsHidden()
