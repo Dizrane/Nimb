@@ -38,13 +38,28 @@ enum Updater {
         let assets: [Asset]
     }
 
+    /// The newest release. GitHub's API lets 60 requests an hour through for one address, and many people share an address (a VPN,
+    /// the exit of Cloudflare WARP, which Nimb itself turns on), so when the API refuses, the page of the latest release is read
+    /// instead: it has no such limit.
     static func latestRelease() async throws -> Release {
+        do {
+            return try await latestFromAPI()
+        } catch {
+            if let release = try? await latestFromReleasePage() { return release }
+            throw error
+        }
+    }
+
+    private static func latestFromAPI() async throws -> Release {
         var request = URLRequest(url: URL(string: "https://api.github.com/repos/\(repository)/releases/latest")!)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.timeoutInterval = 15
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-            throw UpdateError("GitHub не отдал информацию о релизе.")
+        let status = (response as? HTTPURLResponse)?.statusCode
+        guard status == 200 else {
+            throw UpdateError(status == 403 || status == 429
+                ? "GitHub ограничил число запросов с вашего адреса. Попробуйте через несколько минут."
+                : "GitHub не отдал информацию о релизе.")
         }
         let github = try JSONDecoder().decode(GitHubRelease.self, from: data)
         guard let asset = github.assets.first(where: { $0.name.hasPrefix("Nimb") && $0.name.hasSuffix(".zip") }) else {
@@ -58,6 +73,26 @@ enum Updater {
             sha256: sha256(for: asset.name, in: body) ?? firstSHA256(in: body),
             pageURL: github.html_url
         )
+    }
+
+    /// The same from the web page of the latest release: `/releases/latest` leads to `/releases/tag/<tag>`, the archive is named
+    /// `Nimb-<version>.zip` and its hash stands in the description, in a line with the file name.
+    static func latestFromReleasePage() async throws -> Release {
+        var request = URLRequest(url: URL(string: "https://github.com/\(repository)/releases/latest")!)
+        request.timeoutInterval = 15
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200, let page = http.url,
+              let marker = page.path.range(of: "/releases/tag/") else {
+            throw UpdateError("GitHub не отдал страницу релиза.")
+        }
+        let tag = String(page.path[marker.upperBound...])
+        let version = tag.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
+        let name = "Nimb-\(version).zip"
+        let html = String(decoding: data, as: UTF8.self)
+        guard html.contains(name), let zip = URL(string: "https://github.com/\(repository)/releases/download/\(tag)/\(name)") else {
+            throw UpdateError("На странице релиза нет файла \(name).")
+        }
+        return Release(version: version, assetName: name, zipURL: zip, sha256: sha256(for: name, in: html), pageURL: page)
     }
 
     /// The hash written on the same line as the file name, lowercased: the notes list one "hash  file" line per archive.
