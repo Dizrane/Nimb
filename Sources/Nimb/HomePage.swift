@@ -29,9 +29,11 @@ struct HomePage: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            PowerHero(
+            MascotHero(
+                art: .power,
                 isOn: allOn,
                 isBusy: busy,
+                level: Double(onCount) / Double(warpAvailable ? 3 : 2),
                 title: title,
                 subtitle: subtitle,
                 accessibility: allOn ? "Выключить всё" : "Включить всё",

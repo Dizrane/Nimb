@@ -177,10 +177,12 @@ private struct StepFrame<Content: View>: View {
 
     var body: some View {
         VStack(spacing: 14) {
-            Image(systemName: symbol)
-                .font(.system(size: 34, weight: .light))
-                .foregroundStyle(Theme.textPrimary)
-                .padding(.top, 4)
+            HaloCrown {
+                Image(systemName: symbol)
+                    .font(.system(size: 34, weight: .light))
+                    .foregroundStyle(Theme.textPrimary)
+            }
+            .padding(.top, 14)
             Text(title)
                 .font(Typo.status)
                 .foregroundStyle(Theme.textPrimary)

@@ -2,10 +2,12 @@ import SwiftUI
 
 /// What stands under the halo on a page.
 enum MascotArt: Equatable {
-    /// The hooded dog of the Telegram page, a hand drawing.
+    /// The hooded dog of the Telegram page.
     case hood
-    /// A black screen with a play button and a chat bubble, drawn in the same ink: YouTube and Discord.
+    /// A black screen with a play button and the Discord mark: YouTube and Discord.
     case screen
+    /// The graphite power button of the home page. It is the switch itself, so there is no small button below it.
+    case power
 }
 
 /// The big switch of the Telegram and YouTube/Discord pages, made like the one of the DNS page: a figure under the halo
@@ -14,6 +16,9 @@ struct MascotHero: View {
     let art: MascotArt
     let isOn: Bool
     let isBusy: Bool
+    /// How much of the halo shines, 0 to 1. By default all of it while on, none while off; the home page uses the
+    /// part of the services that are on.
+    var level: Double? = nil
     let title: String
     let subtitle: String
     let accessibility: String
@@ -26,13 +31,25 @@ struct MascotHero: View {
 
     /// Where the crown of the figure is, relative to the middle of the stage, and how large the halo is around it.
     private let stageHeight: CGFloat = 208
-    private var haloY: CGFloat { art == .hood ? -50 : -43 }
-    private var haloScale: CGFloat { art == .hood ? 0.70 : 0.88 }
+    private var haloY: CGFloat {
+        switch art {
+        case .hood: -49
+        case .screen: -43
+        case .power: -57
+        }
+    }
+    private var haloScale: CGFloat {
+        switch art {
+        case .hood: 0.80
+        case .screen: 0.92
+        case .power: 0.96
+        }
+    }
 
     var body: some View {
-        let lit: Double = isOn ? 1 : 0
+        let lit: Double = level ?? (isOn ? 1 : 0)
         // With Reduce Motion the halo only fades in; it does not come down from above.
-        let haloDrop: CGFloat = isOn || reduceMotion ? 0 : -18
+        let haloDrop: CGFloat = reduceMotion ? 0 : CGFloat(lit - 1) * 18
         let h: Double = hover.value ? 1 : 0
         VStack(spacing: 6) {
             Button(action: action) {
@@ -53,7 +70,7 @@ struct MascotHero: View {
                         .opacity(lit)
                         .offset(y: haloY + haloDrop)
 
-                    TimelineView(.animation(minimumInterval: 1.0 / 24, paused: !isOn || reduceMotion || scenePhase != .active)) { context in
+                    TimelineView(.animation(minimumInterval: 1.0 / 24, paused: lit < 0.99 || reduceMotion || scenePhase != .active)) { context in
                         Canvas { ctx, size in
                             let place = (center: CGPoint(x: size.width / 2, y: size.height / 2 + haloY), scale: haloScale)
                             HaloSparks.draw(&ctx, place, t: reduceMotion ? 0 : context.date.timeIntervalSinceReferenceDate, spin: 1, strength: 1)
@@ -62,7 +79,7 @@ struct MascotHero: View {
                     }
                     .opacity(lit)
 
-                    badge(hover: h).offset(y: 84)
+                    if art != .power { badge(hover: h).offset(y: 84) }
                 }
                 .frame(width: 320, height: stageHeight)
                 .contentShape(Rectangle())
@@ -70,7 +87,7 @@ struct MascotHero: View {
             .buttonStyle(PressableStyle())
             .disabled(disabled)
             .onHover { hover.value = $0 }
-            .animation(.easeInOut(duration: 1.0), value: isOn)
+            .animation(.easeInOut(duration: 1.0), value: lit)
             .animation(.easeInOut(duration: 0.4), value: hover.value)
             .accessibilityLabel(accessibility)
 
@@ -104,16 +121,14 @@ struct MascotHero: View {
     @ViewBuilder
     private func figure(lit: Double, hover: Double) -> some View {
         let rim = 0.22 + 0.45 * lit + 0.15 * hover
-        Group {
-            switch art {
-            case .hood: HoodArt()
-            case .screen: ScreenArt()
-            }
+        switch art {
+        case .hood:
+            HoodArt().lit(rim: rim, glow: lit)
+        case .screen:
+            ScreenArt().lit(rim: rim, glow: lit)
+        case .power:
+            PowerDisc(isOn: isOn, isBusy: isBusy, hover: hover)
         }
-        .shadow(color: .white.opacity(rim * 0.8), radius: 1)
-        .shadow(color: .white.opacity(0.08 + 0.16 * lit), radius: 10)
-        .opacity(0.62 + 0.38 * lit)
-        .scaleEffect(0.96 + 0.04 * lit)
     }
 
     /// The small power button under the figure, the same as the one under the planet.
@@ -131,5 +146,16 @@ struct MascotHero: View {
                     .foregroundStyle(isOn ? Theme.ok : Color.white.opacity(0.85))
             }
         }
+    }
+}
+
+private extension View {
+    /// A figure under the halo: dim while off, with a thin light rim and a glow as the halo grows.
+    func lit(rim: Double, glow: Double) -> some View {
+        self
+            .shadow(color: .white.opacity(rim * 0.8), radius: 1)
+            .shadow(color: .white.opacity(0.08 + 0.16 * glow), radius: 10)
+            .opacity(0.62 + 0.38 * glow)
+            .scaleEffect(0.96 + 0.04 * glow)
     }
 }
