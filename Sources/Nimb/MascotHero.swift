@@ -6,7 +6,7 @@ enum MascotArt: Equatable {
     case hood
     /// A black screen with a play button and the Discord mark: YouTube and Discord.
     case screen
-    /// The graphite power button of the home page. It is the switch itself, so there is no small button below it.
+    /// Nothing but the halos: the home page, a tower of them, one for each service that is on.
     case power
 }
 
@@ -33,16 +33,16 @@ struct MascotHero: View {
     @StateObject private var hover = Flag()
     @StateObject private var motion = MascotMotion()
 
-    private var stageHeight: CGFloat { art == .power ? 236 : 208 }
-    /// Where the middle of the figure is below the middle of the stage.
-    private var figureY: CGFloat { art == .power ? 26 : 2 }
+    private let stageHeight: CGFloat = 218
+    /// Where the middle of the figure (on the home page, of the tower of halos) is below the middle of the stage.
+    private var figureY: CGFloat { art == .power ? -8 : 2 }
     private let haloSpacing: CGFloat = 24
     /// Where the crown of the figure is, relative to the middle of the stage, and how large the halo is around it.
     private var haloY: CGFloat {
         switch art {
         case .hood: -49
         case .screen: -36
-        case .power: -35
+        case .power: 18
         }
     }
     private var haloScale: CGFloat {
@@ -70,7 +70,11 @@ struct MascotHero: View {
                 TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !animated || reduceMotion || scenePhase != .active)) { context in
                     stage(lit: lit, hover: h, date: context.date)
                 }
-                .frame(width: 320, height: stageHeight)
+                .frame(width: 360, height: stageHeight)
+                // The glow fades out before the edges of the stage, so that it never reaches the tab bar or the title.
+                .mask(LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.10),
+                                             .init(color: .black, location: 0.9), .init(color: .clear, location: 1)],
+                                     startPoint: .top, endPoint: .bottom))
                 .contentShape(Rectangle())
             }
             .buttonStyle(PressableStyle())
@@ -144,15 +148,11 @@ struct MascotHero: View {
 
             Canvas { ctx, size in
                 drawSparks(&ctx, size: size, stack: stack, moment: moment)
-                if art == .power {
-                    drawRipples(&ctx, size: size, moment: moment)
-                } else {
-                    drawOrbiter(&ctx, size: size, progress: orbiter, moment: moment)
-                }
+                if art != .power { drawOrbiter(&ctx, size: size, progress: orbiter, moment: moment) }
             }
             .allowsHitTesting(false)
 
-            if art != .power { badge(hover: hover).offset(y: 84) }
+            badge(hover: hover).offset(y: 90)
         }
     }
 
@@ -188,7 +188,9 @@ struct MascotHero: View {
         }
         return (0..<3).map { i in
             let on = i < halos
-            return Halo(opacity: on ? 1 : 0, y: haloY - CGFloat(i) * haloSpacing + drop(on), scale: haloScale * (1 - 0.07 * CGFloat(i)))
+            // With nothing on, the lowest halo rests, faint, so that the page is not empty.
+            let resting = halos == 0 && i == 0
+            return Halo(opacity: on ? 1 : (resting ? 0.22 : 0), y: haloY - CGFloat(i) * haloSpacing + drop(on || resting), scale: haloScale * (1 - 0.07 * CGFloat(i)))
         }
     }
 
@@ -210,18 +212,6 @@ struct MascotHero: View {
             let place = (center: CGPoint(x: size.width / 2, y: size.height / 2 + halo.y + wave.y), scale: halo.scale * wave.scale)
             HaloSparks.draw(&ctx, place, t: moment.t + Double(i) * 3.1, spin: direction * (isBusy ? 2 : 1),
                             strength: halo.opacity * wave.opacity * moment.busyPulse)
-        }
-    }
-
-    /// Green waves leaving the home switch while everything is on.
-    private func drawRipples(_ ctx: inout GraphicsContext, size: CGSize, moment: Moment) {
-        guard isOn else { return }
-        let c = CGPoint(x: size.width / 2, y: size.height / 2 + figureY)
-        for k in 0..<2 {
-            let phase = (moment.t * 0.3 + Double(k) / 2).truncatingRemainder(dividingBy: 1)
-            let r = 66 + 64 * phase
-            ctx.stroke(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)),
-                       with: .color(Theme.ok.opacity((1 - phase) * 0.35)), lineWidth: 1.2)
         }
     }
 
@@ -283,7 +273,7 @@ struct MascotHero: View {
         case .screen:
             ScreenArt().scaleEffect(0.8).lit(rim: rim, glow: lit)
         case .power:
-            PowerDisc(isOn: isOn, isBusy: isBusy, hover: hover)
+            EmptyView()
         }
     }
 
