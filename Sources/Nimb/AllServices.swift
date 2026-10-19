@@ -17,10 +17,14 @@ final class AllServices: ObservableObject {
     private var warp: WarpTunnelModel?
     private var refresher: Timer?
 
+    /// Set when the services are known. Everything that reads `effective` redraws then: it was asked before and got "nothing works".
+    @Published private(set) var isConfigured = false
+
     func configure(dns: DNSViewModel, telegram: TelegramProxyModel, warp: WarpTunnelModel) {
         self.dns = dns
         self.telegram = telegram
         self.warp = warp
+        isConfigured = true
         // The tunnel is a process of its own: it can end without Nimb doing anything. Read its state often, wherever the
         // person is looking (the window, the menu bar), not only while the tunnel page is open.
         refresher?.invalidate()

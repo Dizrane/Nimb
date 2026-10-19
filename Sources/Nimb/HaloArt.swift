@@ -1,9 +1,9 @@
 import SwiftUI
 
 /// The halo of Nimb as delivered by the art studio: two halves of the ring (the far one behind a figure, the near one in front
-/// of it), a plainer near half for the lower rings of a stack, and a loop of dust and streaks that slides along the ring.
+/// of it) and a loop of dust and streaks that slides along the ring.
 enum HaloArt {
-    enum Part: String { case back = "back.png", front = "front.png", frontPlain = "front-plain.png" }
+    enum Part: String { case back = "back.png", front = "front.png" }
 
     /// The canvas of every half, in points, and where the middle of the ring is on it.
     static let size = CGSize(width: 336, height: 194)

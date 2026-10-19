@@ -150,8 +150,6 @@ struct MascotHero: View {
         var center: CGPoint
         var scale: CGFloat
         var opacity: Double
-        /// How much of the near half is the full one (with the bright spot); the rest is the plain one.
-        var full: Double
         /// The loop of sparkles of each halo of a stack is shifted in time.
         var shift: Double
     }
@@ -166,23 +164,20 @@ struct MascotHero: View {
             let b = breathe(0)
             let drop = reduceMotion ? 0 : CGFloat(lit - 1) * 18
             let center = CGPoint(x: f.middle.x, y: f.middle.y + haloCenterY + drop + bob * 0.7)
-            return [HaloSpec(center: center, scale: haloScale * b.scale, opacity: lit * b.opacity, full: 1, shift: 0)]
+            return [HaloSpec(center: center, scale: haloScale * b.scale, opacity: lit * b.opacity, shift: 0)]
         }
-        // The stack of the home page: lowest first. The top one that shines has the bright spot; the rings below it are plain,
-        // otherwise their bright spots line up in a column and the rings look glued together.
+        // The stack of the home page, the lowest ring first; all the rings are the same.
         let values = (0..<3).map { motion.ring($0, at: f.date) }
         let multiplier = [0.80, 0.92, 1.0]
         return (0..<3).map { i in
             let b = breathe(0.8 * Double(i))
             var value = values[i]
             if i == 0 { value = max(value, 0.22 * (1 - lit)) }
-            let above = (i + 1..<3).reduce(0.0) { $0 + values[$1] }
             let drop = reduceMotion ? 0 : CGFloat(values[i] - 1) * 18
             let wave = reduceMotion ? 0 : CGFloat(sin(1.5 * t - 0.8 * Double(i)) * 1.6)
             return HaloSpec(center: CGPoint(x: f.middle.x, y: f.middle.y + 22 - 28 * CGFloat(i) + drop + wave),
                             scale: 0.96 * (1 - 0.07 * CGFloat(i)) * b.scale,
                             opacity: value * multiplier[i] * b.opacity,
-                            full: max(0, 1 - above),
                             shift: Double(i) * 0.37)
         }
     }
@@ -192,8 +187,7 @@ struct MascotHero: View {
     }
 
     private func drawFront(_ ctx: inout GraphicsContext, _ halo: HaloSpec, _ f: Frame) {
-        HaloArt.draw(.front, in: &ctx, center: halo.center, scale: halo.scale, opacity: halo.opacity * halo.full)
-        HaloArt.draw(.frontPlain, in: &ctx, center: halo.center, scale: halo.scale, opacity: halo.opacity * (1 - halo.full))
+        HaloArt.draw(.front, in: &ctx, center: halo.center, scale: halo.scale, opacity: halo.opacity)
         if reduceMotion {
             HaloArt.drawStill(in: &ctx, center: halo.center, scale: halo.scale, opacity: halo.opacity)
         } else {

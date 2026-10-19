@@ -1,6 +1,6 @@
 {
   "name": "halo",
-  "version": 1,
+  "version": 2,
   "scale": 2,
   "pointSize": [
     336,
@@ -17,15 +17,8 @@
       "id": "front",
       "file": "front.png",
       "role": "in-front-of-figure",
-      "blend": "screen"
-    },
-    {
-      "id": "front-plain",
-      "file": "front-plain.png",
-      "role": "in-front-of-figure",
       "blend": "screen",
-      "optional": true,
-      "notes": "The same front half WITHOUT the bright hot spot and its vertical shafts. Use it instead of 'front' for every halo of a stack except the top one."
+      "notes": "The near half of the ring without any bright hot spot, flare or vertical line: an even glowing band (decision: the single bright point and its vertical ray drew the eye away, so they are gone everywhere)."
     }
   ],
   "loops": [
@@ -93,7 +86,7 @@
       "notes": "play the sparkle loop twice as fast and pulse the opacity 0.75..1.0 at 5 rad/s"
     }
   },
-  "notes": "Photographic halo, rendered in linear light and tone mapped, so layers are meant to be composited with the 'screen' blend (on black, normal blend gives the same picture). Ring: rx 80 pt, ry 25 pt, tilted -2.5 degrees, centre in the middle of the canvas; the near (upper) half is in 'front', the far (lower) half in 'back'. 'sparkle' is a seamless 24-frame loop (3 s at 8 fps) of dust and sliding streaks, frames are cropped to 204x100 pt around the ring (origin in 'loops'); cross-fade neighbouring frames for smoothness. First frame without motion (Reduce Motion): back + front + sparkle-00. Stack on the home page: scale 1 - 0.07*i and 24 pt higher each, the same as now. The small halo (onboarding) is the same files at scale about 0.34, only front+back (skip sparkle). Budget: 0.77 MB of files; in memory back+front = 2.1 MB, sparkle 24 x 0.33 MB = 7.8 MB, about 10 MB per page (shared by the stack). Unity check against the live Нейросети page: ring centre on the crown of the figure, scale 0.8 on Telegram and YouTube/Discord (the YouTube/Discord ring floats above the screen, see ../media-scene), about 1.0 on the planet page.",
+  "notes": "Photographic halo, rendered in linear light and tone mapped, so layers are meant to be composited with the 'screen' blend (on black, normal blend gives the same picture). Ring: rx 80 pt, ry 25 pt, tilted -2.5 degrees, centre in the middle of the canvas; the near (upper) half is in 'front', the far (lower) half in 'back'. 'sparkle' is a seamless 24-frame loop (3 s at 8 fps) of dust and sliding streaks, frames are cropped to 204x100 pt around the ring (origin in 'loops'); cross-fade neighbouring frames for smoothness. First frame without motion (Reduce Motion): back + front + sparkle-00. Stack on the home page: scale 1 - 0.07*i and 24 pt higher each, the same as now. The small halo (onboarding) is the same files at scale about 0.34, only front+back (skip sparkle). Version 1.1: the hot spot with its vertical line was removed from 'front'. Budget: 0.71 MB of files; in memory back+front = 2.1 MB, sparkle 24 x 0.33 MB = 7.8 MB, about 10 MB per page (shared by the stack). Unity check against the live Нейросети page: ring centre on the crown of the figure, scale 0.8 on Telegram and YouTube/Discord (the YouTube/Discord ring floats above the screen, see ../media-scene), about 1.0 on the planet page.",
   "derived": {
     "halo-small": {
       "scale": 0.34,
@@ -115,11 +108,11 @@
       1.0
     ],
     "frontFile": [
-      "front-plain",
-      "front-plain",
+      "front",
+      "front",
       "front"
     ],
     "sparkleOffsetSeconds": 0.37,
-    "notes": "Home page, halos from the lowest (i = 0) to the highest (i = 2): centre y = stage centre + 22 - 28 i, scale 0.96 * (1 - 0.07 i), opacity multiplier [0.80, 0.92, 1.0] times the usual breathing. Only the top halo uses 'front' (with the hot spot); the lower two use 'front-plain', otherwise the bright spots line up in one vertical column and the rings look glued together (spacing 24 as in the old app did exactly that). Play the sparkle loop of each halo shifted by i * 0.37 s. With nothing switched on, keep the app's current behaviour (one faint resting halo at about 0.22)."
+    "notes": "Home page, halos from the lowest (i = 0) to the highest (i = 2): centre y = stage centre + 22 - 28 i, scale 0.96 * (1 - 0.07 i), opacity multiplier [0.80, 0.92, 1.0] times the usual breathing. All halos use the same 'front' and 'back' (there is no bright spot any more, so nothing lines up in a column). Play the sparkle loop of each halo shifted by i * 0.37 s. With nothing switched on, keep the app's current behaviour (one faint resting halo at about 0.22)."
   }
 }

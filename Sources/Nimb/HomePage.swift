@@ -87,13 +87,9 @@ private struct FeatureRow: View {
             StepIcon(player: StepIconPlayers.shared.player(kind), size: 38, dimmed: !isOn)
                 .frame(width: 34, height: 34)
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(title)
-                        .font(Typo.name)
-                        .foregroundStyle(Theme.textPrimary)
-                    // The only colour of the row: a green dot while the service works.
-                    if isOn { Circle().fill(Theme.ok).frame(width: 6, height: 6) }
-                }
+                Text(title)
+                    .font(Typo.name)
+                    .foregroundStyle(Theme.textPrimary)
                 Text(detail)
                     .font(Typo.small)
                     .foregroundStyle(Theme.textSecondary)
