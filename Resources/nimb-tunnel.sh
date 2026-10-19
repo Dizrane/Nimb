@@ -1,5 +1,5 @@
 #!/bin/sh
-# nimb-tunnel 1: brings the Nimb WARP tunnel up and down. It runs as root, from /usr/local/libexec/nimb, which only root
+# nimb-tunnel 2: brings the Nimb WARP tunnel up and down. It runs as root, from /usr/local/libexec/nimb, which only root
 # can write to. The settings are read from warp.conf next to it, a file of plain key=value lines that Nimb wrote after
 # checking every value; nothing in it is ever executed.
 #
@@ -9,6 +9,7 @@
 #
 # NIMB_TUNNEL_DIR and NIMB_TUNNEL_RUN exist for tests only and are ignored unless NIMB_TUNNEL_TEST is set.
 PATH=/usr/bin:/bin:/usr/sbin:/sbin
+if [ -n "${NIMB_TUNNEL_TEST:-}" ] && [ -n "${NIMB_TUNNEL_PATH:-}" ]; then PATH="$NIMB_TUNNEL_PATH:$PATH"; fi
 DIR=/usr/local/libexec/nimb
 RUN=/var/run/nimb-tunnel
 if [ -n "${NIMB_TUNNEL_TEST:-}" ]; then DIR="${NIMB_TUNNEL_DIR:-$DIR}"; RUN="${NIMB_TUNNEL_RUN:-$RUN}"; fi
@@ -31,6 +32,35 @@ uapi() { # uapi SOCKET  (payload on stdin)
     nc -U -w 3 "$1" 2>/dev/null
 }
 
+# The route that keeps the encrypted packets out of the tunnel itself points at the router of the network the Mac is on.
+# When the Mac moves to another network, that route is stale and the tunnel cuts itself off, so a small watcher updates it.
+uplink_now() { # prints "<gateway> <interface>" of the real default route, nothing while offline
+    if [ -n "${NIMB_TUNNEL_TEST:-}" ] && [ -f "$RUN.fake-uplink" ]; then cat "$RUN.fake-uplink"; return; fi
+    netstat -rn -f inet 2>/dev/null | awk '$1=="default" && $4 !~ /^utun/ {print $2, $4; exit}'
+}
+
+retarget() { # retarget <endpoint host> "<gateway> <interface>"
+    host=$1; gw=${2% *}; netif=${2##* }
+    old=$(sed -n "s/^route=-host $host //p" "$STATE" | head -1)
+    [ -n "$old" ] && route -n delete -host "$host" >/dev/null 2>&1
+    case "$gw" in
+        link#*|'') new="-interface $netif" ;;
+        *) new="$gw" ;;
+    esac
+    if route -n add -host "$host" $new >/dev/null 2>&1; then
+        sed -i '' -e "/^route=-host $host /d" -e "/^uplink=/d" "$STATE"
+        printf 'route=-host %s %s\nuplink=%s\n' "$host" "$new" "$2" >> "$STATE"
+    fi
+}
+
+watch_network() { # watch_network <daemon pid> <endpoint host>
+    while alive "$1"; do
+        sleep 5
+        now=$(uplink_now)
+        [ -n "$now" ] && [ "$now" != "$(state_get uplink)" ] && retarget "$2" "$now"
+    done
+}
+
 cmd_status() {
     pid=$(state_get pid)
     if alive "$pid"; then say "up $(state_get interface) $pid"; else say "down"; fi
@@ -48,6 +78,8 @@ cmd_down() {
         i=0; while alive "$pid" && [ $i -lt 20 ]; do sleep 0.25; i=$((i + 1)); done
         alive "$pid" && kill -9 "$pid" 2>/dev/null
     fi
+    watcher=$(state_get watcher)
+    [ -n "$watcher" ] && kill "$watcher" 2>/dev/null
     iface=$(state_get interface)
     [ -n "$iface" ] && rm -f "$SOCKDIR/$iface.sock"
     rm -f "$STATE" "$RUN.name"
@@ -138,7 +170,7 @@ allowed_ip=$cidr"; done
         # shellcheck disable=SC2086
         if route -n add $1 >/dev/null 2>&1; then printf 'route=%s\n' "$1" >> "$STATE"; fi
     }
-    full4=no; full6=no
+    full4=no; full6=no; watching=no
     for cidr in $allowed; do
         case "$cidr" in 0.0.0.0/0) full4=yes ;; ::/0) full6=yes ;; esac
     done
@@ -146,6 +178,8 @@ allowed_ip=$cidr"; done
         gateway=$(route -n get default 2>/dev/null | sed -n 's/^ *gateway: //p' | head -1)
         outif=$(route -n get default 2>/dev/null | sed -n 's/^ *interface: //p' | head -1)
         if [ -n "$gateway" ]; then add_route "-host $host $gateway"; elif [ -n "$outif" ]; then add_route "-host $host -interface $outif"; fi
+        printf 'uplink=%s %s\n' "${gateway:-link#}" "$outif" >> "$STATE"
+        watching=yes
     fi
     for cidr in $allowed; do
         case "$cidr" in
@@ -165,6 +199,10 @@ allowed_ip=$cidr"; done
         sleep 1; i=$((i + 1))
     done
     if [ "$shake" = 0 ]; then cmd_down; fail "сервер не ответил: нет рукопожатия за 16 секунд"; fi
+    if [ $watching = yes ]; then
+        watch_network "$pid" "$host" </dev/null >/dev/null 2>&1 &
+        printf 'watcher=%s\n' "$!" >> "$STATE"
+    fi
     say "up $iface $pid"
 }
 
@@ -172,5 +210,7 @@ case "${1:-}" in
     up) cmd_up ;;
     down) cmd_down ;;
     status) cmd_status ;;
+    retarget-test) [ -n "${NIMB_TUNNEL_TEST:-}" ] && retarget "$2" "$3" ;;
+    watch-test) [ -n "${NIMB_TUNNEL_TEST:-}" ] && watch_network "$2" "$3" ;;
     *) fail "usage: nimb-tunnel up|down|status" ;;
 esac

@@ -175,13 +175,48 @@ final class WarpTunnelModel: ObservableObject {
 
     func toggle() { isOn ? disconnect() : connect() }
 
+    /// The number in the first lines of a helper script ("# nimb-tunnel 2: ...").
+    private static func helperVersion(at path: String) -> Int? {
+        guard let text = try? String(contentsOfFile: path, encoding: .utf8), let range = text.range(of: #"# nimb-tunnel (\d+)"#, options: .regularExpression) else { return nil }
+        return Int(text[range].dropFirst("# nimb-tunnel ".count))
+    }
+
+    /// The installed helper is older than the one inside this app (after an update of Nimb): it is replaced together with
+    /// the start, in the same password prompt. The settings are left as they are.
+    private var upgrade: (binary: URL, helper: URL)? {
+        guard let files = bundledFiles,
+              let bundled = Self.helperVersion(at: files.helper.path),
+              (Self.helperVersion(at: WarpPaths.helper) ?? 0) < bundled else { return nil }
+        return files
+    }
+
     func connect() {
         guard isInstalled, !isWorking else { return }
         errorMessage = nil
         checks = []
         phase = .working("Включаю…")
+        let upgrade = upgrade
         Task.detached {
-            let result = Result { try DNSManager.runPrivileged("'\(WarpPaths.helper)' up") }
+            let result = Result<String, Error> {
+                var script = "'\(WarpPaths.helper)' up"
+                var stage: URL?
+                defer { if let stage { try? FileManager.default.removeItem(at: stage) } }
+                if let upgrade {
+                    let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Nimb-warp-\(UUID().uuidString)")
+                    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+                    stage = folder
+                    try FileManager.default.copyItem(at: upgrade.binary, to: folder.appendingPathComponent("amneziawg-go"))
+                    try FileManager.default.copyItem(at: upgrade.helper, to: folder.appendingPathComponent("nimb-tunnel"))
+                    script = [
+                        "set -e",
+                        "/usr/bin/install -m 755 -o root -g wheel '\(folder.path)/amneziawg-go' '\(WarpPaths.binary)'",
+                        "/usr/bin/install -m 755 -o root -g wheel '\(folder.path)/nimb-tunnel' '\(WarpPaths.helper)'",
+                        "/usr/bin/xattr -c '\(WarpPaths.binary)' '\(WarpPaths.helper)' 2>/dev/null || true",
+                        script,
+                    ].joined(separator: "; ")
+                }
+                return try DNSManager.runPrivileged(script)
+            }
             await MainActor.run {
                 if case .failure(let error) = result {
                     if case DNSError.cancelled = error {} else { self.errorMessage = error.localizedDescription }
