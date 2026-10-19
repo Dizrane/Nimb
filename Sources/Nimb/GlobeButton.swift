@@ -26,11 +26,12 @@ struct HeroButton: View {
     var body: some View {
         Button(action: action) {
             ZStack {
-                // The planet changes slowly, so it is redrawn rarely, except while something is moving.
-                TimelineView(.animation(minimumInterval: state.moving ? 1.0 / 30 : 1.0 / 3, paused: reduceMotion || !gate.shouldRun(brief: state.moving))) { context in
+                // While it turns the planet is drawn as often as the screen allows; while it only drifts, 20 times a second (a slower
+                // clock shows as steps on the edge of the continents); with DNS off it is hardly seen and drawn rarely.
+                TimelineView(.animation(minimumInterval: state.moving ? 1.0 / 60 : (lit ? 1.0 / 20 : 1.0 / 6), paused: reduceMotion || !gate.shouldRun(brief: state.moving))) { context in
                     canvas(.planet, context.date)
                 }
-                TimelineView(.animation(minimumInterval: 1.0 / 20, paused: reduceMotion || !(lit || mode == .probing || state.moving) || !gate.shouldRun(brief: state.moving))) { context in
+                TimelineView(.animation(minimumInterval: 1.0 / 15, paused: reduceMotion || !(lit || mode == .probing || state.moving) || !gate.shouldRun(brief: state.moving))) { context in
                     canvas(.signal, context.date)
                 }
                 bigButton
@@ -292,10 +293,11 @@ private struct GlobeCanvas: View {
 
                     // The region of the chosen provider: a faint outline before connecting, solid white after.
                     let highlighted = path(world.rings(for: region), view, screen)
-                    l.drawLayer { g in
-                        g.addFilter(.shadow(color: green.opacity(0.55 * lit), radius: 4))
-                        g.fill(highlighted, with: .color(green.opacity(0.12 + 0.70 * lit)))
-                    }
+                    // The glow of the region is two soft strokes under the fill: a blur filter on a big path on every frame is what
+                    // made this page the most expensive one.
+                    l.stroke(highlighted, with: .color(green.opacity(0.10 * lit)), style: StrokeStyle(lineWidth: 7, lineJoin: .round))
+                    l.stroke(highlighted, with: .color(green.opacity(0.16 * lit)), style: StrokeStyle(lineWidth: 3.5, lineJoin: .round))
+                    l.fill(highlighted, with: .color(green.opacity(0.12 + 0.70 * lit)))
                     l.stroke(highlighted, with: .color(.white.opacity(0.35 + 0.25 * lit)), lineWidth: 0.7)
 
                     // Night side.
