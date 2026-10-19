@@ -5,6 +5,9 @@ struct SettingsView: View {
     @ObservedObject var model: DNSViewModel
     @ObservedObject var onboarding: Onboarding
     @ObservedObject var warp: WarpTunnelModel
+    /// The layout of the window the page is shown in: the sidebar layout gives the page a title, the tabs have it on the tab.
+    var layout: WindowLayout = .sidebar
+    @ObservedObject private var setting = WindowLayoutSetting.shared
 
     private var accessNote: String? {
         let access = model.access
@@ -20,12 +23,20 @@ struct SettingsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            PageHeader(title: "Настройки", buttonTitle: "Готово") {
-                withAnimation(.easeInOut(duration: 0.2)) { model.showSettings = false }
-            }
+            if layout == .sidebar { PageHeader(title: "Настройки", buttonTitle: nil) {} }
 
             ScrollView {
                 VStack(alignment: .leading, spacing: Space.xl - 4) {
+                    SettingsSection(title: "Оформление окна") {
+                        HStack(alignment: .top, spacing: Space.m) {
+                            ForEach(WindowLayout.allCases, id: \.self) { option in
+                                LayoutCard(option: option, selected: setting.layout == option) {
+                                    withAnimation(.easeInOut(duration: 0.2)) { setting.layout = option }
+                                }
+                            }
+                        }
+                    }
+
                     SettingsSection(title: "Работа") {
                         BackgroundCard()
                         LaunchAtLoginCard()
@@ -75,7 +86,7 @@ struct SettingsView: View {
                             }
                             Spacer(minLength: Space.s)
                             OutlineButton(title: "Пройти заново", color: Theme.textPrimary) {
-                                model.showSettings = false
+                                Navigation.shared.select(.home)
                                 onboarding.start()
                             }
                             .disabled(model.isLocked)
@@ -114,7 +125,8 @@ struct SettingsView: View {
                     }
                 }
                 .padding(.horizontal, Space.page)
-                .padding(.vertical, Space.s)
+                .padding(.top, layout == .sidebar ? Space.s : 16)
+                .padding(.bottom, Space.s)
             }
             .scrollIndicators(.hidden)
         }

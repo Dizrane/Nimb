@@ -53,6 +53,7 @@ struct NimbApp: App {
                 .environmentObject(warp)
         }
         .windowStyle(.hiddenTitleBar)
-        .windowResizability(.contentSize)
+        .defaultSize(width: 720, height: 480)
+        .windowResizability(.contentMinSize)
     }
 }

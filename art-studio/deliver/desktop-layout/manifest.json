@@ -1,0 +1,99 @@
+{
+  "name": "desktop-layout",
+  "version": 1,
+  "kind": "layout-spec",
+  "reference": "reference.html",
+  "notes_for_reader": "This is not a set of pictures but a design spec for the Mac window. reference.html is a live mock (open it in a browser from this folder: it takes the pictures from the sibling folders of deliver/). Everything in the app is rebuilt from the same assets that are already delivered; no new images are needed.",
+  "setting": {
+    "key": "windowLayout",
+    "values": [
+      "sidebar",
+      "tabs"
+    ],
+    "default": "sidebar",
+    "where": "Settings page, section 'Оформление окна' (two cards with a small wireframe each, the selected one has a light border)",
+    "apply": "at once, no restart; remember between launches; when the user switches while on the Settings page, stay on Settings (sidebar: the 'Настройки' item, tabs: a 'Настройки' tab)"
+  },
+  "layouts": {
+    "sidebar": {
+      "window": {
+        "default": [
+          720,
+          480
+        ],
+        "min": [
+          640,
+          420
+        ],
+        "resizable": true
+      },
+      "sidebar": {
+        "width": 226,
+        "items": [
+          "Главная (three small rings stack icon)",
+          "group 'Сервисы': Нейросети, Telegram, YouTube и Discord, each with its own switch at the right",
+          "Настройки (gear icon, at the bottom)"
+        ],
+        "selected": "white 11% fill, radius 9; text white",
+        "rowHeight": "7 pt padding top and bottom, font 12.5"
+      },
+      "home": {
+        "content": "only the mascot with the halos (one per service that is on), the title and the subtitle, and one button 'Включить всё' / 'Выключить всё'. NO service rows on Home: the switches are in the sidebar. Scale the hero about 1.25 and centre it vertically.",
+        "reason": "the switches would duplicate the sidebar"
+      },
+      "pages": "Нейросети, Telegram, YouTube и Discord, Настройки keep the content they have now (same cards), with the page name as a title"
+    },
+    "tabs": {
+      "window": {
+        "default": [
+          640,
+          470
+        ],
+        "min": [
+          480,
+          400
+        ],
+        "resizable": true
+      },
+      "tabBar": "in the title bar after the traffic lights. Pinned 'Главная' tab with the stack of three small rings (no word). Other tabs: word and a close cross. '+' opens a menu of the pages that are not open yet. The gear at the right end opens Настройки as a tab.",
+      "ring": "the header ring (../header) goes round the word of the selected tab, round the stack icon on Главная; delivered movement, see ../header/header-motion.js",
+      "home": "the mascot (scale 0.8), the button, and the three service rows with switches and a 'Настроить' button that opens the page of that service as a tab (the switches are needed here because there is no sidebar)",
+      "defaultOpen": [
+        "home"
+      ]
+    }
+  },
+  "menuBarPanel": {
+    "trigger": "the Nimb icon in the menu bar; the icon is the small ring of ../header (ring-back + ring-front at about 0.1 scale), dim (opacity 0.45) when nothing is on, full when at least one service is on",
+    "width": 320,
+    "rows": [
+      {
+        "id": "all",
+        "what": "title ('Всё включено' / 'Включено частично' / 'Выключено'), a line 'N из 3 работают', and a big switch for everything"
+      },
+      {
+        "id": "ai",
+        "what": "switch; the second line is the name of the current DNS server with a small chevron; clicking the row opens an inline list of the DNS providers (name, speed, a check mark on the current one); choosing one switches the server (same action as choosing it on the Нейросети page) and closes the list"
+      },
+      {
+        "id": "telegram",
+        "what": "switch; while the proxy runs two small buttons under the row: 'Открыть в Telegram' (the 'Add proxy' window) and 'Скопировать ссылку'"
+      },
+      {
+        "id": "media",
+        "what": "switch only. The check of YouTube and Discord is NOT in the panel (it stays on its page)"
+      },
+      {
+        "id": "footer",
+        "what": "'Открыть Nimb…', 'Настройки…', 'Выйти'"
+      }
+    ],
+    "note": "The app already has a menu in the menu bar (StatusMenuController); this is what it should become."
+  },
+  "notNow": [
+    "command palette on ⌘K",
+    "keyboard shortcuts for services",
+    "a global hotkey"
+  ],
+  "notes": "Black and white; colour only for the green switches and status dots. Layout code must keep the existing rules: the window draws only while it is visible and in front. The reference is a mock, the values (speeds, counters) in it are made up."
+}

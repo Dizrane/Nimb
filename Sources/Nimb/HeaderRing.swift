@@ -17,10 +17,10 @@ final class HeaderRing: ObservableObject {
     private var from: Pose?
     private var to: Pose?
     private var started = Date.distantPast
-    private var tab: AppTab?
+    private var tab: AppPage?
 
     /// The place the ring should be for the selected tab. Called when the tab changes and when the labels get their places.
-    func update(tab newTab: AppTab, pose: Pose) {
+    func update(tab newTab: AppPage, pose: Pose) {
         if tab == nil || to == nil {
             to = pose; from = nil; tab = newTab
             return

@@ -30,5 +30,9 @@
       "notes": "Same use as AppIconActive.icns: NSApp.applicationIconImage while a DNS provider is active."
     }
   },
-  "notes": "Chosen variant: 2 'Photo halo, the same composition' (previews/28-app-icon). Composition, tile (824 pt rounded square on the 1024 grid, corner radius 185, soft drop shadow, hairline edge) and the planet are exactly as in the current icons; only the halo is the new photographic one without the bright hot spot and vertical line (rendered at 4 px per point, 1344x776, so it stays sharp at 1024) and with a little more exposure so the ring reads at small sizes. Black and white only. Every size of the .icns is scaled down from the 1024 master. Files: 2 x ~0.74 MB .icns + 2 x ~0.33 MB 1024 PNG. No metadata. The app code in scripts/make_icon/main.swift draws the old halo and is not needed any more for these two files: copy the .icns into Resources/ under the old names."
+  "notes": "Chosen variant: 2 'Photo halo, the same composition' (previews/28-app-icon). Composition, tile (824 pt rounded square on the 1024 grid, corner radius 185, soft drop shadow, hairline edge) and the planet are exactly as in the current icons; only the halo is the new photographic one without the bright hot spot and vertical line (rendered at 4 px per point, 1344x776, so it stays sharp at 1024) and with a little more exposure so the ring reads at small sizes. Black and white only. Every size of the .icns is scaled down from the 1024 master. Files: 2 x ~0.74 MB .icns + 2 x ~0.33 MB 1024 PNG. No metadata. The app code in scripts/make_icon/main.swift draws the old halo and is not needed any more for these two files: copy the .icns into Resources/ under the old names.",
+  "avatar": {
+    "file": "avatar-1024.png",
+    "notes": "Square 1024x1024 picture of the idle ring on black, no rounded tile (for round avatars, e.g. the Telegram channel). Not used by the app."
+  }
 }

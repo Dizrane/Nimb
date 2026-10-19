@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 /// The three things Nimb switches, together: "turn everything on" and "turn everything off" for the home page and the
@@ -16,6 +17,7 @@ final class AllServices: ObservableObject {
     private var telegram: TelegramProxyModel?
     private var warp: WarpTunnelModel?
     private var refresher: Timer?
+    private var forwarding: [AnyCancellable] = []
 
     /// Set when the services are known. Everything that reads `effective` redraws then: it was asked before and got "nothing works".
     @Published private(set) var isConfigured = false
@@ -25,6 +27,12 @@ final class AllServices: ObservableObject {
         self.telegram = telegram
         self.warp = warp
         isConfigured = true
+        // A change of any of the three is a change of this object: whoever shows the services needs to watch only this one.
+        forwarding = [
+            dns.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() },
+            telegram.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() },
+            warp.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() },
+        ]
         // The tunnel is a process of its own: it can end without Nimb doing anything. Read its state often, wherever the
         // person is looking (the window, the menu bar), not only while the tunnel page is open.
         refresher?.invalidate()
@@ -58,6 +66,58 @@ final class AllServices: ObservableObject {
         return (dns.isBusy ? dns.active == nil : dns.active != nil,
                 telegram.isStarting ? true : telegram.isRunning,
                 warp.isWorking ? warp.isTurningOn : warp.isOn)
+    }
+
+    // MARK: One service
+
+    /// The service as the switches, the sidebar and the menu bar panel see it. `page` is one of `AppPage.services`.
+    func isOn(_ page: AppPage) -> Bool {
+        guard let dns, let telegram, let warp else { return false }
+        switch page {
+        case .ai: return dns.active != nil
+        case .telegram: return telegram.isRunning
+        case .media: return warp.isOn
+        default: return false
+        }
+    }
+
+    /// The service is being switched: a spinner instead of the switch until its state is final.
+    func isPending(_ page: AppPage) -> Bool {
+        guard let dns, let telegram, let warp else { return false }
+        switch page {
+        case .ai: return dns.isBusy || dns.isProbing || dns.isSettingUp
+        case .telegram: return telegram.isStarting
+        case .media: return warp.isWorking
+        default: return false
+        }
+    }
+
+    /// The service cannot be switched now (it is unavailable in this build, or something else is changing).
+    func isLocked(_ page: AppPage) -> Bool {
+        guard let warp else { return true }
+        if page == .media && warp.phase == .unavailable { return true }
+        return isBusy
+    }
+
+    /// The second line under the name of the service.
+    func detail(_ page: AppPage) -> String {
+        guard let dns, let telegram, let warp else { return "" }
+        switch page {
+        case .ai: return dns.active?.name ?? "ChatGPT, Claude, Gemini и другие"
+        case .telegram: return telegram.isRunning ? "Прокси работает" : "Прокси для Telegram Desktop"
+        case .media: return warp.isOn ? "Туннель работает" : (warp.phase == .unavailable ? "Недоступно в этой сборке" : "Туннель WARP")
+        default: return ""
+        }
+    }
+
+    func toggle(_ page: AppPage) {
+        guard let dns, let telegram else { return }
+        switch page {
+        case .ai: dns.toggle()
+        case .telegram: telegram.toggle()
+        case .media: toggleWarp()
+        default: break
+        }
     }
 
     var effectiveCount: Int { let e = effective; return [e.ai, e.telegram, e.media].filter { $0 }.count }

@@ -13,8 +13,6 @@ final class DNSViewModel: ObservableObject {
     @Published var reports: [ProviderReport] = []
     @Published var access = DNSManager.PasswordlessState()
     @Published var isSettingUp = false
-    @Published var showSettings = false
-    @Published var tab: AppTab = .home
 
     init() {
         // Read the state synchronously once, so a Mac that already has DNS on opens straight into space.
@@ -299,96 +297,55 @@ struct ContentView: View {
     @EnvironmentObject private var model: DNSViewModel
     @StateObject private var updates = UpdateViewModel()
     @ObservedObject private var onboarding = Onboarding.shared
-    @ObservedObject private var all = AllServices.shared
+    @ObservedObject private var nav = Navigation.shared
+    @ObservedObject private var setting = WindowLayoutSetting.shared
     @EnvironmentObject private var telegram: TelegramProxyModel
     @EnvironmentObject private var warp: WarpTunnelModel
     @Environment(\.openWindow) private var openWindow
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private func isOn(_ tab: AppTab) -> Bool {
-        let e = all.effective
-        switch tab {
-        case .home: return e.ai && e.telegram && e.media
-        case .ai: return e.ai
-        case .telegram: return e.telegram
-        case .media: return e.media
-        }
-    }
 
     var body: some View {
+        let layout = setting.layout
         VStack(spacing: 0) {
-            if onboarding.isShown {
-                OnboardingView(model: model, telegram: telegram, warp: warp, onboarding: onboarding)
-                    .transition(.opacity)
-            } else if model.showSettings {
-                SettingsView(model: model, onboarding: onboarding, warp: warp)
-                    .transition(.opacity)
-            } else {
-                TabBar(selection: $model.tab, isOn: isOn)
-                    .padding(.top, 38)
-                    .padding(.bottom, 4)
-                switch model.tab {
-                case .home:
-                    HomePage(model: model, telegram: telegram, warp: warp).transition(.opacity)
-                case .ai:
-                    VStack(spacing: 0) {
-                        Hero(model: model)
-                        ScrollView {
-                            ProvidersSection(model: model)
-                                .padding(.horizontal, Space.page)
-                                .padding(.vertical, Space.s)
-                        }
-                        .scrollIndicators(.hidden)
+            Group {
+                if onboarding.isShown {
+                    // The first set-up stays a column of 400 pt in the middle of the window.
+                    OnboardingView(model: model, telegram: telegram, warp: warp, onboarding: onboarding)
+                        .frame(maxWidth: 400)
+                        .frame(maxWidth: .infinity)
+                        .transition(.opacity)
+                } else if layout == .sidebar {
+                    HStack(spacing: 0) {
+                        SidebarView()
+                        PageHost(page: nav.page, layout: .sidebar)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
-                    .transition(.opacity)
-                case .telegram:
-                    TelegramPage(telegram: telegram).transition(.opacity)
-                case .media:
-                    WarpPage(warp: warp).transition(.opacity)
+                } else {
+                    VStack(spacing: 0) {
+                        TitleTabs()
+                        PageHost(page: nav.page, layout: .tabs)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             FooterBar(updates: updates, canInstall: !model.isLocked)
         }
-        .frame(width: 400, height: 720)
-        .overlay(alignment: .topTrailing) {
-            if !model.showSettings && !onboarding.isShown {
-                Button {
-                    StepIconPlayers.shared.player(.gear).play(reduceMotion: reduceMotion)
-                    withAnimation(.easeInOut(duration: 0.3)) { model.showSettings = true }
-                } label: {
-                    // The gear of the art studio, 37 pt in the frame of the old symbol; it turns by one tooth as the page opens.
-                    GearIcon()
-                        .frame(width: 32, height: 28)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(PressableStyle())
-                .help("Настройки")
-                .accessibilityLabel("Настройки")
-                .padding(.top, 6)
-                .padding(.trailing, 10)
-            }
-        }
-        // The hidden title bar adds its height (28 pt) to the window on top of the content, which would leave a black
-        // strip under the footer; the content reports itself that much shorter so that the window fits it exactly.
-        .padding(.bottom, -28)
-        // As a background the scenery cannot widen the layout; it is larger than the window.
-        .background(alignment: .top) {
-            // The layout is reported 28 pt shorter than the window (see above); the scenery is drawn at the full height
-            // so that nothing, including the footer, is left standing on bare window background.
-            NimbBackground(lit: model.active != nil).frame(width: 400, height: 720)
-        }
+        .frame(minWidth: layout.minimumSize.width, maxWidth: .infinity, minHeight: layout.minimumSize.height, maxHeight: .infinity)
+        .background { NimbBackground(lit: model.active != nil) }
         .ignoresSafeArea()
         .preferredColorScheme(.dark)
-        .background(WindowConfigurator())
+        .background(WindowConfigurator(layout: layout))
         .animation(.easeInOut(duration: 0.5), value: model.reports.count)
         .animation(.easeInOut(duration: 0.3), value: onboarding.isShown)
-        .animation(.easeOut(duration: 0.15), value: model.tab)
+        .animation(.easeOut(duration: 0.15), value: nav.page)
+        .onChange(of: setting.layout) { nav.layoutChanged(to: $0) }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             model.refresh()
             warp.refreshAccess()
         }
         .onAppear {
             updates.check(silent: true)
+            nav.layoutChanged(to: setting.layout)
             telegram.openMainWindow = { openWindow(id: "main") }
             StatusMenuController.shared.configure(dns: model, telegram: telegram, warp: warp)
             AppDelegate.openMainWindow = { openWindow(id: "main") }
@@ -403,7 +360,7 @@ struct ContentView: View {
 
 // MARK: - Hero
 
-private struct Hero: View {
+struct DNSHero: View {
     @ObservedObject var model: DNSViewModel
 
     var body: some View {
@@ -464,7 +421,7 @@ private struct Hero: View {
 
 // MARK: - Providers
 
-private struct ProvidersSection: View {
+struct ProvidersSection: View {
     @ObservedObject var model: DNSViewModel
 
     var body: some View {

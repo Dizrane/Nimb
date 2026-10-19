@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><title>Nimb для компьютера: эталон</title><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root{color-scheme:dark;--ok:#34c759;--warn:#d4af37;--bad:#ff453a;--t1:rgba(255,255,255,.92);--t2:rgba(255,255,255,.55);--t3:rgba(255,255,255,.32);--line:rgba(255,255,255,.11)}
+*{box-sizing:border-box}
+body{margin:0;background:#141416;color:#d9d9de;font:14px/1.5 -apple-system,system-ui,sans-serif;padding:28px 32px 90px}
+h1{font:600 24px -apple-system,system-ui,sans-serif;margin:0 0 6px} .lead{color:#9a9aa3;max-width:880px;margin:4px 0}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:16px 0 4px}
+button.ctl{font:inherit;color:#d9d9de;background:#26262b;border:1px solid #38383f;border-radius:8px;padding:6px 12px;cursor:pointer}button.ctl.on{background:#ececf0;color:#101012;border-color:#ececf0}
+section.v{margin-top:42px;padding-top:26px;border-top:1px solid #2a2a30}
+section.v h2{font:600 18px -apple-system,system-ui,sans-serif;margin:0 0 4px;display:flex;gap:10px;align-items:center}
+.num{font:600 13px ui-monospace,Menlo,monospace;background:#ececf0;color:#101012;border-radius:6px;padding:2px 8px}
+.reco{color:#cdb98a;font-size:12px;font-weight:400}
+.why{color:#9a9aa3;max-width:880px;margin:2px 0 14px}
+.cols{display:flex;gap:26px;flex-wrap:wrap;align-items:flex-start}
+.pc{font-size:13px;color:#9a9aa3;max-width:330px}.pc b{color:#d9d9de;font-weight:600}.pc ul{margin:4px 0 12px;padding-left:18px}.pc li{margin:2px 0}
+kbd{font:11px ui-monospace,Menlo,monospace;background:#26262b;border:1px solid #3a3a41;border-radius:5px;padding:1px 6px;color:#cfcfd6}
+/* ---------- the app window ---------- */
+.win{position:relative;background:radial-gradient(ellipse 80% 38% at 50% 0%,rgba(255,255,255,.09),transparent 70%),#000;border:1px solid rgba(255,255,255,.14);border-radius:12px;overflow:hidden;color:var(--t1);box-shadow:0 18px 50px rgba(0,0,0,.55);user-select:none}
+.tb{height:40px;display:flex;align-items:center;gap:12px;padding:0 12px;position:relative}
+.lights{display:flex;gap:8px;flex:none}.lights i{width:12px;height:12px;border-radius:50%;background:#3a3a3f;display:block}
+.scroll{overflow:hidden}
+.card{background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.row{display:flex;align-items:center;gap:12px}.grow{flex:1;min-width:0}
+.nm{font-size:13px;font-weight:600;color:var(--t1)}.sm{font-size:11.5px;color:var(--t2)}.mono{font:11px ui-monospace,Menlo,monospace;color:var(--t2)}
+.sec{font:600 10.5px -apple-system,system-ui;letter-spacing:.08em;text-transform:uppercase;color:var(--t3)}
+.sw{width:38px;height:22px;border-radius:11px;background:rgba(255,255,255,.14);position:relative;cursor:pointer;flex:none;transition:background .25s}
+.sw::after{content:"";position:absolute;left:2px;top:2px;width:18px;height:18px;border-radius:50%;background:#fff;transition:transform .25s}
+.sw.on{background:var(--ok)}.sw.on::after{transform:translateX(16px)}
+.ico{width:34px;height:34px;display:block;flex:none;transition:opacity .3s}.ico.off{opacity:.45}
+.btn{font:600 12px -apple-system,system-ui;color:var(--t1);background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);border-radius:8px;padding:6px 12px;cursor:pointer;white-space:nowrap}
+.btn:hover{background:rgba(255,255,255,.14)}
+.btn.main{background:#ececf0;color:#101012;border-color:#ececf0}
+.dot{width:7px;height:7px;border-radius:50%;background:rgba(255,255,255,.25);flex:none}.dot.on{background:var(--ok);box-shadow:0 0 6px var(--ok)}
+.hero{position:relative;display:flex;flex-direction:column;align-items:center;text-align:center}
+.hero .stage{position:relative;width:220px;height:150px}
+.hero .stage img{position:absolute;image-rendering:auto}
+.hero .halo{mix-blend-mode:screen;transition:opacity .5s}
+.hero h3{margin:0;font:600 18px -apple-system,system-ui}.hero p{margin:2px 0 0;font-size:12px;color:var(--t2)}
+.foot{position:absolute;left:0;right:0;bottom:0;height:30px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;font-size:11px;color:var(--t3);border-top:1px solid rgba(255,255,255,.06);background:rgba(0,0,0,.4)}
+.ring{position:absolute;left:0;top:0;width:336px;height:194px;pointer-events:none;transform-origin:0 0;mix-blend-mode:screen;transition:transform .7s cubic-bezier(.3,0,.2,1)}
+/* ---------- 1: tabs ---------- */
+.tabs{display:flex;align-items:center;gap:2px;flex:1;min-width:0;position:relative;height:100%}
+.tab{position:relative;z-index:1;height:28px;display:flex;align-items:center;gap:7px;padding:0 10px;border-radius:8px;color:var(--t2);font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap;transition:background .2s,color .2s}
+.tab:hover{background:rgba(255,255,255,.06)}.tab.sel{color:#fff}
+.tab .x{width:15px;height:15px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--t3);margin-left:2px}.tab .x:hover{background:rgba(255,255,255,.16);color:#fff}
+.tab.pin{padding:0 9px}.tab img.mini{width:20px;height:16px;object-fit:contain}
+.tab .t{position:relative}
+.plus{width:26px;height:26px;border-radius:7px;color:var(--t2);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:17px;position:relative;z-index:1}.plus:hover{background:rgba(255,255,255,.08)}
+.menu{position:absolute;z-index:20;background:rgba(30,30,34,.96);border:1px solid rgba(255,255,255,.16);border-radius:10px;padding:5px;min-width:200px;box-shadow:0 12px 30px rgba(0,0,0,.6)}
+.menu div{padding:6px 10px;border-radius:6px;font-size:12px;color:var(--t1);cursor:pointer;display:flex;justify-content:space-between;gap:16px}.menu div:hover{background:rgba(255,255,255,.12)}.menu div span{color:var(--t3)}.menu div.dis{opacity:.4;pointer-events:none}
+.page{padding:6px 18px 0}
+/* ---------- 2: sidebar ---------- */
+.side{width:226px;flex:none;border-right:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.025);padding:46px 10px 10px;display:flex;flex-direction:column;gap:3px;position:relative}
+.si{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:9px;color:var(--t2);font-size:12.5px;white-space:nowrap;font-weight:500;cursor:pointer}
+.si:hover{background:rgba(255,255,255,.06)}.si.sel{background:rgba(255,255,255,.11);color:#fff}
+.si .ico{width:22px;height:22px}.si .sw{transform:scale(.72);transform-origin:right center;margin-left:auto}
+.side .lights{position:absolute;left:12px;top:14px}
+/* ---------- 3: dashboard ---------- */
+.dash{display:grid;transition:grid-template-columns .5s cubic-bezier(.3,0,.2,1);height:100%}
+.insp{border-left:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);padding:44px 16px 16px;overflow:hidden;transition:opacity .3s}
+/* ---------- 4: menu bar ---------- */
+.mbar{height:26px;background:rgba(255,255,255,.07);display:flex;align-items:center;justify-content:flex-end;gap:16px;padding:0 14px;font-size:12px;color:var(--t2);border-radius:8px 8px 0 0}
+.mbar .nimb{width:22px;height:16px;position:relative}
+.pop{width:300px;border-radius:14px;background:rgba(24,24,28,.97);border:1px solid rgba(255,255,255,.15);box-shadow:0 18px 44px rgba(0,0,0,.6);padding:14px}
+/* ---------- 5: palette ---------- */
+.pal{position:absolute;left:50%;top:70px;width:min(440px,86%);transform:translateX(-50%);background:rgba(28,28,32,.97);border:1px solid rgba(255,255,255,.18);border-radius:14px;box-shadow:0 20px 50px rgba(0,0,0,.7);z-index:30;overflow:hidden}
+.pal input{width:100%;background:transparent;border:0;border-bottom:1px solid rgba(255,255,255,.1);padding:13px 16px;color:#fff;font:15px -apple-system,system-ui;outline:none;user-select:text}
+.pal .it{display:flex;align-items:center;justify-content:space-between;padding:8px 16px;font-size:13px;color:var(--t1);cursor:pointer}.pal .it.sel{background:rgba(255,255,255,.12)}.pal .it span{color:var(--t3);font-size:11px}
+.pal .ft{padding:7px 16px;border-top:1px solid rgba(255,255,255,.08);font-size:11px;color:var(--t3)}
+.toast{position:absolute;left:50%;bottom:44px;transform:translateX(-50%);background:rgba(255,255,255,.92);color:#101012;font-size:12px;font-weight:600;padding:6px 14px;border-radius:999px;opacity:0;transition:opacity .25s;pointer-events:none}.toast.show{opacity:1}
+.final{margin-top:44px;padding:20px 22px;background:#1b1b1f;border:1px solid #2c2c33;border-radius:14px;max-width:880px}
+.final h2{margin:0 0 6px;font:600 17px -apple-system,system-ui}
+
+.opt{flex:1;border:1px solid var(--line);border-radius:12px;padding:10px;cursor:pointer;background:rgba(255,255,255,.03)}
+.opt.sel{border-color:rgba(255,255,255,.6);background:rgba(255,255,255,.08)}
+.opt .wf{height:64px;border-radius:7px;background:#000;border:1px solid rgba(255,255,255,.12);margin-bottom:8px;position:relative;overflow:hidden}
+.opt .wf i{position:absolute;background:rgba(255,255,255,.16);border-radius:3px;display:block}
+.pw{width:420px}
+.chev{color:var(--t3);font-size:11px;transition:transform .2s}
+.sub2{margin:2px 0 4px 38px;padding:4px;border-radius:9px;background:rgba(255,255,255,.04);border:1px solid var(--line)}
+.sub2 div{display:flex;justify-content:space-between;align-items:center;padding:6px 9px;border-radius:6px;font-size:12px;color:var(--t1);cursor:pointer}.sub2 div:hover{background:rgba(255,255,255,.1)}.sub2 .ck{color:var(--t1);font-size:12px;width:14px}
+.minibtn{font:600 11px -apple-system,system-ui;color:var(--t1);background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);border-radius:7px;padding:3px 7px;cursor:pointer;white-space:nowrap}.minibtn:hover{background:rgba(255,255,255,.16)}
+</style></head><body>
+<h1>Nimb для компьютера: боковая панель, вкладки на выбор и панель в строке меню</h1>
+<p class="lead">Окно ниже живое. По умолчанию это боковая панель: на «Главной» только пёсик и одна кнопка «Включить всё», а переключатели сервисов остались слева. Откройте «Настройки» (слева внизу) и в «Оформлении окна» выберите «Вкладки»: то же окно станет браузерными вкладками как в Safari. Ниже панель в строке меню с быстрыми действиями.</p>
+<div class="bar"><span style="color:#8a8a93">Включено:</span><button class="ctl on" data-s="ai">Нейросети</button><button class="ctl on" data-s="tg">Telegram</button><button class="ctl" data-s="media">YouTube и Discord</button></div>
+
+<section class="v"><h2><span class="num">А</span>Окно приложения <span class="reco">боковая панель или вкладки, выбирается в настройках</span></h2>
+<div class="why">Что изменилось: на «Главной» в боковой панели больше нет повторяющихся строк (переключатели уже слева). Выбор оформления лежит в «Настройках». Страницы нейросетей, Telegram и YouTube/Discord остались с тем же содержанием.</div>
+<div class="cols"><div id="app"></div><div class="pc"><b>Как это устроено</b><ul><li><b>Боковая панель</b> (по умолчанию): слева «Главная», три сервиса с переключателями, внизу «Настройки». Справа выбранная страница.</li><li><b>Вкладки</b>: «Главная» закреплена слева, остальное открывается плюсом или кнопкой «Настроить», шестерёнка справа открывает настройки. Здесь переключатели остаются на «Главной», потому что слева их нет.</li><li>Нимб: в боковой панели над списком и на значке «Главной», во вкладках обводит слово активной вкладки.</li><li>Окно можно растягивать. Для боковой панели стартовый размер 720×480, минимум 640×420. Для вкладок можно ниже и уже.</li></ul></div></div></section>
+
+<section class="v"><h2><span class="num">Б</span>Панель в строке меню <span class="reco">четвёртая идея, с нужными действиями</span></h2>
+<div class="why">Нажмите на значок нимба. Нейросети: нажмите на строку, чтобы выбрать другой DNS-сервер. Telegram: «Открыть в Telegram» и «Скопировать ссылку». Проверки YouTube и Discord здесь нет, остался только переключатель.</div>
+<div class="cols"><div id="menubar"></div><div class="pc"><b>Что внутри</b><ul><li>Главный переключатель «Всё».</li><li>Нейросети: переключатель и выбор сервера прямо в панели. Выбранный отмечен галочкой.</li><li>Telegram: переключатель и две кнопки (открыть в Telegram, скопировать ссылку).</li><li>YouTube и Discord: только переключатель.</li><li>Открыть Nimb…, Настройки…, Выйти.</li></ul><b>Значок в строке меню</b><ul><li>Кольцо нимба, тусклое когда ничего не включено и яркое когда что-то работает.</li></ul></div></div></section>
+<div class="toast" id="toast" style="position:fixed;bottom:28px">.</div>
+<script>
+const H='../';
+const SV={ai:{t:'Нейросети',d:'ChatGPT, Claude, Gemini и другие',ico:'icon-ai/flower'},tg:{t:'Telegram',d:'Прокси для Telegram Desktop',ico:'icon-telegram/plane'},media:{t:'YouTube и Discord',d:'Туннель WARP',ico:'icon-media/play'}};
+const DNS=['GeoHide (EU)','Comss.one','GeoHide (RU)','GeoHide (US)'], DNSMS=['0,2','0,3','0,4','0,6'];
+const on={ai:true,tg:true,media:false}; let dns=0;
+const ORDER=['ai','tg','media'];
+const nOn=()=>ORDER.filter(k=>on[k]).length;
+const title=()=>nOn()==3?'Всё включено':nOn()==0?'Выключено':'Включено частично';
+const sub=()=>nOn()==3?'Нейросети, Telegram, YouTube и Discord работают.':nOn()==0?'Одна кнопка включает нейросети, Telegram, YouTube и Discord.':'Включите остальное кнопкой или переключателями.';
+const icoSrc=k=>H+SV[k].ico+'.png';
+const sw=k=>`<div class="sw ${on[k]?'on':''}" data-sw="${k}"></div>`;
+const toggle=k=>{on[k]=!on[k];renderAll()}, setAll=v=>{ORDER.forEach(k=>on[k]=v);renderAll()};
+document.querySelectorAll('[data-s]').forEach(b=>{b.classList.toggle('on',on[b.dataset.s]);b.onclick=()=>toggle(b.dataset.s)});
+document.addEventListener('click',e=>{const s=e.target.closest('[data-sw]');if(s){e.stopPropagation();toggle(s.dataset.sw);return}if(e.target.closest('[data-all]')){setAll(nOn()!=3)}},true);
+let tt;function toast(t){const e=document.getElementById('toast');e.textContent=t;e.classList.add('show');clearTimeout(tt);tt=setTimeout(()=>e.classList.remove('show'),1700)}
+
+function hero(scale=1){
+  const n=nOn(), W=220*scale, Hh=150*scale; let h='';
+  for(let i=0;i<3;i++){const s=(.78-i*.055)*scale, cy=(84-i*22+8)*scale, o=i<n?[.8,.92,1][i]:0, st=`left:${W/2-168*s}px;top:${cy-97*s}px;width:${336*s}px;height:${194*s}px;opacity:${o}`;
+    h+=`<img class="halo" style="${st}" src="${H}halo/back.png"><img class="halo" style="z-index:2;${st}" src="${H}halo/front.png">`;}
+  const dw=78*scale, dh=dw*154/128;
+  return `<div class="hero"><div class="stage" style="width:${W}px;height:${Hh}px">${h}<img style="z-index:1;left:${W/2-dw/2}px;top:${60*scale}px;width:${dw}px;height:${dh}px" src="${H}hood/${n?'on':'off'}.png"></div><h3 style="font-size:${18+4*(scale-1)}px">${title()}</h3><p>${sub()}</p><div style="height:12px"></div><div class="btn main" data-all style="padding:${6+3*(scale-1)}px ${14+10*(scale-1)}px">${n==3?'Выключить всё':'Включить всё'}</div></div>`;
+}
+const featureRow=(k,extra='')=>`<div class="card row"><img class="ico ${on[k]?'':'off'}" src="${icoSrc(k)}"><div class="grow"><div class="nm">${SV[k].t}</div><div class="sm">${on[k]?(k=='ai'?DNS[dns]:k=='tg'?'Прокси работает':'Туннель работает'):SV[k].d}</div></div>${extra}${sw(k)}</div>`;
+
+/* pages */
+const pageAI=()=>`<div class="row" style="margin:2px 0 8px"><div class="sec grow">DNS-провайдеры</div><div class="btn">Проверить</div></div>`+DNS.map((n,i)=>`<div class="card" data-dns="${i}" style="margin-bottom:8px;padding:10px 14px;cursor:pointer;border-color:${i==dns?'rgba(255,255,255,.5)':'var(--line)'}"><div class="row"><div class="nm grow">${n}${i==dns&&on.ai?' <span class="sm" style="color:var(--ok)">· активен</span>':''}</div><span class="mono">${DNSMS[i]} с</span><div style="width:15px;height:15px;border-radius:50%;border:1px solid rgba(255,255,255,.4);display:flex;align-items:center;justify-content:center">${i==dns?'<i style="width:7px;height:7px;border-radius:50%;background:#fff"></i>':''}</div></div></div>`).join('');
+const pageTG=()=>`<div class="card" style="margin-bottom:8px"><div class="nm">Подключить Telegram</div><div class="sm" style="margin:3px 0 9px">Кнопка откроет Telegram Desktop с окном «Добавить прокси»: подтвердите его.</div><div class="row" style="flex-wrap:wrap;gap:8px"><div class="btn" data-toast="Ссылка скопирована">Скопировать ссылку</div><div class="btn main" data-toast="Открыто в Telegram Desktop">Открыть в Telegram</div></div></div><div class="card row"><div class="grow"><div class="nm">Работа в фоне</div><div class="sm">Прокси работает и при закрытом окне</div></div><div class="sw on"></div></div><div class="mono" style="margin:10px 4px">Соединений: ${on.tg?'14 (сейчас 3)':'0'}   ↑ ${on.tg?'1,2 МБ':'0'}   ↓ ${on.tg?'8,4 МБ':'0'}</div>`;
+const pageMedia=()=>`<div class="card" style="margin-bottom:8px"><div class="nm">Проверка</div><div class="sm" style="margin:3px 0 9px">Запросит у YouTube и Discord короткий ответ и покажет, дошёл ли он.</div><div class="btn" data-toast="Проверка запущена">Проверить YouTube и Discord</div></div><div class="card row"><div class="grow"><div class="nm">Без пароля</div><div class="sm">Включать и выключать туннель без пароля</div></div><div class="sw"></div></div>`;
+let layout='side';
+const wf=(k)=>k=='side'?`<i style="left:0;top:0;bottom:0;width:30%;border-radius:0"></i><i style="left:36%;top:14px;width:36%;height:8px"></i><i style="left:36%;top:30px;width:50%;height:8px"></i><i style="left:6px;top:10px;width:18%;height:6px"></i><i style="left:6px;top:22px;width:18%;height:6px"></i><i style="left:6px;top:34px;width:18%;height:6px"></i>`:`<i style="left:6px;top:6px;width:16%;height:9px"></i><i style="left:26%;top:6px;width:22%;height:9px;background:rgba(255,255,255,.3)"></i><i style="left:52%;top:6px;width:18%;height:9px"></i><i style="left:10%;top:26px;width:80%;height:8px"></i><i style="left:10%;top:40px;width:62%;height:8px"></i>`;
+const pageSet=()=>`<div class="sec" style="margin:2px 0 8px">Оформление окна</div><div class="row" style="gap:10px;margin-bottom:6px">${[['side','Боковая панель','Список слева, страница справа'],['tabs','Вкладки','Как в Safari: вкладки сверху']].map(([k,n,d])=>`<div class="opt ${layout==k?'sel':''}" data-layout="${k}"><div class="wf">${wf(k)}</div><div class="nm">${n}</div><div class="sm">${d}</div></div>`).join('')}</div><div class="sec" style="margin:14px 0 8px">Работа</div><div class="card row" style="margin-bottom:8px"><div class="grow"><div class="nm">Запускать при входе</div><div class="sm">Nimb стартует вместе с Mac</div></div><div class="sw on"></div></div><div class="card row" style="margin-bottom:8px"><div class="grow"><div class="nm">Работать в фоне</div><div class="sm">Служба остаётся после закрытия окна</div></div><div class="sw on"></div></div><div class="sec" style="margin:12px 0 8px">Помощь</div><div class="card row"><div class="grow"><div class="nm">Первая настройка</div><div class="sm">Короткое обучение, ещё раз</div></div><div class="btn">Пройти заново</div></div>`;
+const PAGES={ai:pageAI,tg:pageTG,media:pageMedia,set:pageSet};
+const footer=()=>`<div class="foot"><span>Версия 0.7.0 · проверено сегодня</span><span>Канал в Telegram</span></div>`;
+const stackMini=()=>[0,1,2].map(i=>{const s=.1-i*.004,o=on[ORDER[2-i]]?1:.2;return ['back','front'].map(pt=>`<img src="${H}header/ring-${pt}.png" style="position:absolute;left:${11-168*s}px;top:${3.4+i*5-97*s}px;width:${336*s}px;height:${194*s}px;mix-blend-mode:screen;opacity:${o}">`).join('')}).join('');
+
+document.addEventListener('click',e=>{
+  const d=e.target.closest('[data-dns]');if(d){dns=+d.dataset.dns;renderAll();return}
+  const t=e.target.closest('[data-toast]');if(t){toast(t.dataset.toast);return}
+  const l=e.target.closest('[data-layout]');if(l){setLayout(l.dataset.layout)}
+});
+
+/* ---------- the window ---------- */
+const root=document.getElementById('app'), W=720, HH=480;
+const S={side:'home',open:['home','set'],tab:'home',menu:false};
+const TT={home:'Главная',ai:'Нейросети',tg:'Telegram',media:'YouTube и Discord',set:'Настройки'};
+function setLayout(k){layout=k;if(k=='tabs'){S.open=['home','set'];S.tab='set'}else{S.side='set'}built=null;renderAll()}
+let built=null;
+function renderSide(){
+  const items=ORDER.map(k=>`<div class="si ${S.side==k?'sel':''}" data-p="${k}"><img class="ico ${on[k]?'':'off'}" src="${icoSrc(k)}">${SV[k].t}${sw(k)}</div>`).join('');
+  root.innerHTML=`<div class="win" style="width:${W}px;height:${HH}px;display:flex"><div class="side"><div class="lights" style="position:absolute"><i></i><i></i><i></i></div><div class="si ${S.side=='home'?'sel':''}" data-p="home"><span style="width:22px;height:16px;position:relative;display:block;flex:none">${stackMini()}</span>Главная</div><div class="sec" style="margin:14px 10px 4px">Сервисы</div>${items}<div style="flex:1"></div><div class="si ${S.side=='set'?'sel':''}" data-p="set"><img class="ico" style="width:22px;height:22px" src="${H}icon-gear/gear.png">Настройки</div><div style="height:30px"></div></div><div style="flex:1;padding:46px 24px 40px;overflow:hidden;display:flex;flex-direction:column">${S.side=='home'?`<div style="flex:1;display:flex;align-items:center;justify-content:center">${hero(1.25)}</div>`:`<div class="nm" style="font-size:17px;margin-bottom:10px">${S.side=='set'?'Настройки':SV[S.side].t}</div>${PAGES[S.side]()}`}</div>${footer()}</div>`;
+}
+root.addEventListener('click',e=>{
+  if(layout=='side'){const p=e.target.closest('[data-p]');if(p&&!e.target.closest('[data-sw]')){S.side=p.dataset.p;renderSide()}return}
+  const c=e.target.closest('[data-close]');if(c){e.stopPropagation();const k=c.dataset.close;S.open=S.open.filter(x=>x!=k);if(S.tab==k)S.tab='home';S.menu=false;return renderTabs()}
+  const t=e.target.closest('[data-t]');if(t){S.tab=t.dataset.t;S.menu=false;return renderTabs()}
+  if(e.target.closest('[data-plus]')){S.menu=!S.menu;return renderTabs()}
+  const n=e.target.closest('[data-new]');if(n){const k=n.dataset.new;if(!S.open.includes(k))S.open.push(k);S.tab=k;S.menu=false;return renderTabs()}
+  const o=e.target.closest('[data-open]');if(o){const k=o.dataset.open;if(!S.open.includes(k))S.open.push(k);S.tab=k;return renderTabs()}
+  const g=e.target.closest('[data-gear]');if(g){if(!S.open.includes('set'))S.open.push('set');S.tab='set';return renderTabs()}
+  if(S.menu){S.menu=false;renderTabs()}
+});
+function renderTabs(){
+  if(built!='tabs'){root.innerHTML=`<div class="win" style="width:${W}px;height:${HH}px"><div class="tb"><div class="lights"><i></i><i></i><i></i></div><div class="tabs" id="tabs1"></div><div data-gear style="width:30px;height:28px;display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative;z-index:1"><img src="${H}icon-gear/gear.png" style="width:26px;height:26px"></div></div><div class="ringbox" style="position:absolute;left:0;top:0;right:0;height:60px;pointer-events:none"><img class="ring" src="${H}header/ring-back.png"><img class="ring" src="${H}header/ring-front.png"></div><div class="page scroll" id="pg1" style="height:${HH-70}px;padding:6px 24px 0"></div>${footer()}<div id="mh1"></div></div>`;built='tabs'}
+  const tabs=S.open.map(k=>k=='home'?`<div class="tab pin ${S.tab=='home'?'sel':''}" data-t="home"><span class="t" style="width:22px;height:16px;display:block;position:relative">${stackMini()}</span></div>`:`<div class="tab ${S.tab==k?'sel':''}" data-t="${k}"><span class="t" data-label="${k}">${TT[k]}</span><span class="x" data-close="${k}">×</span></div>`).join('');
+  root.querySelector('#tabs1').innerHTML=tabs+'<div class="plus" data-plus>+</div>';
+  root.querySelector('#pg1').innerHTML=S.tab=='home'?hero(.8)+'<div style="height:10px"></div>'+ORDER.map(k=>featureRow(k,`<div class="btn" data-open="${k}" style="padding:4px 9px;font-weight:500">Настроить</div>`)).join('<div style="height:8px"></div>'):PAGES[S.tab]();
+  const win=root.querySelector('.win'),box=root.querySelector('.ringbox'),mh=root.querySelector('#mh1');
+  mh.innerHTML=S.menu?`<div class="menu" style="top:36px">${['ai','tg','media','set'].map(k=>`<div class="${S.open.includes(k)?'dis':''}" data-new="${k}">${TT[k]}<span>${S.open.includes(k)?'открыта':''}</span></div>`).join('')}</div>`:'';
+  if(S.menu){const pb=root.querySelector('[data-plus]').getBoundingClientRect(),wb=win.getBoundingClientRect();mh.firstChild.style.left=(pb.left-wb.left-6)+'px'}
+  const home=S.tab=='home', el=home?root.querySelector('.tab.pin .t'):root.querySelector(`[data-label="${S.tab}"]`);
+  const b=box.getBoundingClientRect(),r=el.getBoundingClientRect(),cx=r.left-b.left+r.width/2,cy=r.top-b.top+r.height/2+(home?0:.5),rx=r.width/2+(home?9:15),ry=home?9:8.8;
+  const first=!box.dataset.init;box.dataset.init=1;
+  box.querySelectorAll('.ring').forEach(i=>{if(first)i.style.transition='none';i.style.opacity=1;i.style.transform=`translate(${cx}px,${cy}px) scale(${rx/80},${ry/25}) translate(-168px,-97px)`;if(first){void i.offsetWidth;i.style.transition=''}});
+}
+
+/* ---------- the menu bar panel ---------- */
+const mbRoot=document.getElementById('menubar'); const MB={dnsOpen:false};
+function renderMB(){
+  const n=nOn(), o=n?1:.45;
+  const glyph=['back','front'].map(p=>`<img src="${H}header/ring-${p}.png" style="position:absolute;left:${11-16.8}px;top:${8-9.7}px;width:33.6px;height:19.4px;opacity:${o}">`).join('');
+  mbRoot.innerHTML=`<div class="pw"><div class="mbar" style="background:#26262b"><span style="margin-right:auto;color:var(--t3)">Finder  Файл  Правка  Вид</span><span style="width:22px;height:16px;position:relative;display:block;cursor:default">${glyph}</span><span>Пт 12:30</span></div><div style="background:linear-gradient(#17171b,#101013);padding:10px 14px 24px;display:flex;justify-content:flex-end;border-radius:0 0 12px 12px;min-height:470px"><div class="pop" style="width:320px"><div class="row" style="margin-bottom:10px"><div class="grow"><div class="nm" style="font-size:15px">${title()}</div><div class="sm">${n?n+(n==1?' сервис работает':' из 3 работают'):'ничего не работает'}</div></div><div class="sw ${n==3?'on':''}" data-all style="transform:scale(1.15);transform-origin:right"></div></div><div style="height:1px;background:var(--line);margin:0 -14px 6px"></div>
+  <div class="row" style="padding:7px 0;cursor:pointer" data-mbdns><img class="ico ${on.ai?'':'off'}" style="width:26px;height:26px" src="${icoSrc('ai')}"><div class="grow"><div class="nm">Нейросети</div><div class="sm">${DNS[dns]} <span class="chev" style="display:inline-block;transform:rotate(${MB.dnsOpen?90:0}deg)">›</span></div></div>${sw('ai')}</div>
+  ${MB.dnsOpen?`<div class="sub2">${DNS.map((d,i)=>`<div data-mbpick="${i}"><span><span class="ck">${i==dns?'✓':''}</span>${d}</span><span class="mono">${DNSMS[i]} с</span></div>`).join('')}</div>`:''}
+  <div class="row" style="padding:7px 0"><img class="ico ${on.tg?'':'off'}" style="width:26px;height:26px" src="${icoSrc('tg')}"><div class="grow"><div class="nm">Telegram</div><div class="sm">${on.tg?'Прокси работает':'Выключено'}</div></div>${sw('tg')}</div>
+  ${on.tg?`<div class="row" style="margin:0 0 4px 38px;gap:6px;flex-wrap:wrap"><div class="minibtn" data-toast="Открыто в Telegram Desktop">Открыть в Telegram</div><div class="minibtn" data-toast="Ссылка скопирована">Скопировать ссылку</div></div>`:''}
+  <div class="row" style="padding:7px 0"><img class="ico ${on.media?'':'off'}" style="width:26px;height:26px" src="${icoSrc('media')}"><div class="grow"><div class="nm">YouTube и Discord</div><div class="sm">${on.media?'Туннель работает':'Выключено'}</div></div>${sw('media')}</div>
+  <div style="height:1px;background:var(--line);margin:6px -14px 6px"></div><div class="menu" style="position:static;background:none;border:0;box-shadow:none;padding:0;min-width:0"><div data-toast="Окно Nimb открыто">Открыть Nimb…<span>⌘O</span></div><div data-toast="Настройки открыты">Настройки…<span>⌘,</span></div><div>Выйти<span>⌘Q</span></div></div></div></div></div>`;
+}
+mbRoot.addEventListener('click',e=>{
+  const p=e.target.closest('[data-mbpick]');if(p){dns=+p.dataset.mbpick;MB.dnsOpen=false;toast('Сервер: '+DNS[dns]);return renderAll()}
+  if(e.target.closest('[data-mbdns]')&&!e.target.closest('[data-sw]')){MB.dnsOpen=!MB.dnsOpen;renderMB()}
+});
+
+function renderAll(){
+  document.querySelectorAll('[data-s]').forEach(b=>b.classList.toggle('on',on[b.dataset.s]));
+  if(layout=='side')renderSide();else renderTabs();
+  renderMB();
+}
+renderAll();
+window.addEventListener('load',()=>setTimeout(renderAll,400));
+</script></body></html>
