@@ -14,8 +14,7 @@ final class DNSViewModel: ObservableObject {
     @Published var access = DNSManager.PasswordlessState()
     @Published var isSettingUp = false
     @Published var showSettings = false
-    @Published var showTelegram = false
-    @Published var showWarp = false
+    @Published var tab: AppTab = .home
 
     init() {
         // Read the state synchronously once, so a Mac that already has DNS on opens straight into space.
@@ -62,8 +61,8 @@ final class DNSViewModel: ObservableObject {
         reports.first { $0.provider == provider }
     }
 
-    /// Checks every provider's pool without touching the system DNS.
-    func probe() {
+    /// Checks every provider's pool without touching the system DNS. `then` runs when the answers are in.
+    func probe(then completion: (() -> Void)? = nil) {
         guard !isLocked else { return }
         isProbing = true
         probeProgress = "Определяю адреса…"
@@ -81,7 +80,16 @@ final class DNSViewModel: ObservableObject {
                 self.reports = result
                 self.isProbing = false
                 self.probeProgress = ""
+                completion?()
             }
+        }
+    }
+
+    /// The one-button set-up of the first launch: checks every service, takes the best one and switches to it.
+    func enableBest() {
+        probe { [self] in
+            if let best, best.workingCount > 0 { selected = best.provider }
+            if active != selected { change(to: selected) }
         }
     }
 
@@ -239,11 +247,6 @@ final class UpdateViewModel: ObservableObject {
 
     @Published var state: State = .idle
 
-    /// Whether the app asks GitHub for a newer version once at launch. The button in the footer always works.
-    @Published var checkOnLaunch = UserDefaults.standard.object(forKey: "checkUpdatesOnLaunch") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(checkOnLaunch, forKey: "checkUpdatesOnLaunch") }
-    }
-
     /// A silent check stays quiet when offline or when GitHub cannot be reached.
     func check(silent: Bool) {
         if case .installing = state { return }
@@ -287,69 +290,64 @@ final class UpdateViewModel: ObservableObject {
 struct ContentView: View {
     @EnvironmentObject private var model: DNSViewModel
     @StateObject private var updates = UpdateViewModel()
+    @ObservedObject private var onboarding = Onboarding.shared
     @EnvironmentObject private var telegram: TelegramProxyModel
     @EnvironmentObject private var warp: WarpTunnelModel
     @Environment(\.openWindow) private var openWindow
 
+    private func isOn(_ tab: AppTab) -> Bool {
+        switch tab {
+        case .home: return model.active != nil && telegram.isRunning && warp.isOn
+        case .ai: return model.active != nil
+        case .telegram: return telegram.isRunning
+        case .media: return warp.isOn
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            if model.showSettings {
-                SettingsView(model: model, updates: updates)
+            if onboarding.isShown {
+                OnboardingView(model: model, telegram: telegram, warp: warp, onboarding: onboarding)
                     .transition(.opacity)
-            } else if model.showTelegram {
-                TelegramPage(telegram: telegram) { withAnimation(.easeInOut(duration: 0.3)) { model.showTelegram = false } }
-                    .transition(.opacity)
-            } else if model.showWarp {
-                WarpPage(warp: warp) { withAnimation(.easeInOut(duration: 0.3)) { model.showWarp = false } }
+            } else if model.showSettings {
+                SettingsView(model: model, onboarding: onboarding)
                     .transition(.opacity)
             } else {
-                Hero(model: model)
-                ScrollView {
-                    ProvidersSection(model: model)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 8)
+                TabBar(selection: $model.tab, isOn: isOn)
+                    .padding(.top, 38)
+                    .padding(.bottom, 4)
+                switch model.tab {
+                case .home:
+                    HomePage(model: model, telegram: telegram, warp: warp)
+                case .ai:
+                    Hero(model: model)
+                    ScrollView {
+                        ProvidersSection(model: model)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 8)
+                    }
+                    .scrollIndicators(.hidden)
+                case .telegram:
+                    TelegramPage(telegram: telegram)
+                case .media:
+                    WarpPage(warp: warp)
                 }
-                .scrollIndicators(.hidden)
             }
             FooterBar(updates: updates, canInstall: !model.isLocked)
         }
         .frame(width: 400, height: 720)
         .overlay(alignment: .topTrailing) {
-            if !model.showSettings && !model.showTelegram && !model.showWarp {
-                HStack(spacing: 0) {
-                    Button { withAnimation(.easeInOut(duration: 0.3)) { model.showWarp = true } } label: {
-                        Image(systemName: "shield.lefthalf.filled")
-                            .font(.system(size: 13, weight: .regular))
-                            .foregroundStyle(warp.isOn ? Theme.ok : Theme.textSecondary)
-                            .frame(width: 32, height: 28)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(PressableStyle())
-                    .help("Туннель WARP")
-                    .accessibilityLabel("Туннель WARP")
-
-                    Button { withAnimation(.easeInOut(duration: 0.3)) { model.showTelegram = true } } label: {
-                        Image(systemName: "paperplane")
-                            .font(.system(size: 13, weight: .regular))
-                            .foregroundStyle(telegram.isRunning ? Theme.ok : Theme.textSecondary)
-                            .frame(width: 32, height: 28)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(PressableStyle())
-                    .help("Прокси для Telegram")
-                    .accessibilityLabel("Прокси для Telegram")
-
-                    Button { withAnimation(.easeInOut(duration: 0.3)) { model.showSettings = true } } label: {
-                        Image(systemName: "gearshape")
-                            .font(.system(size: 14, weight: .regular))
-                            .foregroundStyle(Theme.textSecondary)
-                            .frame(width: 32, height: 28)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(PressableStyle())
-                    .help("Настройки")
-                    .accessibilityLabel("Настройки")
+            if !model.showSettings && !onboarding.isShown {
+                Button { withAnimation(.easeInOut(duration: 0.3)) { model.showSettings = true } } label: {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundStyle(Theme.textSecondary)
+                        .frame(width: 32, height: 28)
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(PressableStyle())
+                .help("Настройки")
+                .accessibilityLabel("Настройки")
                 .padding(.top, 6)
                 .padding(.trailing, 10)
             }
@@ -367,16 +365,20 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
         .background(WindowConfigurator())
         .animation(.easeInOut(duration: 0.5), value: model.reports.count)
+        .animation(.easeInOut(duration: 0.3), value: onboarding.isShown)
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             model.refresh()
         }
         .onAppear {
-            if updates.checkOnLaunch { updates.check(silent: true) }
+            updates.check(silent: true)
             telegram.openMainWindow = { openWindow(id: "main") }
             StatusMenuController.shared.configure(dns: model, telegram: telegram, warp: warp)
             AppDelegate.openMainWindow = { openWindow(id: "main") }
             // After the window is up, so that the question has something behind it.
-            DispatchQueue.main.async { MoveToApplications.offer() }
+            DispatchQueue.main.async {
+                MoveToApplications.offer()
+                onboarding.showIfFresh(existingSetup: model.active != nil || WarpPaths.isInstalled || UserDefaults.standard.object(forKey: "telegramProxyPort") != nil)
+            }
         }
     }
 }
@@ -434,7 +436,7 @@ private struct Hero: View {
 
     private var subtitle: String {
         switch model.mode {
-        case .off: return "Используется DNS роутера или провайдера"
+        case .off: return "Включите, чтобы открывались ChatGPT, Claude, Gemini и другие нейросети"
         case .on: return ""
         case .probing: return "Спрашиваю DNS и запрашиваю сайты и API"
         case .busy: return model.passwordless && model.access.missing.isEmpty && !model.isSettingUp ? "Меняю DNS на всех подключениях" : "Подтвердите пароль администратора"
@@ -557,7 +559,7 @@ struct OutlineButton: View {
 
 private struct SettingsView: View {
     @ObservedObject var model: DNSViewModel
-    @ObservedObject var updates: UpdateViewModel
+    @ObservedObject var onboarding: Onboarding
 
     private var accessNote: String? {
         let access = model.access
@@ -598,9 +600,6 @@ private struct SettingsView: View {
                     BackgroundCard()
                     LaunchAtLoginCard()
 
-                    HStack { Text("Разрешения").sectionLabel(); Spacer() }
-                        .padding(.horizontal, 2)
-
                     PermissionRow(
                         title: "Смена DNS без пароля",
                         detail: model.access.tooBroad
@@ -616,13 +615,26 @@ private struct SettingsView: View {
                         action: model.togglePasswordless
                     )
 
-                    PermissionRow(
-                        title: "Обновления при запуске",
-                        detail: "Один запрос к GitHub при запуске, чтобы узнать о новой версии. Кнопка проверки внизу окна работает в любом случае.",
-                        granted: updates.checkOnLaunch,
-                        disabled: false,
-                        action: { updates.checkOnLaunch.toggle() }
-                    )
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Первая настройка")
+                                .font(Typo.name)
+                                .foregroundStyle(Theme.textPrimary)
+                            Text("Короткое обучение: по шагам включит нейросети, Telegram, YouTube и Discord.")
+                                .font(Typo.small)
+                                .foregroundStyle(Theme.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 8)
+                        OutlineButton(title: "Пройти заново", color: Theme.textPrimary) {
+                            model.showSettings = false
+                            onboarding.start()
+                        }
+                        .disabled(model.isLocked)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .glassCard(tint: .white, tintOpacity: 0.02, borderOpacity: 0.16, radius: 10)
 
                     Text("Больше Nimb ни о чём не просит: ни доступа к файлам, ни к камере или микрофону.")
                         .font(Typo.small)
@@ -676,7 +688,7 @@ private struct ProbeButton: View {
     @ObservedObject var model: DNSViewModel
 
     var body: some View {
-        Button(action: model.probe) {
+        Button { model.probe() } label: {
             ZStack(alignment: .leading) {
                 GeometryReader { geo in
                     Rectangle()

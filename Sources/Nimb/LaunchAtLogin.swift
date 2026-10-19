@@ -35,7 +35,7 @@ struct LaunchAtLoginCard: View {
                     Text("Запускать при входе в систему")
                         .font(Typo.name)
                         .foregroundStyle(Theme.textPrimary)
-                    Text("Nimb откроется сам, когда вы включите Mac и войдёте в систему. Вместе с режимом «Работать в фоне» и автозапуском прокси всё заработает без вашего участия.")
+                    Text("Nimb откроется сам, когда вы включите Mac и войдёте в систему. Вместе с режимом «Работать в фоне» всё заработает без вашего участия.")
                         .font(Typo.small)
                         .foregroundStyle(Theme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -45,6 +45,7 @@ struct LaunchAtLoginCard: View {
                     .toggleStyle(.switch)
                     .controlSize(.small)
                     .labelsHidden()
+                .tint(Theme.ok)
             }
             if launch.status == .requiresApproval {
                 Text("macOS ждёт подтверждения: «Системные настройки» → «Основные» → «Объекты входа» → включите Nimb.")

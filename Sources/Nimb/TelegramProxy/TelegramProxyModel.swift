@@ -9,7 +9,8 @@ final class TelegramProxyModel: ObservableObject {
     @Published private(set) var port: UInt16 = 0
     @Published private(set) var stats = TelegramProxyStats()
     @Published var errorMessage: String?
-    @Published var autoStart: Bool {
+    /// Whether the proxy was on when Nimb was last used: it comes back by itself, nobody has to find a switch for it.
+    @Published private(set) var autoStart: Bool {
         didSet { UserDefaults.standard.set(autoStart, forKey: Self.autoStartKey) }
     }
 
@@ -57,6 +58,7 @@ final class TelegramProxyModel: ObservableObject {
                 UserDefaults.standard.set(Int(chosen), forKey: Self.portKey)
                 port = chosen
                 isRunning = true
+                autoStart = true
                 beginPolling()
             } catch {
                 errorMessage = "Не удалось запустить прокси: \(error.localizedDescription)"
@@ -69,6 +71,7 @@ final class TelegramProxyModel: ObservableObject {
         poller?.cancel()
         engine.stop()
         isRunning = false
+        autoStart = false
         stats = TelegramProxyStats()
     }
 

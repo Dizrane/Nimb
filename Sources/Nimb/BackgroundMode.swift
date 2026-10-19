@@ -34,6 +34,7 @@ struct BackgroundCard: View {
                 .toggleStyle(.switch)
                 .controlSize(.small)
                 .labelsHidden()
+                .tint(Theme.ok)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
