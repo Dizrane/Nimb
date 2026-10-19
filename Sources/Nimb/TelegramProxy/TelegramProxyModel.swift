@@ -20,7 +20,6 @@ final class TelegramProxyModel: ObservableObject {
     let secretHex: String
     private let engine: TelegramProxyEngine
     private var poller: Task<Void, Never>?
-    private var statusItem: TelegramStatusItem?
     /// Opens the main window again after it has been closed; set by the window itself.
     var openMainWindow: (() -> Void)?
 
@@ -37,14 +36,11 @@ final class TelegramProxyModel: ObservableObject {
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [engine] _ in
             engine.stop()
         }
-        statusItem = TelegramStatusItem(model: self)
         // Not inside the first update of the scenes: changing state then makes SwiftUI abort.
         if autoStart {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.start() }
         }
     }
-
-    var menuBarIconShown: Bool { statusItem?.isShown ?? false }
 
     /// `tg://proxy` link: Telegram Desktop opens a dialog that adds this proxy.
     var link: String { "tg://proxy?server=127.0.0.1&port=\(port)&secret=dd\(secretHex)" }
@@ -99,18 +95,5 @@ final class TelegramProxyModel: ObservableObject {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
-    }
-
-    /// The icon of the menu bar item: a thin halo, a template image so that macOS tints it.
-    static func menuBarImage() -> NSImage {
-        let image = NSImage(size: NSSize(width: 20, height: 12), flipped: false) { rect in
-            NSColor.black.setStroke()
-            let ring = NSBezierPath(ovalIn: rect.insetBy(dx: 1.5, dy: 2.5))
-            ring.lineWidth = 1.6
-            ring.stroke()
-            return true
-        }
-        image.isTemplate = true
-        return image
     }
 }

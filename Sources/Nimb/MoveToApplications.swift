@@ -46,7 +46,7 @@ enum MoveToApplications {
 
         do {
             try move()
-            NSApp.terminate(nil)
+            AppDelegate.quit()
         } catch {
             let failure = NSAlert()
             failure.alertStyle = .warning

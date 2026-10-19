@@ -31,6 +31,7 @@ struct TelegramPage: View {
                 VStack(spacing: 10) {
                     statusCard
                     if telegram.isRunning { connectCard }
+                    BackgroundCard()
                     optionsCard
                     if let message = telegram.errorMessage {
                         NoticeCard(lines: [message], color: Theme.bad, symbol: "xmark.octagon")

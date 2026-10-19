@@ -200,7 +200,7 @@ final class DNSViewModel: ObservableObject {
                     if case DNSError.cancelled = outcome {} else { self.errorMessage = outcome.localizedDescription }
                     self.refresh()
                 } else {
-                    NSApp.terminate(nil)
+                    AppDelegate.quit()
                 }
             }
         }
@@ -270,7 +270,7 @@ final class UpdateViewModel: ObservableObject {
                 try await Updater.install(release) { text in
                     Task { @MainActor in self.state = .installing(text) }
                 }
-                NSApp.terminate(nil)
+                AppDelegate.quit()
             } catch {
                 state = .failed(error.localizedDescription)
             }
@@ -281,7 +281,7 @@ final class UpdateViewModel: ObservableObject {
 // MARK: - Window
 
 struct ContentView: View {
-    @StateObject private var model = DNSViewModel()
+    @EnvironmentObject private var model: DNSViewModel
     @StateObject private var updates = UpdateViewModel()
     @EnvironmentObject private var telegram: TelegramProxyModel
     @Environment(\.openWindow) private var openWindow
@@ -354,6 +354,7 @@ struct ContentView: View {
         .onAppear {
             if updates.checkOnLaunch { updates.check(silent: true) }
             telegram.openMainWindow = { openWindow(id: "main") }
+            StatusMenuController.shared.configure(dns: model, telegram: telegram)
             AppDelegate.openMainWindow = { openWindow(id: "main") }
             // After the window is up, so that the question has something behind it.
             DispatchQueue.main.async { MoveToApplications.offer() }
@@ -575,6 +576,8 @@ private struct SettingsView: View {
 
             ScrollView {
                 VStack(spacing: 10) {
+                    BackgroundCard()
+
                     HStack { Text("Разрешения").sectionLabel(); Spacer() }
                         .padding(.horizontal, 2)
 
