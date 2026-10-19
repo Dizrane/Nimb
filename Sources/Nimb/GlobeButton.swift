@@ -295,9 +295,9 @@ private struct GlobeCanvas: View {
                     let highlighted = path(world.rings(for: region), view, screen)
                     // The glow of the region is two soft strokes under the fill: a blur filter on a big path on every frame is what
                     // made this page the most expensive one.
-                    l.stroke(highlighted, with: .color(green.opacity(0.10 * lit)), style: StrokeStyle(lineWidth: 7, lineJoin: .round))
-                    l.stroke(highlighted, with: .color(green.opacity(0.16 * lit)), style: StrokeStyle(lineWidth: 3.5, lineJoin: .round))
-                    l.fill(highlighted, with: .color(green.opacity(0.12 + 0.70 * lit)))
+                    l.stroke(highlighted, with: .color(white.opacity(0.09 * lit)), style: StrokeStyle(lineWidth: 7, lineJoin: .round))
+                    l.stroke(highlighted, with: .color(white.opacity(0.14 * lit)), style: StrokeStyle(lineWidth: 3.5, lineJoin: .round))
+                    l.fill(highlighted, with: .color(white.opacity(0.10 + 0.55 * lit)))
                     l.stroke(highlighted, with: .color(.white.opacity(0.35 + 0.25 * lit)), lineWidth: 0.7)
 
                     // Night side.
@@ -370,8 +370,8 @@ private struct GlobeCanvas: View {
                             let ping = (t * 0.33).truncatingRemainder(dividingBy: 1)
                             let pr = 2.5 + 11 * ping
                             l.stroke(Path(ellipseIn: CGRect(x: target.x - pr, y: target.y - pr, width: pr * 2, height: pr * 2)),
-                                     with: .color(white.opacity((1 - ping) * 0.6)), lineWidth: 0.9)
-                            l.fill(Path(ellipseIn: CGRect(x: target.x - 1.8, y: target.y - 1.8, width: 3.6, height: 3.6)), with: .color(white))
+                                     with: .color(green.opacity((1 - ping) * 0.85)), lineWidth: 1.1)
+                            l.fill(Path(ellipseIn: CGRect(x: target.x - 2.2, y: target.y - 2.2, width: 4.4, height: 4.4)), with: .color(green))
                         }
                     }
 
