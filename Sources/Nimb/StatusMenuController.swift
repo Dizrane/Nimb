@@ -101,67 +101,128 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
     // MARK: Menu
 
-    func menuNeedsUpdate(_ menu: NSMenu) {
-        guard let dns, let telegram, let warp else { return }
-        dns.refresh()
-        warp.refresh()
-        menu.removeAllItems()
-        let all = AllServices.shared
-        let busy = all.isBusy
+    private let master = NSMenuItem()
+    private let aiItem = NSMenuItem()
+    private let aiToggle = NSMenuItem()
+    private var aiProviders: [NSMenuItem] = []
+    private let tgItem = NSMenuItem()
+    private let tgToggle = NSMenuItem()
+    private let tgOpen = NSMenuItem()
+    private let tgCopy = NSMenuItem()
+    private let warpItem = NSMenuItem()
+    private var watching: [AnyCancellable] = []
 
-        // One switch for everything.
-        let master = action(all.allOn ? "Выключить всё" : "Включить всё", #selector(toggleAll), enabled: !busy)
-        master.image = symbol("power")
+    /// The items are made once and only changed afterwards. A menu that is rebuilt on every opening shows the state of the
+    /// moment it opened and never changes while it is open: that is why a person had to open it again and again.
+    private func build(_ menu: NSMenu) {
+        master.target = self; master.action = #selector(toggleAll); master.image = symbol("power")
         menu.addItem(master)
         menu.addItem(.separator())
 
-        // Each service: a check mark when it works, the details one step deeper.
-        let ai = NSMenuItem(title: "Нейросети", action: nil, keyEquivalent: "")
-        ai.state = dns.active != nil ? .on : .off
-        ai.attributedTitle = titled("Нейросети", detail: dns.active?.name)
+        aiToggle.target = self; aiToggle.action = #selector(toggleDNS)
         let aiMenu = NSMenu()
-        aiMenu.addItem(action(dns.active != nil ? "Выключить" : "Включить (\(dns.selected.name))", #selector(toggleDNS), enabled: !dns.isLocked))
+        aiMenu.addItem(aiToggle)
         aiMenu.addItem(.separator())
         for provider in DNSProvider.all {
             let entry = NSMenuItem(title: provider.name, action: #selector(selectProvider(_:)), keyEquivalent: "")
             entry.target = self
             entry.representedObject = provider.id
-            entry.state = (dns.active ?? dns.selected) == provider ? .on : .off
-            entry.isEnabled = !dns.isLocked
             aiMenu.addItem(entry)
+            aiProviders.append(entry)
         }
-        ai.submenu = aiMenu
-        menu.addItem(ai)
+        aiItem.submenu = aiMenu
+        menu.addItem(aiItem)
 
-        let tg = NSMenuItem(title: "Telegram", action: nil, keyEquivalent: "")
-        tg.state = telegram.isRunning ? .on : .off
-        tg.attributedTitle = titled("Telegram", detail: telegram.isRunning ? "127.0.0.1:\(String(telegram.port))" : nil)
+        tgToggle.target = self; tgToggle.action = #selector(toggleProxy)
+        tgOpen.title = "Открыть в Telegram"; tgOpen.target = self; tgOpen.action = #selector(openInTelegram)
+        tgCopy.title = "Скопировать ссылку"; tgCopy.target = self; tgCopy.action = #selector(copyLink)
         let tgMenu = NSMenu()
-        tgMenu.addItem(action(telegram.isRunning ? "Остановить прокси" : "Включить прокси", #selector(toggleProxy), enabled: !telegram.isStarting))
-        if telegram.isRunning {
-            tgMenu.addItem(.separator())
-            tgMenu.addItem(action("Открыть в Telegram", #selector(openInTelegram)))
-            tgMenu.addItem(action("Скопировать ссылку", #selector(copyLink)))
-        }
-        tg.submenu = tgMenu
-        menu.addItem(tg)
+        [tgToggle, .separator(), tgOpen, tgCopy].forEach { tgMenu.addItem($0) }
+        tgItem.submenu = tgMenu
+        menu.addItem(tgItem)
 
-        switch warp.phase {
-        case .unavailable:
-            break
-        case .working(let text):
-            let entry = NSMenuItem(title: "YouTube и Discord: \(text)", action: nil, keyEquivalent: "")
-            entry.isEnabled = false
-            menu.addItem(entry)
-        default:
-            let entry = action("YouTube и Discord", #selector(toggleWarp), enabled: !busy)
-            entry.state = warp.isOn ? .on : .off
-            menu.addItem(entry)
-        }
+        warpItem.target = self; warpItem.action = #selector(toggleWarp)
+        menu.addItem(warpItem)
 
         menu.addItem(.separator())
         menu.addItem(action("Открыть Nimb", #selector(showWindow)))
         menu.addItem(action("Выйти", #selector(quit)))
+        refreshItems()
+    }
+
+    /// Sets every item to the state of the moment. Called when the menu opens and on every change while it is open.
+    private func refreshItems() {
+        guard let dns, let telegram, let warp else { return }
+        let all = AllServices.shared
+
+        master.title = all.isRunning ? "Подождите…" : (all.allOn ? "Выключить всё" : "Включить всё")
+        master.isEnabled = !all.isBusy
+
+        // Neural networks: a check mark when it works, a dash while it is being switched.
+        let aiBusy = dns.isBusy || dns.isProbing || dns.isSettingUp
+        aiItem.state = aiBusy ? .mixed : (dns.active != nil ? .on : .off)
+        aiItem.attributedTitle = titled("Нейросети", detail: aiBusy ? "переключаю…" : dns.active?.name)
+        aiToggle.title = dns.active != nil ? "Выключить" : "Включить (\(dns.selected.name))"
+        aiToggle.isEnabled = !dns.isLocked
+        for (entry, provider) in zip(aiProviders, DNSProvider.all) {
+            entry.state = (dns.active ?? dns.selected) == provider ? .on : .off
+            entry.isEnabled = !dns.isLocked
+        }
+
+        let tgBusy = telegram.isStarting
+        tgItem.state = tgBusy ? .mixed : (telegram.isRunning ? .on : .off)
+        tgItem.attributedTitle = titled("Telegram", detail: tgBusy ? "запускаю…" : (telegram.isRunning ? "127.0.0.1:\(String(telegram.port))" : nil))
+        tgToggle.title = telegram.isRunning ? "Остановить прокси" : "Включить прокси"
+        tgToggle.isEnabled = !tgBusy
+        tgOpen.isHidden = !telegram.isRunning
+        tgCopy.isHidden = !telegram.isRunning
+        tgToggle.menu?.items.first { $0.isSeparatorItem }?.isHidden = !telegram.isRunning
+
+        if warp.phase == .unavailable {
+            warpItem.isHidden = true
+        } else {
+            warpItem.isHidden = false
+            if case .working(let text) = warp.phase {
+                warpItem.state = .mixed
+                warpItem.attributedTitle = titled("YouTube и Discord", detail: text.lowercased())
+                warpItem.isEnabled = false
+            } else {
+                warpItem.state = warp.isOn ? .on : .off
+                warpItem.attributedTitle = titled("YouTube и Discord", detail: nil)
+                warpItem.isEnabled = !all.isBusy
+            }
+        }
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu === item?.menu, dns != nil else { return }
+        if menu.items.isEmpty { build(menu) }
+        dns?.refresh()
+        warp?.refresh()
+        refreshItems()
+    }
+
+    /// While the menu is open, it follows every change of the services.
+    func menuWillOpen(_ menu: NSMenu) {
+        guard menu === item?.menu, let dns, let telegram, let warp else { return }
+        let all = AllServices.shared
+        let changes: [AnyPublisher<Void, Never>] = [
+            dns.objectWillChange.map { _ in }.eraseToAnyPublisher(),
+            telegram.objectWillChange.map { _ in }.eraseToAnyPublisher(),
+            warp.objectWillChange.map { _ in }.eraseToAnyPublisher(),
+            all.objectWillChange.map { _ in }.eraseToAnyPublisher(),
+        ]
+        // `objectWillChange` fires before the value is set: look at the state on the next turn of the main queue.
+        watching = changes.map { publisher in
+            publisher
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] in self?.refreshItems() }
+        }
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        guard menu === item?.menu else { return }
+        watching.removeAll()
     }
 
     /// A title with a quiet second part on the same line.

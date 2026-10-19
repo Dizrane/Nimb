@@ -115,10 +115,11 @@ final class DNSViewModel: ObservableObject {
             let access = DNSManager.passwordlessState(for: services)
             await MainActor.run {
                 guard !self.isLocked else { return }
-                self.access = access
-                self.active = active
-                self.warnings = shownWarnings
-                if let active { self.selected = active }
+                // Only what changed is published: the same value set again would redraw the pages and the menu for nothing.
+                if self.access != access { self.access = access }
+                if self.active != active { self.active = active }
+                if self.warnings != shownWarnings { self.warnings = shownWarnings }
+                if let active, self.selected != active { self.selected = active }
             }
         }
     }
@@ -226,6 +227,13 @@ final class DNSViewModel: ObservableObject {
             let services = DNSManager.physicalServices()
             let result = Result { try DNSManager.apply(provider, to: services) }
             await MainActor.run {
+                // `apply` has read the servers back and checked them, so success means the state is the one asked for. It
+                // is set in the same moment as "not busy": a reading that came later left a gap in which the page, the
+                // menu and "turn everything off" still saw the old state.
+                if case .success = result {
+                    if self.active != provider { self.active = provider }
+                    if let provider, self.selected != provider { self.selected = provider }
+                }
                 self.isBusy = false
                 if case .failure(let error) = result {
                     if case DNSError.cancelled = error {} else { self.errorMessage = error.localizedDescription }

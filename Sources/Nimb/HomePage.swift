@@ -46,19 +46,19 @@ struct HomePage: View {
                     FeatureRow(
                         symbol: "sparkles", title: "Нейросети",
                         detail: aiOn ? (model.active?.name ?? "Включено") : "ChatGPT, Claude, Gemini и другие",
-                        isOn: aiOn, disabled: busy,
+                        isOn: aiOn, pending: model.isBusy || model.isProbing || model.isSettingUp, disabled: busy,
                         set: { _ in model.toggle() }
                     )
                     FeatureRow(
                         symbol: "paperplane", title: "Telegram",
                         detail: telegram.isRunning ? "Прокси работает" : "Прокси для Telegram Desktop",
-                        isOn: telegram.isRunning, disabled: busy,
+                        isOn: telegram.isRunning, pending: telegram.isStarting, disabled: busy,
                         set: { _ in telegram.toggle() }
                     )
                     FeatureRow(
                         symbol: "play.rectangle", title: "YouTube и Discord",
                         detail: warp.isOn ? "Туннель работает" : (warpAvailable ? "Туннель WARP" : "Недоступно в этой сборке"),
-                        isOn: warp.isOn, disabled: busy || !warpAvailable,
+                        isOn: warp.isOn, pending: warp.isWorking, disabled: busy || !warpAvailable,
                         set: { _ in all.toggleWarp() }
                     )
                     ForEach([model.errorMessage, telegram.errorMessage, warp.errorMessage].compactMap { $0 }, id: \.self) { message in
@@ -78,6 +78,8 @@ private struct FeatureRow: View {
     let title: String
     let detail: String
     let isOn: Bool
+    /// The service is being switched: a small spinner takes the place of the switch until the state is final.
+    var pending = false
     let disabled: Bool
     let set: (Bool) -> Void
 
@@ -101,12 +103,16 @@ private struct FeatureRow: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 8)
-            Toggle(title, isOn: Binding(get: { isOn }, set: set))
-                .toggleStyle(.switch)
-                .controlSize(.small)
-                .labelsHidden()
-                .tint(Theme.ok)
-                .disabled(disabled)
+            if pending {
+                ProgressView().controlSize(.small).frame(width: 38)
+            } else {
+                Toggle(title, isOn: Binding(get: { isOn }, set: set))
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .labelsHidden()
+                    .tint(Theme.ok)
+                    .disabled(disabled)
+            }
         }
         .card()
         .opacity(disabled && !isOn ? 0.6 : 1)

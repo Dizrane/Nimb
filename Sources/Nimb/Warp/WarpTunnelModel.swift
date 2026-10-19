@@ -63,19 +63,24 @@ final class WarpTunnelModel: ObservableObject {
         return (binary, helper)
     }
 
+    /// What the files and the state of the helper say right now.
+    private func currentPhase() -> Phase {
+        if bundledFiles == nil && !WarpPaths.isInstalled { return .unavailable }
+        if !WarpPaths.isInstalled { return .notInstalled }
+        if let interface = Self.runningInterface() { return .on(interface: interface) }
+        return .off
+    }
+
     func refresh() {
         if isWorking { return }
-        let next: Phase
-        if bundledFiles == nil && !WarpPaths.isInstalled {
-            next = .unavailable
-        } else if !WarpPaths.isInstalled {
-            next = .notInstalled
-        } else if let interface = Self.runningInterface() {
-            next = .on(interface: interface)
-        } else {
-            next = .off
-        }
         // Only a change is published: this runs every few seconds, and an unchanged value would redraw every page.
+        let next = currentPhase()
+        if next != phase { phase = next }
+    }
+
+    /// The end of an operation: "working" gives way straight to the real state, with no "off" in between.
+    private func finish() {
+        let next = currentPhase()
         if next != phase { phase = next }
     }
 
@@ -174,8 +179,7 @@ final class WarpTunnelModel: ObservableObject {
                 account = try await WarpRegistration.register()
             } catch {
                 errorMessage = error.localizedDescription
-                phase = .off
-                refresh()
+                finish()
                 return
             }
             phase = .working("Включаю…")
@@ -185,8 +189,7 @@ final class WarpTunnelModel: ObservableObject {
                 // Not installed (the password was refused, say): the account would be left without an owner.
                 if !WarpPaths.isInstalled { await WarpRegistration.delete(account) }
             }
-            phase = .off
-            refresh()
+            finish()
         }
     }
 
@@ -230,8 +233,7 @@ final class WarpTunnelModel: ObservableObject {
                     self.errorMessage = error.localizedDescription
                 }
                 self.checks = []
-                self.phase = .off
-                self.refresh()
+                self.finish()
             }
         }
     }
@@ -295,8 +297,7 @@ final class WarpTunnelModel: ObservableObject {
                 if case .failure(let error) = result {
                     if case DNSError.cancelled = error {} else { self.errorMessage = Self.friendly(error) }
                 }
-                self.phase = .off
-                self.refresh()
+                self.finish()
             }
         }
     }
@@ -313,8 +314,7 @@ final class WarpTunnelModel: ObservableObject {
                 if case .failure(let error) = result {
                     if case DNSError.cancelled = error {} else { self.errorMessage = Self.friendly(error) }
                 }
-                self.phase = .off
-                self.refresh()
+                self.finish()
             }
         }
     }

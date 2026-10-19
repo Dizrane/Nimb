@@ -73,11 +73,13 @@ function build() {
   const all = [...(manifest.layers || []), ...(manifest.loops || [])];
   for (let n = 0; n < count; n++) {
     for (const l of all) {
-      const el = document.createElement(l.kind ? 'video' : 'img');
-      el.className = 'layer'; el.src = base + l.file;
-      if (l.kind) { el.loop = true; el.muted = true; el.autoplay = true; el.playsInline = true; }
-      el.style.width = pw + 'px'; el.style.height = ph + 'px';
-      el.style.left = (180 - center[0]) + 'px'; el.style.top = (109 - center[1] - n * 24) + 'px';
+      const seq = l.kind === 'png-sequence';
+      const el = document.createElement(l.kind && !seq ? 'video' : 'img');
+      el.className = 'layer'; el.src = base + (seq ? l.pattern.replace('%02d', '00') : l.file);
+      if (l.kind && !seq) { el.loop = true; el.muted = true; el.autoplay = true; el.playsInline = true; }
+      const [lw, lh] = seq ? l.pointSize : [pw, ph], [ox, oy] = seq ? l.origin : [0, 0];
+      el.style.width = lw + 'px'; el.style.height = lh + 'px';
+      el.style.left = (180 - center[0] + ox) + 'px'; el.style.top = (109 - center[1] + oy - n * 24) + 'px';
       el.style.mixBlendMode = l.blend === 'screen' ? 'screen' : 'normal';
       el.dataset.base = l.opacity ?? 1; el.dataset.n = n;
       stage.appendChild(el); layers.push({ el, l, n });
@@ -107,6 +109,10 @@ function tick(now) {
     }
     el.style.opacity = op;
     el.style.transform = `translateY(${dy}px) scale(${sc}) rotate(${rot}deg)`;
+    if (l.kind === 'png-sequence' && playing) {
+      const f = Math.floor(t * speed * l.fps + n * 5) % l.frames, name = l.pattern.replace('%02d', String(f).padStart(2, '0'));
+      if (el.dataset.f !== name) { el.dataset.f = name; el.src = base + name; }
+    }
     if (el.tagName === 'VIDEO') { playing ? el.play().catch(() => {}) : el.pause(); }
   }
   requestAnimationFrame(tick);
