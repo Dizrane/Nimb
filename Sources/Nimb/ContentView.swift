@@ -310,7 +310,7 @@ struct ContentView: View {
                 OnboardingView(model: model, telegram: telegram, warp: warp, onboarding: onboarding)
                     .transition(.opacity)
             } else if model.showSettings {
-                SettingsView(model: model, onboarding: onboarding)
+                SettingsView(model: model, onboarding: onboarding, warp: warp)
                     .transition(.opacity)
             } else {
                 TabBar(selection: $model.tab, isOn: isOn)
@@ -368,6 +368,7 @@ struct ContentView: View {
         .animation(.easeInOut(duration: 0.3), value: onboarding.isShown)
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             model.refresh()
+            warp.refreshAccess()
         }
         .onAppear {
             updates.check(silent: true)
@@ -560,6 +561,7 @@ struct OutlineButton: View {
 private struct SettingsView: View {
     @ObservedObject var model: DNSViewModel
     @ObservedObject var onboarding: Onboarding
+    @ObservedObject var warp: WarpTunnelModel
 
     private var accessNote: String? {
         let access = model.access
@@ -613,6 +615,16 @@ private struct SettingsView: View {
                         extraTitle: model.access.needsUpdate ? (model.access.tooBroad ? "Сделать точным" : "Добавить подключения") : nil,
                         extraAction: { model.setPasswordless(true, confirm: false) },
                         action: model.togglePasswordless
+                    )
+
+                    PermissionRow(
+                        title: "Туннель без пароля",
+                        detail: warp.passwordless
+                            ? "Туннель включается и выключается без пароля. Правило sudo (\(WarpPaths.sudoersPath)) разрешает только две команды помощника Nimb: включить и выключить. Цена: любая программа от вашего имени может сделать то же самое."
+                            : "Сейчас macOS просит пароль администратора или Touch ID при каждом включении туннеля. Можно разрешить без пароля только его включение и выключение (две команды помощника Nimb). Самая первая установка туннеля всё равно спросит пароль один раз.",
+                        granted: warp.passwordless,
+                        disabled: warp.isWorking || warp.isSettingAccess,
+                        action: { warp.setPasswordless(!warp.passwordless) }
                     )
 
                     HStack(spacing: 10) {

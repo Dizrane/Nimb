@@ -13,6 +13,9 @@ enum WarpPaths {
     static let binary = "\(dir)/amneziawg-go"
     static let config = "\(dir)/warp.conf"
     static let stateFile = "/var/run/nimb-tunnel.state"
+    /// The sudoers rule that lets the person start and stop the tunnel without a password (opt-in, like the one for DNS).
+    static let sudoersPath = "/etc/sudoers.d/nimb-tunnel"
+    static let passwordlessCommands = ["\(helper) up", "\(helper) down"]
 
     /// Settings and helper are in place (the config itself is readable by root only, so only its presence is checked).
     static var isInstalled: Bool {
@@ -20,7 +23,7 @@ enum WarpPaths {
     }
 
     /// Stops the tunnel and deletes everything that was installed. Used by "remove" and by the uninstall.
-    static let removeScript = "[ ! -x '\(helper)' ] || { '\(helper)' down; '\(helper)' unregister || true; }; /bin/rm -rf '\(dir)' /var/run/nimb-tunnel.state /var/run/nimb-tunnel.log /var/run/nimb-tunnel.name"
+    static let removeScript = "[ ! -x '\(helper)' ] || { '\(helper)' down; '\(helper)' unregister || true; }; /bin/rm -f '\(sudoersPath)'; /bin/rm -rf '\(dir)' /var/run/nimb-tunnel.state /var/run/nimb-tunnel.log /var/run/nimb-tunnel.name"
 }
 
 /// The WARP tunnel: AmneziaWG (WireGuard with extra camouflage) to Cloudflare, so that YouTube and Discord open.
@@ -45,11 +48,15 @@ final class WarpTunnelModel: ObservableObject {
     @Published var errorMessage: String?
     @Published private(set) var checks: [SiteCheck] = []
     @Published private(set) var isChecking = false
+    /// sudo lets this person start and stop the tunnel without a password.
+    @Published private(set) var passwordless = false
+    @Published private(set) var isSettingAccess = false
 
     private var timer: Timer?
 
     init() {
         refresh()
+        refreshAccess()
     }
 
     var isOn: Bool { if case .on = phase { return true } else { return false } }
@@ -82,6 +89,65 @@ final class WarpTunnelModel: ObservableObject {
         // EPERM means the process exists but belongs to root, which is what is expected here.
         if kill(pid, 0) == 0 || errno == EPERM { return interface }
         return nil
+    }
+
+    /// Reads what sudo allows, off the main thread: it starts a process.
+    func refreshAccess() {
+        Task.detached {
+            let allowed = DNSManager.sudoAllows(WarpPaths.passwordlessCommands)
+            await MainActor.run { self.passwordless = allowed }
+        }
+    }
+
+    /// Gives or takes back the right to start and stop the tunnel without a password. The risk is explained first.
+    func setPasswordless(_ enable: Bool, confirm: Bool = true) {
+        guard !isWorking, !isSettingAccess else { return }
+        let user = NSUserName()
+        if enable {
+            guard user.range(of: #"^[A-Za-z0-9_][A-Za-z0-9._-]*$"#, options: .regularExpression) != nil else {
+                errorMessage = "Имя пользователя «\(user)» содержит необычные символы, правило для него не создаю."
+                return
+            }
+            if confirm {
+                let alert = NSAlert()
+                alert.messageText = "Включать туннель без пароля?"
+                alert.informativeText = """
+                    Nimb добавит правило в \(WarpPaths.sudoersPath). Один раз понадобится пароль администратора.
+
+                    Правило разрешает вашей учётной записи без пароля только две команды помощника Nimb: включить туннель и выключить его. Помощник лежит в папке, куда может писать только администратор, подменить его нельзя.
+
+                    Риск: любая программа, запущенная от вашего имени, сможет включить или выключить туннель без пароля. Забрать разрешение можно в любой момент.
+                    """
+                alert.addButton(withTitle: "Дать")
+                alert.addButton(withTitle: "Отмена")
+                guard alert.runModal() == .alertFirstButtonReturn else { return }
+            }
+        }
+        errorMessage = nil
+        isSettingAccess = true
+        Task.detached {
+            let result = Result<Void, Error> {
+                if enable {
+                    let lines = [
+                        "# Nimb: lets \(user) start and stop the WARP tunnel without a password. Remove this file to undo.",
+                        "\(user) ALL = (root) NOPASSWD: \(WarpPaths.passwordlessCommands.joined(separator: ", "))",
+                    ]
+                    try DNSManager.runPrivileged(DNSManager.ruleInstallScript(at: WarpPaths.sudoersPath, lines: lines))
+                } else {
+                    try DNSManager.runPrivileged("/bin/rm -f '\(WarpPaths.sudoersPath)'")
+                }
+            }
+            let allowed = DNSManager.sudoAllows(WarpPaths.passwordlessCommands)
+            await MainActor.run {
+                self.isSettingAccess = false
+                self.passwordless = allowed
+                if case .failure(let error) = result {
+                    if case DNSError.cancelled = error {} else { self.errorMessage = error.localizedDescription }
+                } else if enable && !allowed {
+                    self.errorMessage = "Правило установлено, но sudo всё равно просит пароль."
+                }
+            }
+        }
     }
 
     func startWatching() {
@@ -193,8 +259,10 @@ final class WarpTunnelModel: ObservableObject {
         checks = []
         phase = .working("Включаю…")
         let upgrade = upgrade
+        let withoutPassword = passwordless && upgrade == nil
         Task.detached {
             let result = Result<String, Error> {
+                if withoutPassword { return try Self.runWithoutPassword("up") }
                 var script = "'\(WarpPaths.helper)' up"
                 var stage: URL?
                 defer { if let stage { try? FileManager.default.removeItem(at: stage) } }
@@ -229,8 +297,9 @@ final class WarpTunnelModel: ObservableObject {
         errorMessage = nil
         checks = []
         phase = .working("Выключаю…")
+        let withoutPassword = passwordless
         Task.detached {
-            let result = Result { try DNSManager.runPrivileged("'\(WarpPaths.helper)' down") }
+            let result = Result { withoutPassword ? try Self.runWithoutPassword("down") : try DNSManager.runPrivileged("'\(WarpPaths.helper)' down") }
             await MainActor.run {
                 if case .failure(let error) = result {
                     if case DNSError.cancelled = error {} else { self.errorMessage = error.localizedDescription }
@@ -238,6 +307,16 @@ final class WarpTunnelModel: ObservableObject {
                 self.phase = .off
                 self.refresh()
             }
+        }
+    }
+
+    /// Starts or stops the tunnel through the sudoers rule. If sudo asks for a password after all (the rule is gone or
+    /// stale), the usual prompt is used instead.
+    nonisolated private static func runWithoutPassword(_ verb: String) throws -> String {
+        do {
+            return try DNSManager.runWithoutPassword([WarpPaths.helper, verb])
+        } catch DNSError.failed(let message) where message.contains("password is required") || message.contains("not allowed") || message.contains("may not run") {
+            return try DNSManager.runPrivileged("'\(WarpPaths.helper)' \(verb)")
         }
     }
 

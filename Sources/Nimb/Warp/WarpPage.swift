@@ -46,8 +46,9 @@ struct WarpPage: View {
                     if let message = warp.errorMessage {
                         NoticeCard(lines: [message], color: Theme.bad, symbol: "xmark.octagon")
                     }
+                    if warp.isInstalled && !warp.passwordless && !warp.isWorking { passwordHint }
                     if warp.isInstalled && !warp.isWorking { removeRow }
-                    Text("Туннель создаёт системное подключение и меняет маршруты, поэтому включение просит пароль администратора. Основано на amneziawg-go (MIT).")
+                    Text("Туннель создаёт системное подключение и меняет маршруты, поэтому первая установка просит пароль администратора. Основано на amneziawg-go (MIT).")
                         .font(Typo.small)
                         .foregroundStyle(Theme.textSecondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -114,6 +115,22 @@ struct WarpPage: View {
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassCard(tint: Theme.ok, tintOpacity: 0.03, borderOpacity: 0.28, radius: 10)
+    }
+
+    /// The tunnel asks for the administrator password each time; the person may allow it without.
+    private var passwordHint: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text("Включение туннеля каждый раз просит пароль. Можно разрешить включать и выключать его без пароля.")
+                .font(Typo.small)
+                .foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 4)
+            OutlineButton(title: "Без пароля", color: Theme.warn) { warp.setPasswordless(true) }
+                .disabled(warp.isSettingAccess)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassCard(tint: Theme.warn, tintOpacity: 0.03, borderOpacity: 0.28, radius: 10)
     }
 
     private var removeRow: some View {

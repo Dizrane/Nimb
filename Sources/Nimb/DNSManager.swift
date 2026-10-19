@@ -138,7 +138,7 @@ enum DNSManager {
         }
         script.append("/usr/bin/dscacheutil -flushcache || { echo \(shellQuote("Не удалось сбросить кэш DNS (dscacheutil).")) >&2; failed=1; }")
         script.append("/usr/bin/killall -HUP mDNSResponder || { echo \(shellQuote("Не удалось перезапустить mDNSResponder.")) >&2; failed=1; }")
-        if removingRule { script.append("[ $failed -eq 0 ] && /bin/rm -f \(sudoersPath)") }
+        if removingRule { script.append("[ $failed -eq 0 ] && /bin/rm -f \(sudoersPath) \(WarpPaths.sudoersPath)") }
         if removingTunnel { script.append("[ $failed -eq 0 ] && { \(WarpPaths.removeScript); }") }
         script.append("exit $failed")
         return script.joined(separator: "; ")
@@ -269,20 +269,37 @@ enum DNSManager {
         }
         let services = physicalServices().filter(isRuleSafe)
         guard !services.isEmpty else { throw DNSError.failed("Не нашёл сетевых подключений, для которых можно составить правило.") }
-        let lines = sudoersRule(for: user, services: services).map(shellQuote).joined(separator: " ")
-        let script = [
+        let script = ruleInstallScript(at: sudoersPath, lines: sudoersRule(for: user, services: services))
+        try runPrivileged(script)
+        let state = passwordlessState(for: services)
+        guard state.enabled, state.missing.isEmpty else { throw DNSError.failed("Правило установлено, но sudo всё равно просит пароль.") }
+    }
+
+    /// The script that checks a rule with visudo and installs it as `path`: nothing is installed unless the rule is valid.
+    static func ruleInstallScript(at path: String, lines: [String]) -> String {
+        let quoted = lines.map(shellQuote).joined(separator: " ")
+        return [
             "set -e",
             "grep -Eq '^[#@]includedir[[:space:]]+(/private)?/etc/sudoers[.]d' /etc/sudoers || { echo \(shellQuote("В /etc/sudoers не подключена папка sudoers.d.")) >&2; exit 1; }",
             "mkdir -p /etc/sudoers.d",
             "tmp=$(/usr/bin/mktemp /tmp/nimb-sudoers.XXXXXX)",
             "trap 'rm -f \"$tmp\"' EXIT",
-            "printf '%s\\n' \(lines) > \"$tmp\"",
+            "printf '%s\\n' \(quoted) > \"$tmp\"",
             "/usr/sbin/visudo -cf \"$tmp\" >/dev/null || { echo \(shellQuote("Правило не прошло проверку visudo, ничего не установлено.")) >&2; exit 1; }",
-            "/usr/bin/install -m 440 -o root -g wheel \"$tmp\" \(sudoersPath)",
+            "/usr/bin/install -m 440 -o root -g wheel \"$tmp\" \(path)",
         ].joined(separator: "; ")
-        try runPrivileged(script)
-        let state = passwordlessState(for: services)
-        guard state.enabled, state.missing.isEmpty else { throw DNSError.failed("Правило установлено, но sudo всё равно просит пароль.") }
+    }
+
+    /// Whether sudo lets this user run every one of the commands (each as one line, like `/path/to/tool up`) without a password.
+    static func sudoAllows(_ commands: [String]) -> Bool {
+        let list = noPasswordList()
+        return commands.allSatisfy(list.allows)
+    }
+
+    /// Runs a command as root through `sudo -n`: it fails at once, without asking, if a password would be needed.
+    @discardableResult
+    static func runWithoutPassword(_ arguments: [String]) throws -> String {
+        try run("/usr/bin/sudo", ["-n"] + arguments)
     }
 
     /// Removes the sudoers rule again. Asks for the administrator password.
