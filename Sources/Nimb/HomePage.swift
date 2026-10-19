@@ -34,6 +34,7 @@ struct HomePage: View {
                 isOn: allOn,
                 isBusy: busy,
                 level: Double(onCount) / Double(warpAvailable ? 3 : 2),
+                halos: onCount,
                 title: title,
                 subtitle: subtitle,
                 accessibility: allOn ? "Выключить всё" : "Включить всё",

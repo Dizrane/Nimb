@@ -19,6 +19,8 @@ struct MascotHero: View {
     /// How much of the halo shines, 0 to 1. By default all of it while on, none while off; the home page uses the
     /// part of the services that are on.
     var level: Double? = nil
+    /// The home page stacks one halo for each service that is on (up to three). Nil: one halo that fades in and out.
+    var halos: Int? = nil
     let title: String
     let subtitle: String
     let accessibility: String
@@ -30,12 +32,15 @@ struct MascotHero: View {
     @StateObject private var hover = Flag()
 
     /// Where the crown of the figure is, relative to the middle of the stage, and how large the halo is around it.
-    private let stageHeight: CGFloat = 208
+    private var stageHeight: CGFloat { art == .power ? 236 : 208 }
+    /// Where the middle of the figure is below the middle of the stage.
+    private var figureY: CGFloat { art == .power ? 26 : 2 }
+    private let haloSpacing: CGFloat = 24
     private var haloY: CGFloat {
         switch art {
         case .hood: -49
         case .screen: -43
-        case .power: -57
+        case .power: -35
         }
     }
     private var haloScale: CGFloat {
@@ -49,7 +54,7 @@ struct MascotHero: View {
     var body: some View {
         let lit: Double = level ?? (isOn ? 1 : 0)
         // With Reduce Motion the halo only fades in; it does not come down from above.
-        let haloDrop: CGFloat = reduceMotion ? 0 : CGFloat(lit - 1) * 18
+        let stack = haloStack(lit: lit)
         let h: Double = hover.value ? 1 : 0
         VStack(spacing: 6) {
             Button(action: action) {
@@ -57,27 +62,33 @@ struct MascotHero: View {
                     Circle()
                         .fill(RadialGradient(colors: [Color.white.opacity(0.05 + 0.13 * lit + 0.04 * h * lit), .clear], center: .center, startRadius: 8, endRadius: 128))
                         .frame(width: 270, height: 270)
-                        .offset(y: 4)
+                        .offset(y: figureY + 2)
 
-                    haloImage(HaloImages.shared.back)
-                        .opacity(lit)
-                        .offset(y: haloY + haloDrop)
+                    ForEach(stack.indices, id: \.self) { i in
+                        haloImage(HaloImages.shared.back, scale: stack[i].scale)
+                            .opacity(stack[i].opacity)
+                            .offset(y: stack[i].y)
+                    }
 
                     figure(lit: lit, hover: h)
-                        .offset(y: 2)
+                        .offset(y: figureY)
 
-                    haloImage(HaloImages.shared.front)
-                        .opacity(lit)
-                        .offset(y: haloY + haloDrop)
+                    ForEach(stack.indices, id: \.self) { i in
+                        haloImage(HaloImages.shared.front, scale: stack[i].scale)
+                            .opacity(stack[i].opacity)
+                            .offset(y: stack[i].y)
+                    }
 
-                    TimelineView(.animation(minimumInterval: 1.0 / 24, paused: lit < 0.99 || reduceMotion || scenePhase != .active)) { context in
+                    TimelineView(.animation(minimumInterval: 1.0 / 24, paused: lit <= 0 || reduceMotion || scenePhase != .active)) { context in
                         Canvas { ctx, size in
-                            let place = (center: CGPoint(x: size.width / 2, y: size.height / 2 + haloY), scale: haloScale)
+                            // The sparks run around the highest halo that is on.
+                            let top = stack.last(where: { $0.opacity > 0 }) ?? stack[0]
+                            let place = (center: CGPoint(x: size.width / 2, y: size.height / 2 + top.y), scale: top.scale)
                             HaloSparks.draw(&ctx, place, t: reduceMotion ? 0 : context.date.timeIntervalSinceReferenceDate, spin: 1, strength: 1)
                         }
                         .allowsHitTesting(false)
                     }
-                    .opacity(lit)
+                    .opacity(lit > 0 ? 1 : 0)
 
                     if art != .power { badge(hover: h).offset(y: 84) }
                 }
@@ -109,11 +120,25 @@ struct MascotHero: View {
         .animation(.easeInOut(duration: 0.35), value: title)
     }
 
-    private func haloImage(_ image: CGImage) -> some View {
+    /// The halos to draw: one that fades in over the figure, or on the home page one for every service that is on,
+    /// each a little smaller and higher than the one below it.
+    private func haloStack(lit: Double) -> [(opacity: Double, y: CGFloat, scale: CGFloat)] {
+        // Without Reduce Motion a halo comes down from above as it appears.
+        let drop: (Bool) -> CGFloat = { on in on || reduceMotion ? 0 : -18 }
+        guard let halos else {
+            return [(lit, haloY + (reduceMotion ? 0 : CGFloat(lit - 1) * 18), haloScale)]
+        }
+        return (0..<3).map { i in
+            let on = i < halos
+            return (on ? 1 : 0, haloY - CGFloat(i) * haloSpacing + drop(on), haloScale * (1 - 0.07 * CGFloat(i)))
+        }
+    }
+
+    private func haloImage(_ image: CGImage, scale: CGFloat) -> some View {
         let size = HaloImages.shared.size
         return Image(decorative: image, scale: HaloImages.shared.pixelScale)
             .resizable()
-            .frame(width: size.width * haloScale, height: size.height * haloScale)
+            .frame(width: size.width * scale, height: size.height * scale)
             .allowsHitTesting(false)
     }
 

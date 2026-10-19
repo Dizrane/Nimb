@@ -4,7 +4,7 @@ import SwiftUI
 struct ScreenArt: View {
     var body: some View {
         Canvas { ctx, size in
-            let screen = CGRect(x: 6, y: 6, width: 126, height: 88)
+            let screen = CGRect(x: 13, y: 6, width: 126, height: 88)
             let bezel = Path(roundedRect: screen, cornerRadius: 24, style: .continuous)
             let display = Path(roundedRect: screen.insetBy(dx: 7, dy: 7), cornerRadius: 17, style: .continuous)
 
