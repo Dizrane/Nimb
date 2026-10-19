@@ -41,14 +41,14 @@ struct MascotHero: View {
     private var haloY: CGFloat {
         switch art {
         case .hood: -49
-        case .screen: -51
+        case .screen: -36
         case .power: -35
         }
     }
     private var haloScale: CGFloat {
         switch art {
         case .hood: 0.80
-        case .screen: 0.92
+        case .screen: 0.80
         case .power: 0.96
         }
     }
@@ -56,7 +56,7 @@ struct MascotHero: View {
     private var beamTarget: CGPoint {
         switch art {
         case .hood: CGPoint(x: 0, y: 33)
-        case .screen: CGPoint(x: -3, y: -10)
+        case .screen: CGPoint(x: -2, y: -8)
         case .power: .zero
         }
     }
@@ -281,7 +281,7 @@ struct MascotHero: View {
         case .hood:
             HoodArt().lit(rim: rim, glow: lit)
         case .screen:
-            ScreenArt().lit(rim: rim, glow: lit)
+            ScreenArt().scaleEffect(0.8).lit(rim: rim, glow: lit)
         case .power:
             PowerDisc(isOn: isOn, isBusy: isBusy, hover: hover)
         }
