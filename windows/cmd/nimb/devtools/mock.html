@@ -21,6 +21,13 @@ window.go = { main: { App: {
   SetAI: toggle('ai', 'ai', 600), SetTelegram: toggle('tg', 'telegram', 300), SetMedia: toggle('media', 'media', 1500),
   SetAll: async (on) => { await Promise.all([toggle('ai', 'ai', 600)(on), toggle('tg', 'telegram', 300)(on), toggle('media', 'media', 1500)(on)]); return { ok: true }; },
   SetProvider: async (id) => { M.provider = id; return { ok: true }; },
+  Onboarded: async () => localStorage.getItem('onb') === '1', FinishOnboarding: async () => localStorage.setItem('onb', '1'),
+  RestartOnboarding: async () => localStorage.removeItem('onb'), OpenTerms: () => {},
+  GetAutostart: async () => localStorage.getItem('auto') === '1', SetAutostart: async (on) => { localStorage.setItem('auto', on ? '1' : '0'); return { ok: true }; },
+  ReportPrepare: async () => { await wait(600); return { id: 'AB12CD', facts: '— Программа —\nNimb для Windows 0.1.0\n\n— Сервисы —\nНейросети: выключено' }; },
+  ReportPreview: async (d, c) => `Отчёт № AB12CD\n\nЧто случилось:\n${d || '(не описано)'}${c ? '\n\nКак ответить: ' + c : ''}\n\n— Программа —\nNimb для Windows 0.1.0`,
+  ReportSend: async () => { await wait(800); return location.search.includes('fail') ? { ok: false, error: 'Не удалось соединиться с сервером отчётов.' } : { ok: true }; },
+  ReportCopy: async () => ({ ok: true }), ReportWrite: async () => ({ ok: true }),
   OpenTelegram: async () => ({ ok: true }), CopyLink: async () => ({ ok: true }), OpenChannel: () => {}, Quit: () => {}, Log: () => {},
   InitialPage: async () => new URLSearchParams(location.search).get('page') || 'home',
 } } };

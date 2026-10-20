@@ -27,10 +27,11 @@ const (
 	TunnelUnregister = "tunnel.unregister"
 	DNSSet           = "dns.set"     // takes the ID of a provider from the list of the service
 	DNSRestore       = "dns.restore" // gives the DNS of the adapters back
+	Diag             = "diag"        // facts of the service for a report about a problem (no keys)
 )
 
 var known = map[string]bool{
-	Ping: true, Status: true, TunnelUp: true, TunnelDown: true, TunnelUnregister: true, DNSSet: true, DNSRestore: true,
+	Ping: true, Status: true, TunnelUp: true, TunnelDown: true, TunnelUnregister: true, DNSSet: true, DNSRestore: true, Diag: true,
 }
 
 // MaxLine is the longest line the service reads.
@@ -49,6 +50,8 @@ type Response struct {
 	Error  string        `json:"error,omitempty"` // worded for the person
 	Tunnel *TunnelStatus `json:"tunnel,omitempty"`
 	DNS    *DNSStatus    `json:"dns,omitempty"`
+	// Lines answer the command diag.
+	Lines []string `json:"lines,omitempty"`
 }
 
 // DNSStatus is the state of Smart DNS.

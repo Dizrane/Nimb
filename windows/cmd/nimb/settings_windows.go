@@ -21,6 +21,8 @@ type Settings struct {
 	TelegramAuto bool `json:"telegramAuto"`
 	// Provider is the Smart DNS provider chosen last.
 	Provider string `json:"provider"`
+	// OnboardingDone: the first setup was gone through (or skipped).
+	OnboardingDone bool `json:"onboardingDone"`
 }
 
 type settingsStore struct {

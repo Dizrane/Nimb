@@ -1,0 +1,61 @@
+//go:build windows
+
+package main
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+
+	"golang.org/x/sys/windows/registry"
+)
+
+const runKey = `Software\Microsoft\Windows\CurrentVersion\Run`
+
+// The command that starts Nimb with Windows: the exe of this copy, quietly (to the tray, no window).
+func autostartCommand() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return `"` + exe + `" --hidden`
+}
+
+// autostartOn says whether Nimb is in the list of programs that start with Windows (and points at this exe).
+func autostartOn() bool {
+	k, err := registry.OpenKey(registry.CURRENT_USER, runKey, registry.QUERY_VALUE)
+	if err != nil {
+		return false
+	}
+	defer k.Close()
+	v, _, err := k.GetStringValue("Nimb")
+	return err == nil && strings.EqualFold(v, autostartCommand())
+}
+
+func setAutostart(on bool) error {
+	k, _, err := registry.CreateKey(registry.CURRENT_USER, runKey, registry.SET_VALUE)
+	if err != nil {
+		return err
+	}
+	defer k.Close()
+	if !on {
+		if err := k.DeleteValue("Nimb"); err != nil && err != registry.ErrNotExist {
+			return err
+		}
+		return nil
+	}
+	return k.SetStringValue("Nimb", autostartCommand())
+}
+
+// A file that exists while Nimb runs: if it is there at the start, the last run did not end by itself (a crash, a power cut).
+func sessionMarker() string { return filepath.Join(dataDir(), "session.marker") }
+
+func beginSession() (previousEndedBadly bool) {
+	_, err := os.Stat(sessionMarker())
+	previousEndedBadly = err == nil
+	os.MkdirAll(dataDir(), 0o700)
+	os.WriteFile(sessionMarker(), []byte("running"), 0o600)
+	return previousEndedBadly
+}
+
+func endSession() { os.Remove(sessionMarker()) }

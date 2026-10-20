@@ -5,7 +5,10 @@
 package main
 
 import (
+	"context"
 	"embed"
+	"os"
+	"slices"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -29,6 +32,8 @@ func main() {
 		OnStartup:         app.startup,
 		OnBeforeClose:     app.beforeClose,
 		HideWindowOnClose: true,
+		StartHidden:       slices.Contains(os.Args[1:], "--hidden"),
+		OnShutdown:        func(context.Context) { endSession() },
 		Bind:              []any{app},
 		SingleInstanceLock: &options.SingleInstanceLock{
 			UniqueId:               "com.nimb.windows",

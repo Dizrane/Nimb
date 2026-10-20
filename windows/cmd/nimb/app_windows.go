@@ -18,10 +18,11 @@ import (
 	"github.com/Dizrane/Nimb/windows/internal/dnsx"
 	"github.com/Dizrane/Nimb/windows/internal/ipc"
 	"github.com/Dizrane/Nimb/windows/internal/tgproxy"
+	"github.com/Dizrane/Nimb/windows/internal/version"
 )
 
 // Version of the Windows app. It is not tied to the number of the Mac app.
-const Version = "0.1.0"
+var Version = version.Version
 
 // App is what the page can call.
 type App struct {
@@ -33,6 +34,10 @@ type App struct {
 	mu   sync.Mutex // one switch at a time
 	busy map[string]bool
 	errs map[string]string
+
+	// for a report about a problem
+	reportID, reportFacts string
+	previousEndedBadly    bool
 }
 
 // NewApp makes the application object.
@@ -42,6 +47,8 @@ func NewApp() *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	a.previousEndedBadly = beginSession()
+	logLine("start " + Version)
 	engine, err := tgproxy.New(a.settings.get().TelegramSecret, tgproxy.DefaultConfig())
 	if err == nil {
 		a.tg = engine
@@ -69,6 +76,7 @@ func (a *App) ShowWindow() {
 
 // Quit closes Nimb. The proxy of Telegram stops with it; DNS and the tunnel stay as they are, as on the Mac.
 func (a *App) Quit() {
+	endSession()
 	if a.tg != nil {
 		a.tg.Stop()
 	}
@@ -113,13 +121,19 @@ type State struct {
 	Providers []Provider `json:"providers"`
 }
 
+func providerList() []Provider {
+	var out []Provider
+	for _, p := range dnsx.Providers {
+		out = append(out, Provider{p.ID, p.Name})
+	}
+	return out
+}
+
 // GetState reads the state of the three services.
 func (a *App) GetState() State {
 	var st State
 	st.Version = Version
-	for _, p := range dnsx.Providers {
-		st.Providers = append(st.Providers, Provider{p.ID, p.Name})
-	}
+	st.Providers = providerList()
 	set := a.settings.get()
 	st.AI.Provider = set.Provider
 
@@ -179,6 +193,7 @@ func (a *App) end(name string, err error) Result {
 	}
 	a.mu.Unlock()
 	if err != nil {
+		logLine(name + ": " + err.Error())
 		return Result{Error: err.Error()}
 	}
 	return Result{OK: true}
@@ -340,6 +355,32 @@ func (a *App) Log(line string) {
 		line = line[:500]
 	}
 	logLine(line)
+}
+
+// Onboarded says whether the first setup has been gone through.
+func (a *App) Onboarded() bool { return a.settings.get().OnboardingDone }
+
+// FinishOnboarding remembers that the first setup is over.
+func (a *App) FinishOnboarding() { a.settings.update(func(s *Settings) { s.OnboardingDone = true }) }
+
+// RestartOnboarding makes the first setup show again.
+func (a *App) RestartOnboarding() { a.settings.update(func(s *Settings) { s.OnboardingDone = false }) }
+
+// GetAutostart says whether Nimb starts with Windows.
+func (a *App) GetAutostart() bool { return autostartOn() }
+
+// SetAutostart makes Nimb start with Windows (quietly, to the tray) or not.
+func (a *App) SetAutostart(on bool) Result {
+	if err := setAutostart(on); err != nil {
+		logLine("autostart: " + err.Error())
+		return Result{Error: "Не удалось изменить автозапуск."}
+	}
+	return Result{OK: true}
+}
+
+// OpenTerms opens the terms of Cloudflare WARP in the browser.
+func (a *App) OpenTerms() {
+	runtime.BrowserOpenURL(a.ctx, "https://www.cloudflare.com/application/terms/")
 }
 
 // OpenChannel opens the channel of Nimb in the browser.

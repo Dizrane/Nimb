@@ -47,8 +47,9 @@ type Helper struct {
 	tun *tunnel.Tunnel
 
 	// backup is what the adapters had before Smart DNS; nil when Smart DNS is off.
-	backup *dnsx.Backup
-	watch  *dnsWatcher
+	backup  *dnsx.Backup
+	watch   *dnsWatcher
+	started time.Time
 }
 
 // New prepares the folder (closed to everybody but the system and the administrators) and returns a helper.
@@ -59,7 +60,7 @@ func New(dir string, logf func(string, ...any)) (*Helper, error) {
 	if err := secureDir(dir); err != nil {
 		return nil, fmt.Errorf("папка службы: %w", err)
 	}
-	h := &Helper{dir: dir, logf: logf}
+	h := &Helper{dir: dir, logf: logf, started: time.Now()}
 	h.backup = h.loadBackup()
 	h.startWatching()
 	return h, nil
@@ -83,6 +84,8 @@ func (h *Helper) Handle(ctx context.Context, req ipc.Request) ipc.Response {
 		return ipc.Response{OK: true}
 	case ipc.Status:
 		return ipc.Response{OK: true, Tunnel: h.status(), DNS: h.dnsStatus()}
+	case ipc.Diag:
+		return ipc.Response{OK: true, Lines: h.diag()}
 	case ipc.DNSSet:
 		provider, ok := dnsx.Find(req.Provider)
 		if !ok {
