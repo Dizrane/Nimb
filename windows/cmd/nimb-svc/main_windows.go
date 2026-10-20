@@ -6,19 +6,23 @@
 //	nimb-svc install    register and start the service (administrator)
 //	nimb-svc uninstall  stop and remove the service (administrator)
 //	nimb-svc run        run in this console, for debugging (administrator)
+//	nimb-svc cleanup    after uninstall: give the DNS back, delete the account at Cloudflare, remove the data and the driver (administrator)
 package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
+	"golang.zx2c4.com/wintun"
 
 	"github.com/Dizrane/Nimb/windows/internal/helper"
 	"github.com/Dizrane/Nimb/windows/internal/ipc"
@@ -43,6 +47,8 @@ func main() {
 		err = install()
 	case "uninstall":
 		err = uninstall()
+	case "cleanup":
+		err = cleanup()
 	case "run":
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer stop()
@@ -121,6 +127,21 @@ func openLog() (func(string, ...any), func()) {
 	}, func() { f.Close() }
 }
 
+// cleanup is called by the uninstaller after the service is removed.
+func cleanup() error {
+	logf := func(format string, args ...any) { fmt.Printf(format+"\n", args...) }
+	problems := helper.Cleanup(helper.DataDir(), logf)
+	// The driver of the adapter (wintun) stays in the system after the program is gone; it is removed here, with its DLL, which sits next to this file.
+	if err := wintun.Uninstall(); err != nil {
+		fmt.Println("driver:", err)
+	}
+	if len(problems) > 0 {
+		return errors.New(strings.Join(problems, "; "))
+	}
+	fmt.Println("cleaned")
+	return nil
+}
+
 func install() error {
 	exe, err := os.Executable()
 	if err != nil {
@@ -132,8 +153,23 @@ func install() error {
 	}
 	defer m.Disconnect()
 	if s, err := m.OpenService(serviceName); err == nil {
-		s.Close()
-		return fmt.Errorf("служба %s уже установлена", serviceName)
+		// An update: the service stays, it only points at the new file; it is started again if it is not running.
+		defer s.Close()
+		cfg, err := s.Config()
+		if err != nil {
+			return err
+		}
+		cfg.BinaryPathName = `"` + exe + `"`
+		if err := s.UpdateConfig(cfg); err != nil {
+			return err
+		}
+		if st, err := s.Query(); err == nil && st.State == svc.Stopped {
+			if err := s.Start(); err != nil {
+				return fmt.Errorf("служба обновлена, но не запустилась: %w", err)
+			}
+		}
+		fmt.Println("service updated")
+		return nil
 	}
 	s, err := m.CreateService(serviceName, exe, mgr.Config{
 		DisplayName: "Nimb: помощник",
