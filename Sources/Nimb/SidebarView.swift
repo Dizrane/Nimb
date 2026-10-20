@@ -35,24 +35,35 @@ struct SidebarView: View {
     private func row(_ page: AppPage) -> some View {
         let selected = nav.page == page
         return HStack(spacing: 8) {
-            Button {
-                PlayableIcon.play(page, reduceMotion: reduceMotion)
-                withAnimation(.easeOut(duration: 0.12)) { nav.select(page) }
-            } label: {
+            if page.isService {
+                // A service: pressing the row only opens its page. The icon plays its little story when the service is switched on, and
+                // when the icon itself is pressed.
                 HStack(spacing: 6) {
-                    icon(page).frame(width: 26, height: 24)
-                    Text(page.title)
-                        .font(.system(size: 12.5, weight: selected ? .semibold : .medium))
-                        .foregroundStyle(selected ? Color.white : Theme.textSecondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.9)
-                    Spacer(minLength: 0)
+                    Button { PlayableIcon.play(page, reduceMotion: reduceMotion) } label: {
+                        icon(page).frame(width: 26, height: 24).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHidden(true)
+                    Button { withAnimation(.easeOut(duration: 0.12)) { nav.select(page) } } label: { title(page, selected: selected) }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(page.title)
+                        .accessibilityAddTraits(selected ? .isSelected : [])
                 }
-                .contentShape(Rectangle())
+            } else {
+                Button {
+                    if page == .settings { PlayableIcon.play(page, reduceMotion: reduceMotion) }
+                    withAnimation(.easeOut(duration: 0.12)) { nav.select(page) }
+                } label: {
+                    HStack(spacing: 6) {
+                        icon(page).frame(width: 26, height: 24)
+                        title(page, selected: selected)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(page.title)
+                .accessibilityAddTraits(selected ? .isSelected : [])
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(page.title)
-            .accessibilityAddTraits(selected ? .isSelected : [])
 
             if page.isService { ServiceSwitch(page: page) }
         }
@@ -60,6 +71,23 @@ struct SidebarView: View {
         .padding(.trailing, 4)
         .padding(.vertical, 7)
         .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.white.opacity(selected ? 0.11 : 0)))
+        // The new value comes from the change itself (see the note in MascotHero): it plays when the service goes on, not when it goes off.
+        .onChange(of: all.isOn(page)) { on in
+            if page.isService && on { PlayableIcon.play(page, reduceMotion: reduceMotion) }
+        }
+    }
+
+    private func title(_ page: AppPage, selected: Bool) -> some View {
+        HStack(spacing: 0) {
+            Text(page.title)
+                .font(.system(size: 12.5, weight: selected ? .semibold : .medium))
+                .foregroundStyle(selected ? Color.white : Theme.textSecondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.9)
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
+        .contentShape(Rectangle())
     }
 
     @ViewBuilder
