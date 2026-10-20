@@ -288,3 +288,58 @@ import Testing
         #expect(grown)
     }
 }
+
+@Suite struct UpdateScheduleTests {
+    private let t0 = Date(timeIntervalSinceReferenceDate: 9000)
+
+    @Test func theIntervalIsTenMinutes() {
+        #expect(UpdateSchedule.interval == 600)
+    }
+
+    @Test func aFirstCheckIsDueAtOnce() {
+        #expect(UpdateSchedule.isDue(lastTry: .distantPast, now: t0))
+    }
+
+    @Test func isNotDueBeforeTenMinutes() {
+        #expect(!UpdateSchedule.isDue(lastTry: t0, now: t0.addingTimeInterval(30)))
+        #expect(!UpdateSchedule.isDue(lastTry: t0, now: t0.addingTimeInterval(9 * 60)))
+    }
+
+    @Test func isDueAtTenMinutesNotAMinuteLater() {
+        #expect(UpdateSchedule.isDue(lastTry: t0, now: t0.addingTimeInterval(600)))
+        #expect(UpdateSchedule.isDue(lastTry: t0, now: t0.addingTimeInterval(597)), "the timer is not exact: a few seconds of slack")
+        #expect(!UpdateSchedule.isDue(lastTry: t0, now: t0.addingTimeInterval(590)))
+    }
+}
+
+/// One notification for one version, however often the check runs.
+@Suite struct UpdateNoticeTests {
+    @Test func theFirstTimeTellsAboutTheVersion() {
+        #expect(UpdateNotice.shouldTell(version: "0.9.6", lastTold: nil))
+    }
+
+    @Test func theSameVersionIsNeverToldTwice() {
+        #expect(!UpdateNotice.shouldTell(version: "0.9.6", lastTold: "0.9.6"))
+        #expect(!UpdateNotice.shouldTell(version: "v0.9.6", lastTold: "0.9.6"))
+    }
+
+    @Test func aNewerVersionIsToldAboutEvenIfTheOldOneWasNotInstalled() {
+        #expect(UpdateNotice.shouldTell(version: "0.9.7", lastTold: "0.9.6"))
+        #expect(UpdateNotice.shouldTell(version: "0.10.0", lastTold: "0.9.9"))
+        #expect(UpdateNotice.shouldTell(version: "1.0.0", lastTold: "0.9.9"))
+    }
+
+    @Test func anOlderVersionIsNotToldAbout() {
+        #expect(!UpdateNotice.shouldTell(version: "0.9.5", lastTold: "0.9.6"), "a stale answer of GitHub must not bring a notification back")
+    }
+
+    /// The whole story of a person who does not update: ten checks in a row tell once, the next release tells once again.
+    @Test func manyChecksMakeOneNotificationPerVersion() {
+        var told: [String] = []
+        var last: String?
+        for version in ["0.9.6", "0.9.6", "0.9.6", "0.9.5", "0.9.6", "0.9.7", "0.9.7", "0.9.6", "0.9.7"] {
+            if UpdateNotice.shouldTell(version: version, lastTold: last) { told.append(version); last = version }
+        }
+        #expect(told == ["0.9.6", "0.9.7"])
+    }
+}

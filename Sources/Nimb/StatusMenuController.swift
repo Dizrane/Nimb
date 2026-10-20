@@ -105,6 +105,8 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     // MARK: Menu
 
     private let master = NSMenuItem()
+    /// Shown only while a newer version exists: it opens the window, where the button that installs it is.
+    private let updateItem = NSMenuItem()
     private let aiItem = NSMenuItem()
     private let aiToggle = NSMenuItem()
     private var aiProviders: [NSMenuItem] = []
@@ -118,6 +120,9 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     /// The items are made once and only changed afterwards. A menu that is rebuilt on every opening shows the state of the
     /// moment it opened and never changes while it is open: that is why a person had to open it again and again.
     private func build(_ menu: NSMenu) {
+        updateItem.target = self; updateItem.action = #selector(showWindow); updateItem.image = symbol("arrow.down.circle")
+        updateItem.isHidden = true
+        menu.addItem(updateItem)
         master.target = self; master.action = #selector(toggleAll); master.image = symbol("power")
         menu.addItem(master)
         menu.addItem(.separator())
@@ -158,6 +163,12 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         guard let dns, let telegram, let warp else { return }
         let all = AllServices.shared
 
+        if case .available(let release) = UpdateViewModel.shared.state {
+            updateItem.title = "Доступно обновление \(release.version)"
+            updateItem.isHidden = false
+        } else {
+            updateItem.isHidden = true
+        }
         master.title = all.isRunning ? "Подождите…" : (all.allOn ? "Выключить всё" : "Включить всё")
         master.isEnabled = !all.isBusy
 
@@ -214,6 +225,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
             telegram.objectWillChange.map { _ in }.eraseToAnyPublisher(),
             warp.objectWillChange.map { _ in }.eraseToAnyPublisher(),
             all.objectWillChange.map { _ in }.eraseToAnyPublisher(),
+            UpdateViewModel.shared.objectWillChange.map { _ in }.eraseToAnyPublisher(),
         ]
         // `objectWillChange` fires before the value is set: look at the state on the next turn of the main queue.
         watching = changes.map { publisher in
@@ -272,13 +284,5 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     @objc private func copyLink() { telegram?.copyLink() }
     @objc private func quit() { AppDelegate.quit() }
 
-    @objc private func showWindow() {
-        NSApp.activate(ignoringOtherApps: true)
-        if let window = NSApp.windows.first(where: { $0.canBecomeMain }) {
-            if window.isMiniaturized { window.deminiaturize(nil) }
-            window.makeKeyAndOrderFront(nil)
-        } else {
-            AppDelegate.openMainWindow?()
-        }
-    }
+    @objc private func showWindow() { AppDelegate.showMainWindow() }
 }

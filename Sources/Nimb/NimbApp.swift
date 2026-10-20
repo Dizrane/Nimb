@@ -18,6 +18,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.terminate(nil)
     }
 
+    /// Brings the main window to the front, or opens it again if it has been closed.
+    static func showMainWindow() {
+        NSApp.activate(ignoringOtherApps: true)
+        if let window = NSApp.windows.first(where: { $0.canBecomeMain }) {
+            if window.isMiniaturized { window.deminiaturize(nil) }
+            window.makeKeyAndOrderFront(nil)
+        } else {
+            openMainWindow?()
+        }
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         SessionMarker.end()
     }
@@ -89,6 +100,10 @@ struct NimbApp: App {
         AppLog.shared.add("app", "запуск Nimb \(Updater.currentVersion), macOS \(ProcessInfo.processInfo.operatingSystemVersionString)")
         SingleInstance.yieldToRunningCopy()
         SessionMarker.begin()
+        Task { @MainActor in
+            Notifier.shared.start()
+            UpdateViewModel.shared.start()
+        }
     }
 
     var body: some Scene {

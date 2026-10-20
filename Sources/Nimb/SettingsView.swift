@@ -29,6 +29,7 @@ struct SettingsView: View {
                     SettingsSection(title: "Работа") {
                         BackgroundCard()
                         LaunchAtLoginCard()
+                        NotificationsCard()
                     }
 
                     SettingsSection(title: "Помощь") {

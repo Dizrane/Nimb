@@ -155,12 +155,13 @@ struct OnboardingView: View {
         StepFrame(
             kind: .gear,
             title: "Чтобы работало само",
-            text: "Рекомендуем включить оба пункта: тогда Nimb запускается вместе с Mac и продолжает работать при закрытом окне, а Telegram не отваливается."
+            text: "Рекомендуем включить всё: Nimb запустится с Mac, будет работать при закрытом окне и скажет о новой версии."
         ) {
             BackgroundCard()
             LaunchAtLoginCard()
+            NotificationsCard()
             PrimaryButton(title: "Готово", action: onboarding.finish)
-            Text("Пройти настройку заново можно в настройках (шестерёнка справа вверху).")
+            Text("Пройти настройку заново можно в «Настройках» (внизу слева).")
                 .font(Typo.small)
                 .foregroundStyle(Theme.textSecondary)
                 .multilineTextAlignment(.center)

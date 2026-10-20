@@ -258,28 +258,30 @@ final class UpdateViewModel: ObservableObject {
     @Published private(set) var lastChecked: Date?
     @Published private(set) var lastCheckFailed = false
 
-    /// The checks are made when the program opens and then once in 15 minutes of use, never oftener: nobody can press a button
-    /// and run into the limit of GitHub.
-    private static let interval: TimeInterval = 15 * 60
+    /// One for the whole program, not for the window: the checks go on while Nimb lives in the menu bar with its window closed.
+    static let shared = UpdateViewModel()
+
     private var lastTry = Date.distantPast
-    private var activeSeconds: TimeInterval = 0
     private var timer: Timer?
 
-    /// Called when the window opens: the first check, and the clock that counts minutes of use.
+    /// Called once when the program starts: a check now, then one every `UpdateSchedule.interval` for as long as the program runs,
+    /// whether or not its window is open or in front, and one at once when it comes to the front after a long time.
     func start() {
+        guard timer == nil else { return }
         checkIfDue()
-        timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self, AnimationGate.shared.isActive else { return }
-                self.activeSeconds += 30
-                if self.activeSeconds >= Self.interval { self.checkIfDue() }
-            }
+        let tick = min(60, max(1, UpdateSchedule.interval / 4))
+        let created = Timer.scheduledTimer(withTimeInterval: tick, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.checkIfDue() }
+        }
+        created.tolerance = tick / 6
+        timer = created
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.checkIfDue() }
         }
     }
 
     func checkIfDue() {
-        guard Date().timeIntervalSince(lastTry) >= Self.interval - 1 else { return }
+        guard UpdateSchedule.isDue(lastTry: lastTry, now: Date()) else { return }
         check()
     }
 
@@ -288,14 +290,17 @@ final class UpdateViewModel: ObservableObject {
         if case .checking = state { return }
         let before = state
         lastTry = Date()
-        activeSeconds = 0
         state = .checking
+        AppLog.shared.add("update", "проверяю обновления")
         Task {
             do {
                 let release = try await Updater.latestRelease()
                 lastChecked = Date()
                 lastCheckFailed = false
-                state = Updater.isNewer(release.version, than: Updater.currentVersion) ? .available(release) : .upToDate
+                let newer = Updater.isNewer(release.version, than: Updater.currentVersion)
+                AppLog.shared.add("update", newer ? "есть новая версия \(release.version)" : "версия \(Updater.currentVersion) актуальна")
+                state = newer ? .available(release) : .upToDate
+                if newer { Notifier.shared.updateAvailable(release.version) }
             } catch {
                 AppLog.shared.add("update", "проверка обновлений не удалась: \(error.localizedDescription)")
                 lastCheckFailed = true
@@ -323,7 +328,7 @@ final class UpdateViewModel: ObservableObject {
 
 struct ContentView: View {
     @EnvironmentObject private var model: DNSViewModel
-    @StateObject private var updates = UpdateViewModel()
+    @ObservedObject private var updates = UpdateViewModel.shared
     @ObservedObject private var onboarding = Onboarding.shared
     @ObservedObject private var all = AllServices.shared
     @ObservedObject private var report = ReportCenter.shared
@@ -336,9 +341,9 @@ struct ContentView: View {
         VStack(spacing: 0) {
             Group {
                 if onboarding.isShown {
-                    // The first set-up stays a column of 400 pt in the middle of the window.
+                    // The first set-up stays a column of 460 pt in the middle of the window.
                     OnboardingView(model: model, telegram: telegram, warp: warp, onboarding: onboarding)
-                        .frame(maxWidth: 400)
+                        .frame(maxWidth: 460)
                         .frame(maxWidth: .infinity)
                         .transition(.opacity)
                 } else {
@@ -374,7 +379,6 @@ struct ContentView: View {
             warp.refreshAccess()
         }
         .onAppear {
-            updates.start()
             telegram.openMainWindow = { openWindow(id: "main") }
             StatusMenuController.shared.configure(dns: model, telegram: telegram, warp: warp)
             AppDelegate.openMainWindow = { openWindow(id: "main") }
