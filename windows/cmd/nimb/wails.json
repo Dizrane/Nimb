@@ -1,0 +1,15 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "Nimb",
+  "outputfilename": "Nimb",
+  "frontend:dir": "frontend",
+  "wailsjsdir": "frontend",
+  "author": { "name": "Nimb" },
+  "info": {
+    "companyName": "Nimb",
+    "productName": "Nimb",
+    "productVersion": "0.1.0",
+    "copyright": "PolyForm Noncommercial 1.0.0",
+    "comments": "https://github.com/Dizrane/Nimb"
+  }
+}
