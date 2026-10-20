@@ -8,6 +8,9 @@ final class TelegramProxyModel: ObservableObject {
     @Published private(set) var isStarting = false
     @Published private(set) var port: UInt16 = 0
     @Published private(set) var stats = TelegramProxyStats()
+    /// Telegram came with another key a moment ago (a proxy of an older install is still saved in it). It is true only while that goes on:
+    /// ten seconds without such a connection and the warning goes away, and it comes back if they start again.
+    @Published private(set) var wrongSecretRecently = false
     @Published var errorMessage: String? { didSet { if let message = errorMessage { AppLog.shared.add("telegram", "ошибка: \(message)") } } }
     /// Whether the proxy was on when Nimb was last used: it comes back by itself, nobody has to find a switch for it.
     @Published private(set) var autoStart: Bool {
@@ -22,6 +25,7 @@ final class TelegramProxyModel: ObservableObject {
     private let engine: TelegramProxyEngine
     private var poller: Task<Void, Never>?
     private var isRecovering = false
+    private var wrongSecretWatch = RecentCount(quiet: 10)
     /// Opens the main window again after it has been closed; set by the window itself.
     var openMainWindow: (() -> Void)?
 
@@ -74,6 +78,14 @@ final class TelegramProxyModel: ObservableObject {
         isRunning = false
         autoStart = false
         stats = TelegramProxyStats()
+        watchWrongSecret(0, reset: true)
+    }
+
+    /// Remembers when the count of connections with another key last grew, and says whether that was just now.
+    private func watchWrongSecret(_ count: Int, reset: Bool = false) {
+        if reset { wrongSecretWatch.reset() }
+        let recent = wrongSecretWatch.observe(count, at: Date())
+        if recent != wrongSecretRecently { wrongSecretRecently = recent }
     }
 
     func toggle() { isRunning ? stop() : start() }
@@ -98,6 +110,7 @@ final class TelegramProxyModel: ObservableObject {
                 guard let self else { return }
                 let snapshot = self.engine.snapshot
                 if snapshot != self.stats { self.stats = snapshot }
+                self.watchWrongSecret(snapshot.wrongSecret)
                 ticks += 1
                 // Every few seconds: is the port still listening? If not, bring it back by itself.
                 if ticks % 3 == 0, self.isRunning, !self.isRecovering, !self.engine.isListening {
@@ -133,6 +146,7 @@ final class TelegramProxyModel: ObservableObject {
         isRunning = false
         autoStart = false
         stats = TelegramProxyStats()
+        watchWrongSecret(0, reset: true)
         errorMessage = "Прокси остановился и не смог запуститься снова: порт \(wanted), возможно, занят другой программой. Включите его ещё раз."
     }
 }

@@ -22,6 +22,8 @@ networksetup -listallnetworkservices 2>/dev/null | tail -n +2 | sed 's/^\*//' | 
             echo "ОСТАЛСЯ DNS Nimb на «$service»: $servers" ;;
     esac
 done | grep -q . && { echo "(выше: DNS Nimb ещё стоит на подключении)"; left=1; }
-sfltool dumpbtm 2>/dev/null | grep -qi 'nimb' && found "запись Nimb в «Объектах входа» (System Settings → General → Login Items)"
+# A switched-off entry stays in the list of macOS as a record and does nothing; an active one starts Nimb at login.
+sfltool dumpbtm 2>/dev/null | awk '/^ *#[0-9]+:/ {block=""} {block = block "\n" $0} /Disposition:/ && block ~ /com\.nimb\.app/ && $0 ~ /enabled/ {found=1} END {exit !found}' \
+    && found "включённая запись Nimb в «Объектах входа» (System Settings → General → Login Items)"
 [ $left = 0 ] && echo "Чисто: следов Nimb нет." || echo "Есть остатки, см. выше."
 echo "Telegram Desktop хранит свой прокси сам: Настройки → Данные и память → Тип соединения → Прокси: удалите 127.0.0.1:1443, если он остался."

@@ -24,8 +24,8 @@ struct TelegramPage: View {
                     if telegram.isRunning {
                         connectCard
                         if !background.enabled { backgroundHint }
-                        if telegram.stats.wrongSecret > 0 {
-                            NoticeCard(lines: ["Telegram подключается с чужим ключом (\(telegram.stats.wrongSecret) раз): в нём, похоже, указан другой прокси на этом порту. Нажмите «Открыть в Telegram» и подтвердите, а старый прокси удалите."], color: Theme.warn, symbol: "exclamationmark.triangle")
+                        if telegram.wrongSecretRecently {
+                            NoticeCard(lines: ["Telegram подключается с чужим ключом: в нём, похоже, указан другой прокси на этом порту. Нажмите «Открыть в Telegram» и подтвердите, а старый прокси удалите."], color: Theme.warn, symbol: "exclamationmark.triangle")
                         }
                     } else {
                         InfoCard(

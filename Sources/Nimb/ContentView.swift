@@ -357,6 +357,14 @@ struct ContentView: View {
         .ignoresSafeArea()
         .preferredColorScheme(.dark)
         .background(WindowConfigurator())
+        // The one key of the keyboard that Nimb answers: Escape goes back to «Главная».
+        .background {
+            Button("") { if !onboarding.isShown && nav.page != .home { nav.select(.home) } }
+                .keyboardShortcut(.cancelAction)
+                .opacity(0)
+                .frame(width: 0, height: 0)
+                .accessibilityHidden(true)
+        }
         .sheet(isPresented: $report.isShown) { ReportSheet() }
         .animation(.easeInOut(duration: 0.5), value: model.reports.count)
         .animation(.easeInOut(duration: 0.3), value: onboarding.isShown)
@@ -527,7 +535,7 @@ private struct ProbeButton: View {
                 .opacity(model.isProbing ? 1 : 0)
 
                 HStack(spacing: 7) {
-                    Image(systemName: "waveform.path.ecg")
+                    Image(systemName: "waveform.path.ecg").accessibilityHidden(true)
                         .font(.system(size: 11, weight: .regular))
                     Text(model.isProbing ? model.probeProgress : "Проверить сервисы")
                         .lineLimit(1)
@@ -617,8 +625,27 @@ private struct ProviderCard: View {
         .opacity(locked ? 0.6 : 1)
         .animation(.easeInOut(duration: 0.3), value: hover.value)
         .animation(.easeInOut(duration: 0.3), value: isSelected)
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isButton)
+        // One element that VoiceOver can read and press: a tap gesture alone is not an action for it.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(provider.name)
+        .accessibilityValue(spokenState)
+        .accessibilityHint(locked ? "" : "Переключить DNS на этот сервис")
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityAction(.default, onSelect)
+        .accessibilityAction(named: "Подробности проверки") { if report != nil { details.value.toggle() } }
+    }
+
+    /// What the card says, in words: active, chosen, the best, how many services work and how fast.
+    private var spokenState: String {
+        var parts: [String] = []
+        if isActive { parts.append("активен") }
+        if isSelected && !isActive { parts.append("выбран") }
+        if isBest { parts.append("лучший по итогам проверки") }
+        if let report {
+            parts.append("работает \(report.workingCount) из \(report.services.count) сервисов")
+            if let seconds = report.medianSeconds { parts.append("ответ \(seconds.formatted(.number.precision(.fractionLength(1)))) секунды") }
+        }
+        return parts.joined(separator: ", ")
     }
 }
 
@@ -698,7 +725,7 @@ private struct ServicePill: View {
 
     var body: some View {
         HStack(spacing: 5) {
-            Image(systemName: style.symbol)
+            Image(systemName: style.symbol).accessibilityHidden(true)
                 .font(.system(size: 9.5, weight: .semibold))
                 .foregroundStyle(style.color)
             Text(result.name)
@@ -788,7 +815,7 @@ private struct BestBanner: View {
             Spacer(minLength: 4)
             if isSelected {
                 HStack(spacing: 5) {
-                    Image(systemName: "checkmark").font(.system(size: 10, weight: .semibold))
+                    Image(systemName: "checkmark").accessibilityHidden(true).font(.system(size: 10, weight: .semibold))
                     Text("Выбран").font(.system(size: 12, weight: .medium))
                 }
                 .foregroundStyle(Theme.ok)
@@ -818,7 +845,7 @@ struct NoticeCard: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: symbol)
+            Image(systemName: symbol).accessibilityHidden(true)
                 .font(.system(size: 13, weight: .regular))
                 .foregroundStyle(color)
                 .padding(.top, 1)

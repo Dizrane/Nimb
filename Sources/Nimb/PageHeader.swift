@@ -11,6 +11,7 @@ struct PageHeader: View {
             Text(title)
                 .font(.system(size: 22, weight: .regular, design: .serif))
                 .foregroundStyle(Theme.textPrimary)
+                .accessibilityAddTraits(.isHeader)
             Spacer()
             if let buttonTitle {
                 Button(action: action) {
@@ -22,7 +23,6 @@ struct PageHeader: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(PressableStyle())
-                .keyboardShortcut(.cancelAction)
             }
         }
         .padding(.horizontal, Space.page)

@@ -20,7 +20,6 @@ struct OnboardingView: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(PressableStyle())
-                    .keyboardShortcut(.cancelAction)
                 }
             }
             .padding(.horizontal, 20)
@@ -221,7 +220,7 @@ private struct Bullet: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 9) {
-            Image(systemName: "checkmark")
+            Image(systemName: "checkmark").accessibilityHidden(true)
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(Theme.textSecondary)
                 .padding(.top, 3)
@@ -237,7 +236,7 @@ private struct DoneRow: View {
 
     var body: some View {
         HStack(spacing: 7) {
-            Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.ok)
+            Image(systemName: "checkmark.circle.fill").accessibilityHidden(true).foregroundStyle(Theme.ok)
             Text(text).font(Typo.name).foregroundStyle(Theme.textPrimary)
         }
     }
@@ -271,7 +270,6 @@ private struct PrimaryButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(PressableStyle())
-        .keyboardShortcut(.defaultAction)
     }
 }
 

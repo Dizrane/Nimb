@@ -50,6 +50,25 @@ final class WarpTunnelModel: ObservableObject {
     init() {
         refresh()
         refreshAccess()
+        cleanLeftovers()
+    }
+
+    /// A state file with no daemon behind it: the tunnel died without `down` (a crash of the daemon, a kill, an older helper). Its routes
+    /// may still send all the traffic of the Mac into an interface that is gone, and then there is no internet. They are taken out.
+    private func cleanLeftovers() {
+        guard WarpPaths.isInstalled, FileManager.default.fileExists(atPath: WarpPaths.stateFile), Self.runningInterface() == nil else { return }
+        AppLog.shared.add("tunnel", "есть файл состояния, но туннеля нет: убираю остатки")
+        Task.detached {
+            do {
+                _ = try DNSManager.runWithoutPassword([WarpPaths.helper, "down"])
+                await MainActor.run { AppLog.shared.add("tunnel", "остатки туннеля убраны"); self.refresh() }
+            } catch {
+                await MainActor.run {
+                    AppLog.shared.add("tunnel", "остатки туннеля не убраны: \(error.localizedDescription)")
+                    self.errorMessage = "Туннель остановился неожиданно, и интернет мог пропасть. Нажмите «Включить», потом «Выключить»: остатки уберутся."
+                }
+            }
+        }
     }
 
     var isOn: Bool { if case .on = phase { return true } else { return false } }

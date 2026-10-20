@@ -96,6 +96,8 @@ struct TunnelSitesWindow: View {
                         .lineLimit(1)
                 }
                 .padding(.vertical, 6.5)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(first + index). \(site.name), \(site.kind)")
                 if index < items.count - 1 {
                     Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
                 }

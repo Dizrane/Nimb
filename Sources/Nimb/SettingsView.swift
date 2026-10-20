@@ -44,6 +44,7 @@ struct SettingsView: View {
                             }
                             Spacer(minLength: Space.s)
                             OutlineButton(title: "Отправить…", color: Theme.textPrimary) { ReportCenter.shared.isShown = true }
+                                .accessibilityLabel("Сообщить о проблеме")
                         }
                         .card()
 
@@ -63,6 +64,7 @@ struct SettingsView: View {
                                 onboarding.start()
                             }
                             .disabled(model.isLocked)
+                            .accessibilityLabel("Пройти первую настройку заново")
                         }
                         .card()
                     }
@@ -112,6 +114,7 @@ struct SettingsView: View {
                             Spacer(minLength: Space.s)
                             OutlineButton(title: "Удалить…", color: Theme.bad, action: model.uninstall)
                                 .disabled(model.isLocked)
+                                .accessibilityLabel("Удалить Nimb")
                         }
                         .card()
                     }

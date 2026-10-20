@@ -6,10 +6,18 @@ enum Uninstaller {
     /// Both names the app has had.
     static let identifiers = ["com.nimb.app", "com.rdns.app"]
 
+    /// The running copy is not the one on disk: macOS opens a downloaded app from a temporary read-only copy (App Translocation), and a
+    /// disk image is read-only too. There is nothing to delete at that place: the real copies are looked for in the usual folders.
+    static var runsFromTemporaryPlace: Bool {
+        let path = Bundle.main.bundleURL.path
+        return path.contains("/AppTranslocation/") || path.hasPrefix("/Volumes/")
+    }
+
     /// Why the app cannot delete itself, or nil if it can.
     static func blocker() -> String? {
         let bundle = Bundle.main.bundleURL
         guard bundle.pathExtension == "app" else { return "Nimb запущен не как приложение (.app), удалять нечего." }
+        if runsFromTemporaryPlace { return nil }
         let folder = bundle.deletingLastPathComponent().path
         guard FileManager.default.isWritableFile(atPath: folder) else {
             return "У Nimb нет права записи в «\(folder)», поэтому он не может удалить сам себя. Перетащите его в Корзину вручную."
@@ -23,16 +31,25 @@ enum Uninstaller {
         let fm = FileManager.default
         let home = NSHomeDirectory()
         let bundle = Bundle.main.bundleURL
-        var result = [bundle.path]
+        var result = runsFromTemporaryPlace ? [] : [bundle.path]
 
-        let folders = Set([bundle.deletingLastPathComponent().path, "/Applications", "\(home)/Applications"])
-        for folder in folders.sorted() {
+        // The copies of the app: next to the running one (by its usual names), and in the places where people keep an app they have
+        // downloaded (any name there: «Nimb 2.app» is what a second download is called).
+        func isOurs(_ path: String) -> Bool {
+            guard let info = NSDictionary(contentsOfFile: "\(path)/Contents/Info.plist"), let id = info["CFBundleIdentifier"] as? String else { return false }
+            return identifiers.contains(id)
+        }
+        if !runsFromTemporaryPlace {
+            let folder = bundle.deletingLastPathComponent().path
             for name in ["Nimb.app", "RDNS.app"] {
                 let path = "\(folder)/\(name)"
-                guard path != bundle.path, fm.fileExists(atPath: path),
-                      let info = NSDictionary(contentsOfFile: "\(path)/Contents/Info.plist"),
-                      let id = info["CFBundleIdentifier"] as? String, identifiers.contains(id) else { continue }
-                result.append(path)
+                if path != bundle.path, fm.fileExists(atPath: path), isOurs(path) { result.append(path) }
+            }
+        }
+        for folder in ["/Applications", "\(home)/Applications", "\(home)/Downloads", "\(home)/Desktop"] {
+            for name in (try? fm.contentsOfDirectory(atPath: folder)) ?? [] where name.hasSuffix(".app") {
+                let path = "\(folder)/\(name)"
+                if !result.contains(path), path != bundle.path, isOurs(path) { result.append(path) }
             }
         }
 

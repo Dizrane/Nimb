@@ -57,6 +57,9 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         guard let button = item?.button else { return }
         button.image = Self.icon(state)
         button.toolTip = "Nimb"
+        button.setAccessibilityLabel("Nimb")
+        button.setAccessibilityHelp("Открыть меню Nimb")
+        button.setAccessibilityValue(state == .off ? "ничего не работает" : (state == .partial ? "работает часть сервисов" : "работает всё"))
         // The dot is a view over the button: the ring is a template image that macOS tints, and a template cannot be green.
         if dot == nil {
             let view = NSView()

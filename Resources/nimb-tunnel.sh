@@ -1,5 +1,5 @@
 #!/bin/sh
-# nimb-tunnel 3: brings the Nimb WARP tunnel up and down. It runs as root, from /usr/local/libexec/nimb, which only root
+# nimb-tunnel 4: brings the Nimb WARP tunnel up and down. It runs as root, from /usr/local/libexec/nimb, which only root
 # can write to. The settings are read from warp.conf next to it, a file of plain key=value lines that Nimb wrote after
 # checking every value; nothing in it is ever executed.
 #
@@ -54,12 +54,27 @@ retarget() { # retarget <endpoint host> "<gateway> <interface>"
     fi
 }
 
+# The routes of the tunnel, taken out. With a full tunnel they send every packet of the Mac into the interface of the daemon: if the
+# daemon is gone and they stay, the Mac has no internet at all.
+drop_routes() {
+    [ -f "$STATE" ] || return 0
+    sed -n 's/^route=//p' "$STATE" | while IFS= read -r route; do
+        # shellcheck disable=SC2086
+        route -n delete $route >/dev/null 2>&1
+    done
+}
+
 watch_network() { # watch_network <daemon pid> <endpoint host>
     while alive "$1"; do
         sleep 5
         now=$(uplink_now)
         [ -n "$now" ] && [ "$now" != "$(state_get uplink)" ] && retarget "$2" "$now"
     done
+    # The daemon stopped without `down` (killed, crashed): the Mac is not left cut off from the internet.
+    iface=$(state_get interface)
+    drop_routes
+    [ -n "$iface" ] && rm -f "$SOCKDIR/$iface.sock"
+    rm -f "$STATE" "$RUN.name"
 }
 
 cmd_status() {
@@ -70,10 +85,7 @@ cmd_status() {
 cmd_down() {
     [ -f "$STATE" ] || return 0
     pid=$(state_get pid)
-    sed -n 's/^route=//p' "$STATE" | while IFS= read -r route; do
-        # shellcheck disable=SC2086
-        route -n delete $route >/dev/null 2>&1
-    done
+    drop_routes
     if alive "$pid"; then
         kill "$pid" 2>/dev/null
         i=0; while alive "$pid" && [ $i -lt 20 ]; do sleep 0.25; i=$((i + 1)); done

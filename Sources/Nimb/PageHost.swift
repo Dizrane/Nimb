@@ -31,6 +31,7 @@ struct PageHost: View {
                 Text(page.title)
                     .font(.system(size: 22, weight: .regular, design: .serif))
                     .foregroundStyle(Theme.textPrimary)
+                    .accessibilityAddTraits(.isHeader)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, Space.page)
                     .padding(.top, 22)

@@ -14,7 +14,7 @@ struct PermissionRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s + 2) {
             HStack(spacing: Space.s) {
-                Image(systemName: granted ? "lock.open" : "lock")
+                Image(systemName: granted ? "lock.open" : "lock").accessibilityHidden(true)
                     .font(.system(size: 13, weight: .regular))
                     .foregroundStyle(granted ? Theme.warn : Theme.textSecondary)
                     .frame(width: 18)
@@ -46,9 +46,11 @@ struct PermissionRow: View {
                 if let extraTitle, let extraAction {
                     OutlineButton(title: extraTitle, color: Theme.textPrimary, action: extraAction)
                         .disabled(disabled)
+                        .accessibilityLabel("\(extraTitle): \(title)")
                 }
                 OutlineButton(title: granted ? "Забрать" : "Разрешить", color: Theme.textPrimary, action: action)
                     .disabled(disabled)
+                    .accessibilityLabel(granted ? "Забрать разрешение без пароля: \(title)" : "Разрешить без пароля: \(title)")
             }
         }
         .card()

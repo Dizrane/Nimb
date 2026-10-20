@@ -18,6 +18,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.terminate(nil)
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        SessionMarker.end()
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag, let open = Self.openMainWindow {
             open()
@@ -84,6 +88,7 @@ struct NimbApp: App {
     init() {
         AppLog.shared.add("app", "запуск Nimb \(Updater.currentVersion), macOS \(ProcessInfo.processInfo.operatingSystemVersionString)")
         SingleInstance.yieldToRunningCopy()
+        SessionMarker.begin()
     }
 
     var body: some Scene {

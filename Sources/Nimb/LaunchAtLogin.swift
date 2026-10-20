@@ -41,7 +41,7 @@ struct LaunchAtLoginCard: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 8)
-                PillSwitch(isOn: launch.isOn) { launch.set(!launch.isOn) }
+                PillSwitch(label: "Запускать при входе в систему", isOn: launch.isOn) { launch.set(!launch.isOn) }
             }
             if launch.status == .requiresApproval {
                 Text("macOS ждёт подтверждения: «Системные настройки» → «Основные» → «Объекты входа» → включите Nimb.")

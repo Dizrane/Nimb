@@ -30,7 +30,7 @@ struct BackgroundCard: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)
-            PillSwitch(isOn: background.enabled) { background.enabled.toggle() }
+            PillSwitch(label: "Работать в фоне", isOn: background.enabled) { background.enabled.toggle() }
         }
         .card(.neutral)
     }

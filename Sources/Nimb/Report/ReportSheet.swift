@@ -57,6 +57,7 @@ struct ReportSheet: View {
                 Text("Что случилось?").font(Typo.name).foregroundStyle(Theme.textPrimary)
                 ZStack(alignment: .topLeading) {
                     TextEditor(text: $description.text)
+                        .accessibilityLabel("Что случилось")
                         .font(Typo.body)
                         .scrollContentBackground(.hidden)
                         .padding(6)
@@ -77,6 +78,7 @@ struct ReportSheet: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Как вам ответить (по желанию)").font(Typo.name).foregroundStyle(Theme.textPrimary)
                 TextField("@имя в Telegram или почта", text: $contact.text)
+                    .accessibilityLabel("Как вам ответить, по желанию")
                     .textFieldStyle(.plain)
                     .font(Typo.body)
                     .padding(.horizontal, 10)
@@ -90,7 +92,7 @@ struct ReportSheet: View {
                     HStack(spacing: 5) {
                         Text("Посмотреть, что будет отправлено")
                             .font(Typo.small)
-                        Image(systemName: "arrow.up.forward.square")
+                        Image(systemName: "arrow.up.forward.square").accessibilityHidden(true)
                             .font(.system(size: 10))
                     }
                     .foregroundStyle(Theme.textSecondary)
@@ -161,7 +163,7 @@ struct ReportSheet: View {
     private var sentView: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 8) {
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.ok)
+                Image(systemName: "checkmark.circle.fill").accessibilityHidden(true).foregroundStyle(Theme.ok)
                 Text("Отчёт отправлен").font(Typo.name).foregroundStyle(Theme.textPrimary)
             }
             Text("Номер \(id). Спасибо, это помогает исправить ошибку.")

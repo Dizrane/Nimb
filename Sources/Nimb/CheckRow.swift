@@ -15,13 +15,19 @@ struct CheckRow: View {
 
     var body: some View {
         HStack(spacing: 7) {
-            Image(systemName: mark.symbol)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(mark.color)
-                .frame(width: 12)
-            Text(check.name).font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.textPrimary)
-            Spacer()
-            Text(check.result).font(Typo.mono).foregroundStyle(Theme.textSecondary)
+            Group {
+                Image(systemName: mark.symbol)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(mark.color)
+                    .frame(width: 12)
+                    .accessibilityHidden(true)
+                Text(check.name).font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.textPrimary)
+                Spacer()
+                Text(check.result).font(Typo.mono).foregroundStyle(Theme.textSecondary)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(check.name)
+            .accessibilityValue(check.result)
             Button { details.value.toggle() } label: {
                 Image(systemName: "info.circle")
                     .font(.system(size: 13, weight: .light))

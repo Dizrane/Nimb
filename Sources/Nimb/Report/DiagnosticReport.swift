@@ -14,6 +14,7 @@ enum DiagnosticReport {
             "macOS \(ProcessInfo.processInfo.operatingSystemVersionString), \(architecture)",
             "Язык системы: \(Locale.preferredLanguages.first ?? "?")",
             "Окно: \(Int(NSApp.windows.first { $0.canBecomeMain }?.frame.width ?? 0))×\(Int(NSApp.windows.first { $0.canBecomeMain }?.frame.height ?? 0))",
+            "Прошлый запуск закончился неожиданно: \(yes(SessionMarker.previousEndedBadly))",
             "Работа в фоне: \(yes(BackgroundMode.shared.enabled)), автозапуск: \(yes(LaunchAtLogin.shared.isOn))",
         ]))
 

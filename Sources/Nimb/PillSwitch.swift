@@ -3,6 +3,8 @@ import SwiftUI
 /// A switch drawn by the app: green when on, dark when off, the same whether the window is the one in front or not. The system
 /// switch goes grey in a window that is not in front, which is what the panel of the menu bar usually is.
 struct PillSwitch: View {
+    /// What the switch switches, for VoiceOver: «Нейросети», «Работать в фоне».
+    let label: String
     let isOn: Bool
     var disabled = false
     let toggle: () -> Void
@@ -25,7 +27,7 @@ struct PillSwitch: View {
         .disabled(disabled)
         .opacity(disabled ? 0.5 : 1)
         .accessibilityRepresentation {
-            Toggle("", isOn: Binding(get: { isOn }, set: { _ in toggle() })).disabled(disabled)
+            Toggle(label, isOn: Binding(get: { isOn }, set: { _ in toggle() })).disabled(disabled)
         }
     }
 }

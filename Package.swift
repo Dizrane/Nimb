@@ -5,6 +5,7 @@ let package = Package(
     name: "Nimb",
     platforms: [.macOS(.v13)],
     targets: [
-        .executableTarget(name: "Nimb", path: "Sources/Nimb")
+        .executableTarget(name: "Nimb", path: "Sources/Nimb"),
+        .testTarget(name: "NimbTests", dependencies: ["Nimb"], path: "Tests/NimbTests"),
     ]
 )

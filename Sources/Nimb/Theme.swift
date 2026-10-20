@@ -61,6 +61,7 @@ extension View {
             .tracking(1.8)
             .textCase(.uppercase)
             .foregroundStyle(Theme.textSecondary.opacity(0.9))
+            .accessibilityAddTraits(.isHeader)
     }
 }
 

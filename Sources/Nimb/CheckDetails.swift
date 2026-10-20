@@ -10,7 +10,7 @@ struct CheckDetails: View {
             ForEach(check.probes) { probe in
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 6) {
-                        Image(systemName: probe.answered ? "checkmark" : "xmark")
+                        Image(systemName: probe.answered ? "checkmark" : "xmark").accessibilityHidden(true)
                             .font(.system(size: 9.5, weight: .semibold))
                             .foregroundStyle(probe.answered ? Theme.ok : Theme.bad)
                             .frame(width: 11)

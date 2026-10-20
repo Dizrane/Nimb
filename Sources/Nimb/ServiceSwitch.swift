@@ -9,9 +9,9 @@ struct ServiceSwitch: View {
     var body: some View {
         Group {
             if all.isPending(page) {
-                ProgressView().controlSize(.small).frame(width: 38)
+                ProgressView().controlSize(.small).frame(width: 38).accessibilityLabel("\(page.title): переключается")
             } else {
-                PillSwitch(isOn: all.isOn(page), disabled: all.isLocked(page)) { all.toggle(page) }
+                PillSwitch(label: page.title, isOn: all.isOn(page), disabled: all.isLocked(page)) { all.toggle(page) }
             }
         }
     }
