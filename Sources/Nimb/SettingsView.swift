@@ -5,9 +5,6 @@ struct SettingsView: View {
     @ObservedObject var model: DNSViewModel
     @ObservedObject var onboarding: Onboarding
     @ObservedObject var warp: WarpTunnelModel
-    /// The layout of the window the page is shown in: the sidebar layout gives the page a title, the tabs have it on the tab.
-    var layout: WindowLayout = .sidebar
-    @ObservedObject private var setting = WindowLayoutSetting.shared
 
     private var accessNote: String? {
         let access = model.access
@@ -23,22 +20,12 @@ struct SettingsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if layout == .sidebar { PageHeader(title: "Настройки", buttonTitle: nil) {} }
+            PageHeader(title: "Настройки", buttonTitle: nil) {}
 
             // Two columns, so that all the settings are in front of the person at once and nothing is scrolled.
             FitOrScroll {
                 HStack(alignment: .top, spacing: Space.xl) {
                     VStack(alignment: .leading, spacing: Space.l) {
-                        SettingsSection(title: "Оформление окна") {
-                        HStack(alignment: .top, spacing: Space.m) {
-                            ForEach(WindowLayout.allCases, id: \.self) { option in
-                                LayoutCard(option: option, selected: setting.layout == option) {
-                                    withAnimation(.easeInOut(duration: 0.2)) { setting.layout = option }
-                                }
-                            }
-                        }
-                    }
-
                     SettingsSection(title: "Работа") {
                         BackgroundCard()
                         LaunchAtLoginCard()
@@ -65,6 +52,24 @@ struct SettingsView: View {
                         .card()
                     }
 
+
+                    SettingsSection(title: "Удаление") {
+                        VStack(alignment: .leading, spacing: Space.s + 2) {
+                            Text("Удалить Nimb")
+                                .font(Typo.name)
+                                .foregroundStyle(Theme.textPrimary)
+                            Text("Вернёт DNS к автоматическому и удалит приложение вместе с настройками.")
+                                .font(Typo.small)
+                                .foregroundStyle(Theme.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            HStack {
+                                Spacer()
+                                OutlineButton(title: "Удалить…", color: Theme.bad, action: model.uninstall)
+                                    .disabled(model.isLocked)
+                            }
+                        }
+                        .card()
+                    }
                     }
                     .frame(maxWidth: .infinity, alignment: .top)
 
@@ -95,24 +100,6 @@ struct SettingsView: View {
                         )
                     }
 
-                    SettingsSection(title: "Удаление") {
-                        VStack(alignment: .leading, spacing: Space.s + 2) {
-                            Text("Удалить Nimb")
-                                .font(Typo.name)
-                                .foregroundStyle(Theme.textPrimary)
-                            Text("Вернёт DNS к автоматическому и удалит приложение вместе с настройками.")
-                                .font(Typo.small)
-                                .foregroundStyle(Theme.textSecondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                            HStack {
-                                Spacer()
-                                OutlineButton(title: "Удалить…", color: Theme.bad, action: model.uninstall)
-                                    .disabled(model.isLocked)
-                            }
-                        }
-                        .card()
-                    }
-
                     if model.isSettingUp {
                         HStack(spacing: Space.s) {
                             ProgressView().controlSize(.small)
@@ -128,7 +115,7 @@ struct SettingsView: View {
                     .frame(maxWidth: .infinity, alignment: .top)
                 }
                 .padding(.horizontal, Space.page)
-                .padding(.top, layout == .sidebar ? Space.s : 16)
+                .padding(.top, Space.s)
                 .padding(.bottom, Space.s)
             }
         }

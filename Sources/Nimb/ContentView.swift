@@ -324,13 +324,11 @@ struct ContentView: View {
     @ObservedObject private var onboarding = Onboarding.shared
     @ObservedObject private var all = AllServices.shared
     @ObservedObject private var nav = Navigation.shared
-    @ObservedObject private var setting = WindowLayoutSetting.shared
     @EnvironmentObject private var telegram: TelegramProxyModel
     @EnvironmentObject private var warp: WarpTunnelModel
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        let layout = setting.layout
         VStack(spacing: 0) {
             Group {
                 if onboarding.isShown {
@@ -339,16 +337,10 @@ struct ContentView: View {
                         .frame(maxWidth: 400)
                         .frame(maxWidth: .infinity)
                         .transition(.opacity)
-                } else if layout == .sidebar {
+                } else {
                     HStack(spacing: 0) {
                         SidebarView()
-                        PageHost(page: nav.page, layout: .sidebar)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
-                } else {
-                    VStack(spacing: 0) {
-                        TitleTabs()
-                        PageHost(page: nav.page, layout: .tabs)
+                        PageHost(page: nav.page)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 }
@@ -356,22 +348,20 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             FooterBar(updates: updates, canInstall: !model.isLocked)
         }
-        .frame(minWidth: layout.minimumSize.width, maxWidth: .infinity, minHeight: layout.minimumSize.height, maxHeight: .infinity)
+        .frame(minWidth: WindowConfigurator.minimumSize.width, maxWidth: .infinity, minHeight: WindowConfigurator.minimumSize.height, maxHeight: .infinity)
         .background { NimbBackground(lit: all.effectiveCount > 0) }
         .ignoresSafeArea()
         .preferredColorScheme(.dark)
-        .background(WindowConfigurator(layout: layout))
+        .background(WindowConfigurator())
         .animation(.easeInOut(duration: 0.5), value: model.reports.count)
         .animation(.easeInOut(duration: 0.3), value: onboarding.isShown)
         .animation(.easeOut(duration: 0.15), value: nav.page)
-        .onChange(of: setting.layout) { nav.layoutChanged(to: $0) }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             model.refresh()
             warp.refreshAccess()
         }
         .onAppear {
             updates.start()
-            nav.layoutChanged(to: setting.layout)
             telegram.openMainWindow = { openWindow(id: "main") }
             StatusMenuController.shared.configure(dns: model, telegram: telegram, warp: warp)
             AppDelegate.openMainWindow = { openWindow(id: "main") }

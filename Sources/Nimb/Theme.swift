@@ -120,19 +120,19 @@ struct PressableStyle: ButtonStyle {
     }
 }
 
-/// Window without a title bar that can be dragged by its background, with the sizes of the chosen layout: it cannot get smaller
-/// than the layout needs, and a change of the layout gives it the size that is usual for the new one.
+/// Window without a title bar that can be dragged by its background. It is wide rather than tall, and everything of every page (two
+/// columns of cards beside the figure) fits in it at once, so that nothing in the app has to be scrolled: it can be made larger,
+/// never smaller.
 struct WindowConfigurator: NSViewRepresentable {
-    let layout: WindowLayout
+    static let minimumSize = CGSize(width: 1100, height: 660)
 
-    final class Coordinator { var applied: WindowLayout? }
+    final class Coordinator { var sized = false }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> NSView { NSView() }
 
     func updateNSView(_ view: NSView, context: Context) {
-        let layout = layout
         let coordinator = context.coordinator
         DispatchQueue.main.async {
             guard let window = view.window else { return }
@@ -141,17 +141,16 @@ struct WindowConfigurator: NSViewRepresentable {
             window.isMovableByWindowBackground = true
             window.backgroundColor = NSColor(Theme.base)
             window.standardWindowButton(.zoomButton)?.isEnabled = true
-            window.contentMinSize = layout.minimumSize
-            if coordinator.applied != layout {
-                // The very first time with this window design (also after an update from the narrow one) the window gets the usual
-                // size of the layout; after that the size the person left it with is kept, and only a change of the layout sets
-                // the usual size again.
+            window.contentMinSize = Self.minimumSize
+            if !coordinator.sized {
+                // The very first time with this window design (also after an update from the narrow one) the window gets its usual
+                // size; after that the size the person left it with is kept.
                 let key = "desktopWindowSized"
-                if coordinator.applied != nil || !UserDefaults.standard.bool(forKey: key) {
-                    window.setContentSize(layout.defaultSize)
+                if !UserDefaults.standard.bool(forKey: key) {
+                    window.setContentSize(Self.minimumSize)
                     UserDefaults.standard.set(true, forKey: key)
                 }
-                coordinator.applied = layout
+                coordinator.sized = true
             }
         }
     }

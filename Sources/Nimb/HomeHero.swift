@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The top of the home page of the desktop window: a stack of halos (one for each service that works), the title, the subtitle
 /// and the one button that switches everything. The dog belongs to the Telegram page only. Made from the pictures of the art studio, as in
-/// `art-studio/deliver/desktop-layout/reference.html`; `scale` makes it larger (the sidebar layout) or smaller (the tabs).
+/// `art-studio/deliver/desktop-layout/reference.html`; `scale` makes it larger or smaller.
 struct HomeHero: View {
     var scale: CGFloat = 1
 
