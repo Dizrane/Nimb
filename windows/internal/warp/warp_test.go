@@ -1,4 +1,4 @@
-package main
+package warp
 
 import (
 	"os"
@@ -9,12 +9,12 @@ import (
 const goodReply = `{"id":"1234abcd-5678","token":"tok-0123456789","config":{"interface":{"addresses":{"v4":"172.16.0.2","v6":"2606:4700:110:8a36::2"}},"peers":[{"public_key":"bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=","endpoint":{"v4":"162.159.192.1:0"}}]}}`
 
 func TestPresetIsTheOneOfTheMacApp(t *testing.T) {
-	mac, err := os.ReadFile("../../Resources/warp-preset.conf")
+	mac, err := os.ReadFile("../../../Resources/warp-preset.conf")
 	if err != nil {
 		t.Skip("the repository root is not here")
 	}
 	if string(mac) != preset {
-		t.Fatal("windows/warp-reg/warp-preset.conf differs from Resources/warp-preset.conf: copy it again")
+		t.Fatal("windows/internal/warp/warp-preset.conf differs from Resources/warp-preset.conf: copy it again")
 	}
 }
 
