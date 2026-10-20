@@ -292,8 +292,10 @@ final class WarpTunnelModel: ObservableObject {
         guard isInstalled, !isWorking else { return }
         errorMessage = nil
         checks = []
-        phase = .working("Включаю…")
         let upgrade = upgrade
+        // After an update of Nimb the helper in the folder of root is replaced by the new one: that needs the password once, even with the
+        // permission «без пароля». The person is told why.
+        phase = .working(upgrade != nil && passwordless ? "Обновляю помощник туннеля: пароль нужен один раз…" : "Включаю…")
         let withoutPassword = passwordless && upgrade == nil
         Task.detached {
             let result = Result<String, Error> {
