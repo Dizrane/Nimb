@@ -1,6 +1,10 @@
 # Work in progress and previews are large and personal to the session; only the delivered assets and the notes go to git.
 work/*
 !work/.gitkeep
+# The scripts that draw the art stay in git (small); what they draw stays out.
+!work/*/
+work/*/*
+!work/*/*.py
 previews/*
 !previews/.gitkeep
 *.blend1
