@@ -95,5 +95,10 @@ struct NimbApp: App {
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1100, height: 660)
         .windowResizability(.contentMinSize)
+
+        Window("Что открывает туннель", id: TunnelSitesWindow.windowID) {
+            TunnelSitesWindow()
+        }
+        .windowResizability(.contentSize)
     }
 }

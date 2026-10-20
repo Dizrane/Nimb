@@ -3,6 +3,7 @@ import SwiftUI
 /// The YouTube and Discord page: one switch for the WARP tunnel, a check that the two sites open.
 struct WarpPage: View {
     @ObservedObject var warp: WarpTunnelModel
+    @Environment(\.openWindow) private var openWindow
 
     private var title: String {
         switch warp.phase {
@@ -47,6 +48,7 @@ struct WarpPage: View {
                     }
                     if warp.isInstalled && !warp.passwordless && !warp.isWorking { passwordHint }
                     if warp.isInstalled && !warp.isWorking { removeRow }
+                    sitesRow
             }
         }
         .onAppear { warp.refresh(); warp.startWatching() }
@@ -54,6 +56,27 @@ struct WarpPage: View {
     }
 
     // MARK: Cards
+
+    /// A remark, not a block of the page: the list of everything the tunnel opens is behind the small «i».
+    private var sitesRow: some View {
+        HStack(spacing: 6) {
+            Text("Туннель даёт доступ и к другим сервисам")
+                .font(Typo.small)
+                .foregroundStyle(Theme.textSecondary)
+            Button { openWindow(id: TunnelSitesWindow.windowID) } label: {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 13, weight: .light))
+                    .foregroundStyle(Theme.textSecondary)
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Что ещё открывает туннель")
+            .accessibilityLabel("Что ещё открывает туннель")
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 2)
+    }
 
     /// What happens on the first start, with the terms the person agrees to by pressing the button.
     private var firstStartCard: some View {

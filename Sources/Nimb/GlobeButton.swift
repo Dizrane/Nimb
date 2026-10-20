@@ -24,15 +24,19 @@ struct HeroButton: View {
     }
 
     var body: some View {
+        // A paused timeline keeps the picture of the moment it stopped, which may be one from before the switch; a paused planet is
+        // drawn from the time of now every time something changes, and the end of the movement is a change too.
+        let planetRuns = !reduceMotion && gate.shouldRun(brief: state.moving)
+        let signalRuns = !reduceMotion && (lit || mode == .probing || state.moving) && gate.shouldRun(brief: state.moving)
         Button(action: action) {
             ZStack {
                 // While it turns the planet is drawn as often as the screen allows; while it only drifts, 20 times a second (a slower
                 // clock shows as steps on the edge of the continents); with DNS off it is hardly seen and drawn rarely.
-                TimelineView(.animation(minimumInterval: state.moving ? 1.0 / 60 : (lit ? 1.0 / 20 : 1.0 / 6), paused: reduceMotion || !gate.shouldRun(brief: state.moving))) { context in
-                    canvas(.planet, context.date)
+                TimelineView(.animation(minimumInterval: state.moving ? 1.0 / 60 : (lit ? 1.0 / 20 : 1.0 / 6), paused: !planetRuns)) { context in
+                    canvas(.planet, planetRuns ? context.date : Date())
                 }
-                TimelineView(.animation(minimumInterval: 1.0 / 15, paused: reduceMotion || !(lit || mode == .probing || state.moving) || !gate.shouldRun(brief: state.moving))) { context in
-                    canvas(.signal, context.date)
+                TimelineView(.animation(minimumInterval: 1.0 / 15, paused: !signalRuns)) { context in
+                    canvas(.signal, signalRuns ? context.date : Date())
                 }
                 bigButton
                     .opacity(lit ? 0 : 1)

@@ -34,11 +34,15 @@ struct MascotHero: View {
 
     var body: some View {
         let h: Double = hover.value ? 1 : 0
+        // A timeline that is paused keeps the picture of the moment it stopped, which may be one from the middle of a switch (or from
+        // before it): then the figure shows the opposite of the title. A paused page is therefore drawn from the time of now, every
+        // time something changes, and the clock that keeps the redraw going (`motion.moving`) ends with a change too.
+        let running = animated && !(reduceMotion && !motion.moving) && gate.shouldRun(brief: motion.moving)
         VStack(spacing: 6) {
             Button(action: action) {
                 ZStack {
-                    TimelineView(.animation(minimumInterval: motion.moving ? 1.0 / 30 : 1.0 / 20, paused: !animated || reduceMotion && !motion.moving || !gate.shouldRun(brief: motion.moving))) { context in
-                        stage(hover: h, date: context.date)
+                    TimelineView(.animation(minimumInterval: motion.moving ? 1.0 / 30 : 1.0 / 20, paused: !running)) { context in
+                        stage(hover: h, date: running ? context.date : Date())
                     }
                     badge(hover: h).offset(y: 90)
                 }
@@ -55,8 +59,10 @@ struct MascotHero: View {
             .animation(.easeInOut(duration: 0.4), value: hover.value)
             .accessibilityLabel(accessibility)
             .onAppear { sync(initial: true) }
-            .onChange(of: isOn) { _ in sync(initial: false) }
-            .onChange(of: halos) { _ in sync(initial: false) }
+            // The new value is taken from the change itself: the closure may be the one of an earlier pass, and reading `isOn` there
+            // would give the value from before the switch, so the figure would stay as it was.
+            .onChange(of: isOn) { on in if halos == nil { motion.set(on: on) } }
+            .onChange(of: halos) { count in if let count { motion.set(rings: count) } }
 
             Text(title)
                 .font(Typo.status)

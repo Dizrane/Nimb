@@ -28,19 +28,23 @@ struct HomeHero: View {
     }
 
     var body: some View {
+        // A paused timeline keeps the picture of the moment it stopped (maybe from before a switch): a paused hero is drawn from the
+        // time of now every time something changes.
+        let running = (all.effectiveCount > 0 || motion.moving) && !(reduceMotion && !motion.moving) && gate.shouldRun(brief: motion.moving)
         VStack(spacing: 4) {
-            TimelineView(.animation(minimumInterval: motion.moving ? 1.0 / 30 : 1.0 / 20,
-                                    paused: !(all.effectiveCount > 0 || motion.moving) || reduceMotion && !motion.moving || !gate.shouldRun(brief: motion.moving))) { context in
+            TimelineView(.animation(minimumInterval: motion.moving ? 1.0 / 30 : 1.0 / 20, paused: !running)) { context in
                 // The canvas is larger than the stage by `bleed` on every side, so that the glow of the halos is not cut by a
                 // straight edge; the layout still sees the stage.
                 Canvas { ctx, _ in
                     ctx.translateBy(x: bleed, y: bleed)
-                    draw(&ctx, size: CGSize(width: 220 * scale, height: 150 * scale), date: context.date)
+                    draw(&ctx, size: CGSize(width: 220 * scale, height: 150 * scale), date: running ? context.date : Date())
                 }
                 .frame(width: 220 * scale + 2 * bleed, height: 150 * scale + 2 * bleed)
             }
             .padding(-bleed)
-            .frame(width: 220 * scale, height: 150 * scale)
+            // Without a ring there is no stage: the words stand in the middle of the page, and when the first ring comes they slide down
+            // to make room for it. The canvas keeps its bottom on the words, so the rings do not move while the room opens.
+            .frame(width: 220 * scale, height: all.effectiveCount > 0 ? 150 * scale : 0, alignment: .bottom)
             .accessibilityHidden(true)
 
             Text(title)
@@ -74,6 +78,7 @@ struct HomeHero: View {
             .padding(.top, 12)
         }
         .animation(.easeInOut(duration: 0.35), value: title)
+        .animation(.easeInOut(duration: 0.55), value: all.effectiveCount > 0)
         .onAppear { motion.set(rings: all.effectiveCount) }
         .onChange(of: all.effectiveCount) { motion.set(rings: $0) }
     }
