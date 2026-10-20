@@ -5,17 +5,17 @@ enum AppMode: Equatable {
     case off, on, probing, busy
 }
 
-/// A quiet black-and-white scene with colour reserved for status. The colours are muted on purpose: sage for on and
-/// working, champagne for caution and the recommended choice, a dusty red for failure.
+/// A quiet black-and-white scene with colour reserved for status. The colours are full and clear: green for on and working,
+/// amber for caution and the recommended choice, red for failure.
 enum Theme {
     static let base = Color.black
     static let accent = Color.white
     static let textPrimary = Color.white.opacity(0.94)
     static let textSecondary = Color.white.opacity(0.68)
     static let hairline = Color.white.opacity(0.11)
-    static let ok = Color(red: 0.46, green: 0.80, blue: 0.67)
-    static let warn = Color(red: 0.86, green: 0.72, blue: 0.47)
-    static let bad = Color(red: 0.86, green: 0.46, blue: 0.46)
+    static let ok = Color(red: 0.19, green: 0.82, blue: 0.35)
+    static let warn = Color(red: 1.00, green: 0.78, blue: 0.20)
+    static let bad = Color(red: 1.00, green: 0.35, blue: 0.32)
 }
 
 /// Type: a serif for the one big word, a restrained sans for everything else, monospace for numbers and addresses.

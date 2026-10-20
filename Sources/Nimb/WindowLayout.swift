@@ -4,19 +4,12 @@ import SwiftUI
 enum WindowLayout: String, CaseIterable {
     case sidebar, tabs
 
-    var defaultSize: CGSize {
-        switch self {
-        case .sidebar: CGSize(width: 720, height: 480)
-        case .tabs: CGSize(width: 640, height: 470)
-        }
-    }
+    /// One size for both layouts, wide rather than tall: everything of every page (two columns of cards beside the figure) fits in
+    /// it at once, so that nothing in the app has to be scrolled. The window can be made larger, never smaller.
+    static let minimumSize = CGSize(width: 1100, height: 660)
 
-    var minimumSize: CGSize {
-        switch self {
-        case .sidebar: CGSize(width: 640, height: 420)
-        case .tabs: CGSize(width: 480, height: 400)
-        }
-    }
+    var defaultSize: CGSize { Self.minimumSize }
+    var minimumSize: CGSize { Self.minimumSize }
 
     var title: String { self == .sidebar ? "Боковая панель" : "Вкладки" }
     var detail: String { self == .sidebar ? "Список слева, страница справа" : "Как в Safari: вкладки сверху" }

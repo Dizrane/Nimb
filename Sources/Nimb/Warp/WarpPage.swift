@@ -24,7 +24,7 @@ struct WarpPage: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        TwoColumns {
             MascotHero(
                 art: .screen,
                 isOn: warp.isOn,
@@ -35,9 +35,8 @@ struct WarpPage: View {
                 disabled: warp.phase == .unavailable || warp.isWorking,
                 action: warp.phase == .notInstalled ? warp.enable : warp.toggle
             )
-
-            FitOrScroll {
-                VStack(spacing: Space.gap) {
+        } right: {
+            VStack(spacing: Space.gap) {
                     if warp.isOn {
                         checkCard
                     } else if warp.phase == .notInstalled {
@@ -48,15 +47,6 @@ struct WarpPage: View {
                     }
                     if warp.isInstalled && !warp.passwordless && !warp.isWorking { passwordHint }
                     if warp.isInstalled && !warp.isWorking { removeRow }
-                    Text("Туннель создаёт системное подключение и меняет маршруты, поэтому первая установка просит пароль администратора. Основано на amneziawg-go (MIT).")
-                        .font(Typo.small)
-                        .foregroundStyle(Theme.textSecondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 2)
-                }
-                .padding(.horizontal, Space.page)
-                .padding(.vertical, Space.s)
             }
         }
         .onAppear { warp.refresh(); warp.startWatching() }
@@ -71,7 +61,7 @@ struct WarpPage: View {
             Text("Что произойдёт при включении")
                 .font(Typo.name)
                 .foregroundStyle(Theme.textPrimary)
-            Text("Nimb создаст для этого Mac собственный анонимный аккаунт Cloudflare WARP со своими ключами (личных данных он не передаёт), настроит туннель и запросит пароль администратора. Вводить ничего не нужно. Включая, вы принимаете условия Cloudflare WARP.")
+            Text("Nimb создаст для этого Mac анонимный аккаунт Cloudflare WARP и запросит пароль. Включая, вы принимаете условия Cloudflare WARP.")
                 .font(Typo.small)
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -87,7 +77,7 @@ struct WarpPage: View {
                 .font(Typo.name)
                 .foregroundStyle(Theme.textPrimary)
             if warp.checks.isEmpty {
-                Text("Запросит у YouTube и Discord короткий ответ и покажет, дошёл ли он. Голосовые каналы Discord так проверить нельзя, их проверьте в самом Discord.")
+                Text("Проверит, открываются ли YouTube и Discord.")
                     .font(Typo.small)
                     .foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -121,7 +111,7 @@ struct WarpPage: View {
 
     private var removeRow: some View {
         HStack(spacing: 10) {
-            Text("Ключи WARP созданы на этом Mac. Если туннель больше не нужен, их можно удалить вместе с аккаунтом.")
+            Text("Ключи туннеля созданы на этом Mac.")
                 .font(Typo.small)
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)

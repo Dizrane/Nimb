@@ -165,6 +165,37 @@ final class AllServices: ObservableObject {
         }
     }
 
+    /// Whether anything of Nimb is still working: a service that would go on after the program is gone.
+    var anythingWorks: Bool {
+        guard let dns, let telegram, let warp else { return false }
+        return dns.active != nil || telegram.isRunning || warp.isOn
+    }
+
+    /// The services that still work, by name.
+    var stillWorking: [String] {
+        guard let dns, let telegram, let warp else { return [] }
+        var names: [String] = []
+        if dns.active != nil { names.append("DNS нейросетей") }
+        if telegram.isRunning { names.append("прокси Telegram") }
+        if warp.isOn { names.append("туннель YouTube и Discord") }
+        return names
+    }
+
+    /// Before the program ends: turns off all three. Unlike «Выключить всё» it goes on to the next one if one was refused (the
+    /// administrator password), and says in the end which of them still work. Waits for what is changing now.
+    func shutdown() async -> [String] {
+        guard let dns, let telegram, let warp else { return [] }
+        while isBusy { try? await Task.sleep(for: .milliseconds(150)) }
+        isRunning = true
+        intent = .off
+        defer { isRunning = false; intent = .none }
+        if telegram.isRunning { telegram.stop() }
+        if dns.active != nil { dns.toggle(); await settle() }
+        if warp.isOn { warp.disconnect(); await settle() }
+        warp.refresh()
+        return stillWorking
+    }
+
     /// Waits until the previous change is over, so that the password prompts come one after another.
     private func settle() async {
         try? await Task.sleep(for: .milliseconds(300))

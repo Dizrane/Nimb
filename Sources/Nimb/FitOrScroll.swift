@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Shows the content as it is when it fits in the room it is given, and makes it scrollable only when it does not.
+/// Shows the content as it is when it fits in the room it is given (centred in it), and makes it scrollable only when it does not.
+/// The pages of the desktop window are made to fit, so the scrolling is a safety for a small window or an unusual amount of text.
 struct FitOrScroll<Content: View>: View {
     @ViewBuilder let content: Content
 
@@ -12,6 +13,6 @@ struct FitOrScroll<Content: View>: View {
             }
             .scrollIndicators(.hidden)
         }
-        .frame(maxHeight: .infinity, alignment: .top)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

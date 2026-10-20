@@ -6,6 +6,7 @@ struct SidebarView: View {
 
     @ObservedObject private var nav = Navigation.shared
     @ObservedObject private var all = AllServices.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -34,7 +35,10 @@ struct SidebarView: View {
     private func row(_ page: AppPage) -> some View {
         let selected = nav.page == page
         return HStack(spacing: 8) {
-            Button { withAnimation(.easeOut(duration: 0.12)) { nav.select(page) } } label: {
+            Button {
+                PlayableIcon.play(page, reduceMotion: reduceMotion)
+                withAnimation(.easeOut(duration: 0.12)) { nav.select(page) }
+            } label: {
                 HStack(spacing: 6) {
                     icon(page).frame(width: 26, height: 24)
                     Text(page.title)
@@ -61,22 +65,21 @@ struct SidebarView: View {
     @ViewBuilder
     private func icon(_ page: AppPage) -> some View {
         if page == .home {
-            let e = all.effective
-            RingsIcon(enabled: [e.ai, e.telegram, e.media], selected: nav.page == .home)
-        } else if let art = page.iconFile(dimmed: page.isService && !all.isOn(page)) {
-            ArtImage(folder: art.folder, file: art.file, size: 32)
+            RingsIcon(count: all.effectiveCount, selected: nav.page == .home)
+        } else {
+            PlayableIcon(page: page, size: 32, dimmed: page.isService && !all.isOn(page))
         }
     }
 }
 
 /// The three small rings of the home page, one for each service, bright when the service works.
 struct RingsIcon: View {
-    let enabled: [Bool]
+    let count: Int
     let selected: Bool
 
     var body: some View {
         Canvas { ctx, size in
-            HeaderRing.drawStack(&ctx, center: CGPoint(x: size.width / 2, y: size.height / 2), enabled: enabled, selected: selected)
+            HeaderRing.drawStack(&ctx, center: CGPoint(x: size.width / 2, y: size.height / 2), count: count, selected: selected)
         }
         .frame(width: 28, height: 22)
     }

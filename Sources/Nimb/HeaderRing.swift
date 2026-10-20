@@ -91,14 +91,13 @@ final class HeaderRing: ObservableObject {
         }
     }
 
-    /// The home tab: three small rings one above another, one for each service, in a box of 26 x 20 points centred on `center`.
-    static func drawStack(_ ctx: inout GraphicsContext, center: CGPoint, enabled: [Bool], selected: Bool) {
-        // media on top, then Telegram, then the neural networks
-        let order = [2, 1, 0]
-        for (i, service) in order.enumerated() {
+    /// The home tab: three small rings one above another, in a box of 26 x 20 points centred on `center`. As many are lit as
+    /// there are services working, and they go out from the top: the lowest ring is the last one left (as in the hero of the home page).
+    static func drawStack(_ ctx: inout GraphicsContext, center: CGPoint, count: Int, selected: Bool) {
+        for i in 0..<3 {
             let scale = 0.105 - 0.004 * Double(i)
             let cy = center.y - 10 + 4.4 + 5.4 * Double(i)
-            let alpha = enabled[service] ? (selected ? 1.0 : 0.82) : 0.14
+            let alpha = 2 - i < count ? (selected ? 1.0 : 0.82) : 0.14
             for part in HeaderPart.allCases {
                 guard let image = ArtLibrary.shared.image("header", part.file) else { continue }
                 ctx.drawLayer { layer in

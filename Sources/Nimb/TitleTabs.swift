@@ -140,8 +140,7 @@ struct TitleTabs: View {
     private func draw(_ ctx: inout GraphicsContext, date: Date) {
         ring.drawSelection(&ctx, date: date, reduceMotion: reduceMotion)
         if let home = frames.frames[.home] {
-            let e = all.effective
-            HeaderRing.drawStack(&ctx, center: CGPoint(x: home.midX, y: home.midY), enabled: [e.ai, e.telegram, e.media], selected: nav.page == .home)
+            HeaderRing.drawStack(&ctx, center: CGPoint(x: home.midX, y: home.midY), count: all.effectiveCount, selected: nav.page == .home)
         }
     }
 }

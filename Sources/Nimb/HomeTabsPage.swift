@@ -1,24 +1,15 @@
 import SwiftUI
 
-/// The home page of the tabs layout: the dog under its halos, the button for everything and, because there is no sidebar here,
-/// a row for each service with its switch and a button that opens its page as a tab.
+/// The home page of the tabs layout: the halos and the button for everything on the left and, because there is no sidebar here,
+/// a row for each service with its switch and a button that opens its page as a tab on the right.
 struct HomeTabsPage: View {
-    @ObservedObject private var all = AllServices.shared
-    @ObservedObject private var nav = Navigation.shared
-
     var body: some View {
-        FitOrScroll {
-            VStack(spacing: Space.gap + 6) {
-                HomeHero(scale: 0.8)
-                    .padding(.top, 8)
-                VStack(spacing: Space.gap) {
-                    ForEach(AppPage.services) { ServiceRow(page: $0) }
-                }
-                .frame(maxWidth: 440)
+        TwoColumns {
+            HomeHero(scale: 1.0)
+        } right: {
+            VStack(spacing: Space.gap) {
+                ForEach(AppPage.services) { ServiceRow(page: $0) }
             }
-            .padding(.horizontal, Space.page)
-            .padding(.vertical, Space.s)
-            .frame(maxWidth: .infinity)
         }
     }
 }
@@ -27,10 +18,15 @@ struct HomeTabsPage: View {
 private struct ServiceRow: View {
     let page: AppPage
     @ObservedObject private var all = AllServices.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: 12) {
-            if let art = page.iconFile(dimmed: !all.isOn(page)) { ArtImage(folder: art.folder, file: art.file, size: 38) }
+            Button { PlayableIcon.play(page, reduceMotion: reduceMotion) } label: {
+                PlayableIcon(page: page, size: 38, dimmed: !all.isOn(page)).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(page.title)
                     .font(Typo.name)

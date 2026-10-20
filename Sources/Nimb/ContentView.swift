@@ -211,7 +211,7 @@ final class DNSViewModel: ObservableObject {
                     if case DNSError.cancelled = outcome {} else { self.errorMessage = outcome.localizedDescription }
                     self.refresh()
                 } else {
-                    AppDelegate.quit()
+                    AppDelegate.quit(stoppingServices: false)
                 }
             }
         }
@@ -252,27 +252,52 @@ final class UpdateViewModel: ObservableObject {
     }
 
     @Published var state: State = .idle
+    /// When GitHub last answered, and whether the last try failed (a failed try is not shown as an error: it is quiet).
+    @Published private(set) var lastChecked: Date?
+    @Published private(set) var lastCheckFailed = false
 
-    /// A silent check stays quiet when offline or when GitHub cannot be reached.
-    func check(silent: Bool) {
+    /// The checks are made when the program opens and then once in 15 minutes of use, never oftener: nobody can press a button
+    /// and run into the limit of GitHub.
+    private static let interval: TimeInterval = 15 * 60
+    private var lastTry = Date.distantPast
+    private var activeSeconds: TimeInterval = 0
+    private var timer: Timer?
+
+    /// Called when the window opens: the first check, and the clock that counts minutes of use.
+    func start() {
+        checkIfDue()
+        timer?.invalidate()
+        timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, AnimationGate.shared.isActive else { return }
+                self.activeSeconds += 30
+                if self.activeSeconds >= Self.interval { self.checkIfDue() }
+            }
+        }
+    }
+
+    func checkIfDue() {
+        guard Date().timeIntervalSince(lastTry) >= Self.interval - 1 else { return }
+        check()
+    }
+
+    private func check() {
         if case .installing = state { return }
         if case .checking = state { return }
+        let before = state
+        lastTry = Date()
+        activeSeconds = 0
         state = .checking
         Task {
-            let started = Date()
-            let outcome: State
             do {
                 let release = try await Updater.latestRelease()
-                outcome = Updater.isNewer(release.version, than: Updater.currentVersion) ? .available(release) : .upToDate
+                lastChecked = Date()
+                lastCheckFailed = false
+                state = Updater.isNewer(release.version, than: Updater.currentVersion) ? .available(release) : .upToDate
             } catch {
-                outcome = silent ? .idle : .failed("Не удалось проверить обновления: \(error.localizedDescription)")
+                lastCheckFailed = true
+                if case .available = before { state = before } else { state = .idle }
             }
-            // A quick answer would make the icon flicker instead of turning; let it turn for a moment.
-            if !silent {
-                let remaining = 0.9 - Date().timeIntervalSince(started)
-                if remaining > 0 { try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000)) }
-            }
-            state = outcome
         }
     }
 
@@ -283,7 +308,7 @@ final class UpdateViewModel: ObservableObject {
                 try await Updater.install(release) { text in
                     Task { @MainActor in self.state = .installing(text) }
                 }
-                AppDelegate.quit()
+                AppDelegate.quit(stoppingServices: false)
             } catch {
                 state = .failed(error.localizedDescription)
             }
@@ -297,6 +322,7 @@ struct ContentView: View {
     @EnvironmentObject private var model: DNSViewModel
     @StateObject private var updates = UpdateViewModel()
     @ObservedObject private var onboarding = Onboarding.shared
+    @ObservedObject private var all = AllServices.shared
     @ObservedObject private var nav = Navigation.shared
     @ObservedObject private var setting = WindowLayoutSetting.shared
     @EnvironmentObject private var telegram: TelegramProxyModel
@@ -331,7 +357,7 @@ struct ContentView: View {
             FooterBar(updates: updates, canInstall: !model.isLocked)
         }
         .frame(minWidth: layout.minimumSize.width, maxWidth: .infinity, minHeight: layout.minimumSize.height, maxHeight: .infinity)
-        .background { NimbBackground(lit: model.active != nil) }
+        .background { NimbBackground(lit: all.effectiveCount > 0) }
         .ignoresSafeArea()
         .preferredColorScheme(.dark)
         .background(WindowConfigurator(layout: layout))
@@ -344,7 +370,7 @@ struct ContentView: View {
             warp.refreshAccess()
         }
         .onAppear {
-            updates.check(silent: true)
+            updates.start()
             nav.layoutChanged(to: setting.layout)
             telegram.openMainWindow = { openWindow(id: "main") }
             StatusMenuController.shared.configure(dns: model, telegram: telegram, warp: warp)
@@ -384,9 +410,6 @@ struct DNSHero: View {
                             .font(Typo.name)
                             .foregroundStyle(Theme.textPrimary)
                     }
-                    Text(active.addresses.joined(separator: "   "))
-                        .font(Typo.mono)
-                        .foregroundStyle(Theme.textSecondary)
                 } else {
                     Text(subtitle)
                         .font(Typo.body)
@@ -439,16 +462,22 @@ struct ProvidersSection: View {
                     .transition(.opacity)
             }
 
-            ForEach(DNSProvider.all) { provider in
-                ProviderCard(
-                    provider: provider,
-                    report: model.report(for: provider),
-                    isSelected: model.selected == provider,
-                    isActive: model.active == provider,
-                    isBest: model.best?.provider == provider && (model.best?.workingCount ?? 0) > 0,
-                    locked: model.isLocked
-                ) {
-                    model.select(provider)
+            // One slim row for each service; two by two once the check has results (they make the cards taller).
+            LazyVGrid(columns: model.reports.isEmpty
+                        ? [GridItem(.flexible(), alignment: .top)]
+                        : [GridItem(.flexible(), spacing: Space.gap, alignment: .top), GridItem(.flexible(), spacing: Space.gap, alignment: .top)],
+                      spacing: Space.gap) {
+                ForEach(DNSProvider.all) { provider in
+                    ProviderCard(
+                        provider: provider,
+                        report: model.report(for: provider),
+                        isSelected: model.selected == provider,
+                        isActive: model.active == provider,
+                        isBest: model.best?.provider == provider && (model.best?.workingCount ?? 0) > 0,
+                        locked: model.isLocked
+                    ) {
+                        model.select(provider)
+                    }
                 }
             }
 
@@ -536,20 +565,25 @@ private struct ProviderCard: View {
     @StateObject private var details = Flag()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 8) {
                 Text(provider.name)
                     .font(Typo.name)
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
-                    .fixedSize()
+                    .minimumScaleFactor(0.85)
                 if isBest {
                     Image(systemName: "diamond.fill")
                         .font(.system(size: 7))
                         .foregroundStyle(Theme.warn)
                         .help("Лучший по итогам проверки")
                 }
-                if isActive { Badge(text: "Активен", color: Theme.ok) }
+                if isActive {
+                    Text("· активен")
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundStyle(Theme.ok)
+                        .lineLimit(1)
+                }
                 Spacer(minLength: 4)
                 if let report {
                     SpeedBadge(seconds: report.medianSeconds)
@@ -565,16 +599,12 @@ private struct ProviderCard: View {
                 RadioMark(selected: isSelected)
             }
 
-            Text(provider.addresses.joined(separator: "   "))
-                .font(Typo.mono)
-                .foregroundStyle(Theme.textSecondary)
-
             if let report {
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 5) {
                         ForEach(report.services) { ServicePill(result: $0) }
                     }
-                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 6), GridItem(.flexible(), spacing: 6)], spacing: 6) {
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 5), GridItem(.flexible(), spacing: 5)], spacing: 5) {
                         ForEach(report.services) { ServicePill(result: $0) }
                     }
                 }
@@ -582,7 +612,7 @@ private struct ProviderCard: View {
             }
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassCard(tintOpacity: isSelected ? 0.04 : 0, borderOpacity: isSelected ? 0.5 : hover.value ? 0.24 : 0.11)
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -683,7 +713,7 @@ private struct ServicePill: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 5)
+        .padding(.vertical, 3)
         .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(style.color.opacity(0.07)))
         .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(style.color.opacity(0.28), lineWidth: 1))
         .accessibilityElement(children: .ignore)
@@ -744,19 +774,21 @@ private struct BestBanner: View {
     let action: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 1) {
                 Text("Рекомендуем")
                     .sectionLabel()
                     .foregroundStyle(Theme.warn)
-                Text(report.provider.name)
-                    .font(Typo.name)
-                    .foregroundStyle(Theme.textPrimary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-                Text("Работает \(report.workingCount) из \(ProbeTarget.services.count) сервисов")
-                    .font(Typo.small)
-                    .foregroundStyle(Theme.textSecondary)
+                HStack(spacing: 8) {
+                    Text(report.provider.name)
+                        .font(Typo.name)
+                        .foregroundStyle(Theme.textPrimary)
+                        .lineLimit(1)
+                    Text("работает \(report.workingCount) из \(ProbeTarget.services.count)")
+                        .font(Typo.small)
+                        .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(1)
+                }
             }
             Spacer(minLength: 4)
             if isSelected {
@@ -771,7 +803,7 @@ private struct BestBanner: View {
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(Theme.warn)
                         .padding(.horizontal, 14)
-                        .padding(.vertical, 6)
+                        .padding(.vertical, 5)
                         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.warn.opacity(0.65), lineWidth: 1))
                 }
                 .buttonStyle(PressableStyle())
@@ -779,7 +811,7 @@ private struct BestBanner: View {
             }
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 11)
+        .padding(.vertical, 8)
         .glassCard(tint: Theme.warn, tintOpacity: 0.04, borderOpacity: 0.32, radius: 14)
     }
 }
@@ -815,35 +847,34 @@ private struct FooterBar: View {
     @ObservedObject var updates: UpdateViewModel
     let canInstall: Bool
 
+    private static let channel = URL(string: "https://t.me/NimbProject")!
+
     var body: some View {
-        VStack(spacing: 8) {
-            HStack {
-                ChannelLink()
-                    .padding(.leading, -6)
-                    .padding(.trailing, -7)
-                Text("Nimb \(Updater.currentVersion)")
-                    .font(Typo.mono)
-                    .foregroundStyle(Theme.textSecondary)
-                Spacer()
-                switch updates.state {
-                case .installing(let text):
-                    ProgressView().controlSize(.small)
-                    Text(text).font(.system(size: 11.5)).foregroundStyle(Theme.textSecondary)
-                case .available(let release):
-                    Button { updates.install(release) } label: {
-                        Label("Обновить до \(release.version)", systemImage: "arrow.down.circle.fill")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Color.black.opacity(0.85))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.white.opacity(0.92)))
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                versionLine
+                    .padding(.leading, 20)
+                Spacer(minLength: 8)
+                // The whole right half of the bar is the button: a small icon is hard to hit.
+                Button { NSWorkspace.shared.open(Self.channel) } label: {
+                    HStack(spacing: 7) {
+                        Spacer(minLength: 0)
+                        Text("Канал в Telegram")
+                            .font(.system(size: 12, weight: .medium))
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 9, weight: .semibold))
                     }
-                    .buttonStyle(PressableStyle())
-                    .disabled(!canInstall)
-                case .idle, .failed, .checking, .upToDate:
-                    CheckUpdatesButton(updates: updates)
+                    .foregroundStyle(Theme.textSecondary)
+                    .padding(.trailing, 20)
+                    .frame(maxHeight: .infinity)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(PressableStyle())
+                .frame(width: 280)
+                .help("Новости и релизы Nimb в Telegram: @NimbProject")
+                .accessibilityLabel("Канал Nimb в Telegram")
             }
+            .frame(height: 42)
             if case .failed(let message) = updates.state {
                 Text(message)
                     .font(.system(size: 11.5))
@@ -851,75 +882,51 @@ private struct FooterBar: View {
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 8)
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
         .background(Color.black.opacity(0.28))
         .overlay(alignment: .top) { Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1) }
     }
-}
 
-/// A small round Telegram logo that opens the project's channel, @NimbProject.
-private struct ChannelLink: View {
-    private static let url = URL(string: "https://t.me/NimbProject")!
-
-    var body: some View {
-        Button { NSWorkspace.shared.open(Self.url) } label: {
-            Group {
-                if let url = Bundle.main.url(forResource: "telegram", withExtension: "png"), let image = NSImage(contentsOf: url) {
-                    Image(nsImage: image).resizable().frame(width: 14, height: 14).opacity(0.75)
-                } else {
-                    Image(systemName: "paperplane").font(.system(size: 12)).foregroundStyle(Theme.textSecondary)
-                }
-            }
-            .padding(6)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(PressableStyle())
-        .help("Новости и релизы Nimb в Telegram: @NimbProject")
-        .accessibilityLabel("Telegram-канал Nimb Project")
-    }
-}
-
-/// The status of the version with an update icon. Pressing it checks GitHub: the icon turns while it asks and the
-/// text changes if a new version has come out.
-private struct CheckUpdatesButton: View {
-    @ObservedObject var updates: UpdateViewModel
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private var checking: Bool {
-        if case .checking = updates.state { return true }
-        return false
-    }
-
-    private var text: String {
+    /// «Версия 0.9.0 · проверено сегодня», or the offer of a newer version.
+    @ViewBuilder
+    private var versionLine: some View {
         switch updates.state {
-        case .checking: return "Проверяю…"
-        case .upToDate: return "Актуальная версия"
-        default: return "Проверить обновления"
+        case .installing(let text):
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text(text).font(.system(size: 12)).foregroundStyle(Theme.textSecondary)
+            }
+        case .available(let release):
+            HStack(spacing: 10) {
+                Text("Версия \(Updater.currentVersion)")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textSecondary)
+                Button { updates.install(release) } label: {
+                    Label("Обновить до \(release.version)", systemImage: "arrow.down.circle.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color.black.opacity(0.85))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.white.opacity(0.92)))
+                }
+                .buttonStyle(PressableStyle())
+                .disabled(!canInstall)
+            }
+        default:
+            Text(status)
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.textSecondary)
         }
     }
 
-    var body: some View {
-        Button { updates.check(silent: false) } label: {
-            HStack(spacing: 6) {
-                TimelineView(.animation(paused: !checking || reduceMotion)) { context in
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                        .font(.system(size: 12, weight: .semibold))
-                        .rotationEffect(.degrees(checking && !reduceMotion ? context.date.timeIntervalSinceReferenceDate * 360 : 0))
-                }
-                Text(text)
-                    .font(.system(size: 11.5, weight: .medium))
-            }
-            .foregroundStyle(Theme.textSecondary)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(PressableStyle())
-        .disabled(checking)
-        .help("Проверить, вышла ли новая версия")
-        .accessibilityLabel(text)
+    private var status: String {
+        let version = "Версия \(Updater.currentVersion)"
+        if case .checking = updates.state { return version + " · проверяю…" }
+        guard let checked = updates.lastChecked else { return updates.lastCheckFailed ? version + " · не удалось проверить" : version }
+        if updates.lastCheckFailed { return version + " · не удалось проверить" }
+        return version + (Calendar.current.isDateInToday(checked) ? " · проверено сегодня" : " · проверено " + checked.formatted(.dateTime.day().month(.wide)))
     }
 }

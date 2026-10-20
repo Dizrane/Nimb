@@ -25,9 +25,11 @@ struct SettingsView: View {
         VStack(spacing: 0) {
             if layout == .sidebar { PageHeader(title: "Настройки", buttonTitle: nil) {} }
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: Space.xl - 4) {
-                    SettingsSection(title: "Оформление окна") {
+            // Two columns, so that all the settings are in front of the person at once and nothing is scrolled.
+            FitOrScroll {
+                HStack(alignment: .top, spacing: Space.xl) {
+                    VStack(alignment: .leading, spacing: Space.l) {
+                        SettingsSection(title: "Оформление окна") {
                         HStack(alignment: .top, spacing: Space.m) {
                             ForEach(WindowLayout.allCases, id: \.self) { option in
                                 LayoutCard(option: option, selected: setting.layout == option) {
@@ -42,44 +44,13 @@ struct SettingsView: View {
                         LaunchAtLoginCard()
                     }
 
-                    SettingsSection(title: "Пароль администратора") {
-                        PermissionRow(
-                            title: "Смена DNS",
-                            detail: model.access.tooBroad
-                                ? "Старое правило позволяет любой программе поставить любой DNS. «Сделать точным» заменит его на безопасное (один раз нужен пароль)."
-                                : model.passwordless
-                                ? "DNS переключается без пароля. Разрешено только переключение между сервисами Nimb и автоматическим DNS, чужой адрес задать нельзя. Риск: это может сделать любая программа от вашего имени."
-                                : "Сейчас DNS переключается по паролю или Touch ID. Можно разрешить без пароля только переключение между сервисами Nimb и автоматическим DNS.",
-                            granted: model.passwordless,
-                            disabled: model.isLocked,
-                            note: accessNote,
-                            extraTitle: model.access.needsUpdate ? (model.access.tooBroad ? "Сделать точным" : "Добавить подключения") : nil,
-                            extraAction: { model.setPasswordless(true, confirm: false) },
-                            action: model.togglePasswordless
-                        )
-                        PermissionRow(
-                            title: "Туннель YouTube и Discord",
-                            detail: warp.passwordless
-                                ? "Туннель включается и выключается без пароля. Разрешены только две команды помощника Nimb: включить и выключить. Риск: это может сделать любая программа от вашего имени."
-                                : "Сейчас туннель включается по паролю или Touch ID. Можно разрешить без пароля только его включение и выключение. Самая первая установка всё равно спросит пароль один раз.",
-                            granted: warp.passwordless,
-                            disabled: warp.isWorking || warp.isSettingAccess,
-                            action: { warp.setPasswordless(!warp.passwordless) }
-                        )
-                        Text("Больше Nimb ни о чём не просит: ни доступа к файлам, ни к камере или микрофону.")
-                            .font(Typo.small)
-                            .foregroundStyle(Theme.textSecondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 2)
-                    }
-
                     SettingsSection(title: "Помощь") {
                         HStack(spacing: Space.m) {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text("Первая настройка")
                                     .font(Typo.name)
                                     .foregroundStyle(Theme.textPrimary)
-                                Text("Короткое обучение: по шагам включит нейросети, Telegram, YouTube и Discord.")
+                                Text("Короткое обучение по шагам.")
                                     .font(Typo.small)
                                     .foregroundStyle(Theme.textSecondary)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -94,12 +65,42 @@ struct SettingsView: View {
                         .card()
                     }
 
+                    }
+                    .frame(maxWidth: .infinity, alignment: .top)
+
+                    VStack(alignment: .leading, spacing: Space.l) {
+                    SettingsSection(title: "Пароль администратора") {
+                        PermissionRow(
+                            title: "Смена DNS",
+                            detail: model.access.tooBroad
+                                ? "Старое правило слишком широкое. «Сделать точным» заменит его на безопасное."
+                                : model.passwordless
+                                ? "DNS переключается без пароля. Только между сервисами Nimb и автоматическим."
+                                : "DNS переключается по паролю или Touch ID. Можно разрешить без пароля.",
+                            granted: model.passwordless,
+                            disabled: model.isLocked,
+                            note: accessNote,
+                            extraTitle: model.access.needsUpdate ? (model.access.tooBroad ? "Сделать точным" : "Добавить подключения") : nil,
+                            extraAction: { model.setPasswordless(true, confirm: false) },
+                            action: model.togglePasswordless
+                        )
+                        PermissionRow(
+                            title: "Туннель YouTube и Discord",
+                            detail: warp.passwordless
+                                ? "Туннель включается и выключается без пароля."
+                                : "Туннель включается по паролю или Touch ID. Можно разрешить без пароля.",
+                            granted: warp.passwordless,
+                            disabled: warp.isWorking || warp.isSettingAccess,
+                            action: { warp.setPasswordless(!warp.passwordless) }
+                        )
+                    }
+
                     SettingsSection(title: "Удаление") {
                         VStack(alignment: .leading, spacing: Space.s + 2) {
                             Text("Удалить Nimb")
                                 .font(Typo.name)
                                 .foregroundStyle(Theme.textPrimary)
-                            Text("Вернёт DNS к автоматическому, уберёт правила «без пароля» и туннель, закроет приложение и удалит его вместе с настройками и кэшем.")
+                            Text("Вернёт DNS к автоматическому и удалит приложение вместе с настройками.")
                                 .font(Typo.small)
                                 .foregroundStyle(Theme.textSecondary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -123,12 +124,13 @@ struct SettingsView: View {
                     if let message = model.errorMessage ?? warp.errorMessage {
                         NoticeCard(lines: [message], color: Theme.bad, symbol: "xmark.octagon")
                     }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .top)
                 }
                 .padding(.horizontal, Space.page)
                 .padding(.top, layout == .sidebar ? Space.s : 16)
                 .padding(.bottom, Space.s)
             }
-            .scrollIndicators(.hidden)
         }
     }
 }

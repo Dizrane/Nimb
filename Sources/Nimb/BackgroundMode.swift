@@ -24,17 +24,13 @@ struct BackgroundCard: View {
                 Text("Работать в фоне")
                     .font(Typo.name)
                     .foregroundStyle(Theme.textPrimary)
-                Text("Nimb остаётся в строке меню, а ⌘Q и закрытие окна только прячут окно. Выйти совсем можно из меню значка.")
+                Text("Nimb остаётся в строке меню, когда окно закрыто.")
                     .font(Typo.small)
                     .foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)
-            Toggle("Работать в фоне", isOn: $background.enabled)
-                .toggleStyle(.switch)
-                .controlSize(.small)
-                .labelsHidden()
-                .tint(Theme.ok)
+            PillSwitch(isOn: background.enabled) { background.enabled.toggle() }
         }
         .card(.neutral)
     }

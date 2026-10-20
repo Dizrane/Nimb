@@ -20,16 +20,17 @@ struct PageHost: View {
                 } else {
                     HomeTabsPage()
                 }
-            case .ai: column { AIPage(model: model) }
-            case .telegram: column { TelegramPage(telegram: telegram) }
-            case .media: column { WarpPage(warp: warp) }
-            case .settings: column { SettingsView(model: model, onboarding: onboarding, warp: warp, layout: layout) }
+            case .ai: wide { AIPage(model: model) }
+            case .telegram: wide { TelegramPage(telegram: telegram) }
+            case .media: wide { WarpPage(warp: warp) }
+            case .settings: wide { SettingsView(model: model, onboarding: onboarding, warp: warp, layout: layout) }
             }
         }
         .transition(.opacity)
     }
 
-    private func column<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+    /// A page of the desktop window uses all the room it is given; in the sidebar layout it has its name on top.
+    private func wide<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         VStack(spacing: 0) {
             if layout == .sidebar && page != .settings {
                 Text(page.title)
@@ -42,7 +43,6 @@ struct PageHost: View {
             }
             content()
         }
-        .frame(maxWidth: 480)
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

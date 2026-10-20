@@ -10,7 +10,7 @@ struct PillSwitch: View {
     var body: some View {
         Button(action: toggle) {
             ZStack(alignment: isOn ? .trailing : .leading) {
-                Capsule().fill(isOn ? Theme.ok.opacity(0.85) : Color.white.opacity(0.16))
+                Capsule().fill(isOn ? Theme.ok : Color.white.opacity(0.16))
                 Circle()
                     .fill(Color.white.opacity(0.94))
                     .frame(width: 18, height: 18)
