@@ -82,6 +82,7 @@ struct NimbApp: App {
     @StateObject private var warp = WarpTunnelModel()
 
     init() {
+        AppLog.shared.add("app", "запуск Nimb \(Updater.currentVersion), macOS \(ProcessInfo.processInfo.operatingSystemVersionString)")
         SingleInstance.yieldToRunningCopy()
     }
 

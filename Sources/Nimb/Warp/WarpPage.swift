@@ -59,7 +59,7 @@ struct WarpPage: View {
 
     /// A remark, not a block of the page: the list of everything the tunnel opens is behind the small «i».
     private var sitesRow: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 2) {
             Text("Туннель даёт доступ и к другим сервисам")
                 .font(Typo.small)
                 .foregroundStyle(Theme.textSecondary)
@@ -67,7 +67,7 @@ struct WarpPage: View {
                 Image(systemName: "info.circle")
                     .font(.system(size: 13, weight: .light))
                     .foregroundStyle(Theme.textSecondary)
-                    .frame(width: 22, height: 22)
+                    .frame(width: 16, height: 22)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)

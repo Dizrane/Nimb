@@ -47,6 +47,8 @@ enum Uninstaller {
                 "\(home)/Library/WebKit/\(id)",
             ]
         }
+        // The diary of the app (`AppLog`).
+        result.append("\(home)/Library/Logs/Nimb")
 
         let temp = fm.temporaryDirectory
         for name in (try? fm.contentsOfDirectory(atPath: temp.path)) ?? [] where name.hasPrefix("Nimb-update-") || name.hasPrefix("Nimb-move-") {

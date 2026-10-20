@@ -1,7 +1,9 @@
 import Foundation
 
 /// Asks YouTube and Discord for small answers at several addresses each and reports what came. All requests go out at
-/// once, and one that fails is repeated, so that a single lost packet does not read as an outage.
+/// once, and each address is tried by several connections at a time, the way a browser does: through the tunnel, Cloudflare
+/// leaves part of the connections to Google's sites without an answer (measured at about every second one), so a single
+/// connection that fails is not an outage.
 enum SiteChecker {
     private static let targets: [(name: String, probes: [(String, String)])] = [
         ("YouTube", [
@@ -22,7 +24,7 @@ enum SiteChecker {
         await withTaskGroup(of: (Int, Int, SiteProbe).self) { group in
             for (i, target) in targets.enumerated() {
                 for (j, probe) in target.probes.enumerated() {
-                    group.addTask { (i, j, await probeTwice(name: probe.0, url: probe.1)) }
+                    group.addTask { (i, j, await answer(name: probe.0, url: probe.1)) }
                 }
             }
             var found: [Int: [Int: SiteProbe]] = [:]
@@ -33,11 +35,24 @@ enum SiteChecker {
         }
     }
 
-    private static func probeTwice(name: String, url: String) async -> SiteProbe {
-        let first = await Task.detached { curl(name: name, url: url) }.value
-        if first.answered { return first }
-        let second = await Task.detached { curl(name: name, url: url) }.value
-        return second.answered ? second : first
+    /// Connections tried at once for one address, and how many times that is repeated while none of them has answered.
+    private static let attempts = 4
+    private static let rounds = 2
+
+    /// The fastest answer of a round of simultaneous connections; the next round only if none of them answered.
+    private static func answer(name: String, url: String) async -> SiteProbe {
+        var failed: SiteProbe?
+        for _ in 0..<rounds {
+            let round = await withTaskGroup(of: SiteProbe.self) { group in
+                for _ in 0..<attempts { group.addTask { await Task.detached { curl(name: name, url: url) }.value } }
+                var all: [SiteProbe] = []
+                for await result in group { all.append(result) }
+                return all
+            }
+            if let best = round.filter(\.answered).min(by: { $0.seconds < $1.seconds }) { return best }
+            failed = round.first
+        }
+        return failed ?? SiteProbe(name: name, url: url, code: 0, seconds: 0, failure: "нет ответа")
     }
 
     /// `curl` prints the code and the time; its exit status says why there was no answer.

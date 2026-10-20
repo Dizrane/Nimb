@@ -4,11 +4,11 @@ import SwiftUI
 /// The Telegram proxy as the window and the menu see it: on or off, the link, the numbers.
 @MainActor
 final class TelegramProxyModel: ObservableObject {
-    @Published private(set) var isRunning = false
+    @Published private(set) var isRunning = false { didSet { if isRunning != oldValue { AppLog.shared.add("telegram", isRunning ? "прокси включён, порт \(port)" : "прокси выключен") } } }
     @Published private(set) var isStarting = false
     @Published private(set) var port: UInt16 = 0
     @Published private(set) var stats = TelegramProxyStats()
-    @Published var errorMessage: String?
+    @Published var errorMessage: String? { didSet { if let message = errorMessage { AppLog.shared.add("telegram", "ошибка: \(message)") } } }
     /// Whether the proxy was on when Nimb was last used: it comes back by itself, nobody has to find a switch for it.
     @Published private(set) var autoStart: Bool {
         didSet { UserDefaults.standard.set(autoStart, forKey: Self.autoStartKey) }

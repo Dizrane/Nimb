@@ -3,9 +3,9 @@ import SwiftUI
 @MainActor
 final class DNSViewModel: ObservableObject {
     @Published var selected: DNSProvider = DNSProvider.all[0]
-    @Published var active: DNSProvider? { didSet { updateDockIcon() } }
+    @Published var active: DNSProvider? { didSet { updateDockIcon(); if active != oldValue { AppLog.shared.add("dns", "DNS: \(active?.name ?? "выключен")") } } }
     @Published var isBusy = false
-    @Published var errorMessage: String?
+    @Published var errorMessage: String? { didSet { if let message = errorMessage { AppLog.shared.add("dns", "ошибка: \(message)") } } }
     @Published var warnings: [String] = []
     @Published var isProbing = false
     @Published var probeProgress = ""
@@ -200,6 +200,8 @@ final class DNSViewModel: ObservableObject {
                 if !services.isEmpty || removeRule || removeTunnel {
                     try DNSManager.resetBeforeUninstall(services, removingRule: removeRule, removingTunnel: removeTunnel)
                 }
+                // The entry in «Объекты входа» goes away with the app, not later by itself.
+                await MainActor.run { LaunchAtLogin.shared.set(false) }
                 try Uninstaller.scheduleRemoval()
             } catch {
                 failure = error
@@ -295,6 +297,7 @@ final class UpdateViewModel: ObservableObject {
                 lastCheckFailed = false
                 state = Updater.isNewer(release.version, than: Updater.currentVersion) ? .available(release) : .upToDate
             } catch {
+                AppLog.shared.add("update", "проверка обновлений не удалась: \(error.localizedDescription)")
                 lastCheckFailed = true
                 if case .available = before { state = before } else { state = .idle }
             }
@@ -323,6 +326,7 @@ struct ContentView: View {
     @StateObject private var updates = UpdateViewModel()
     @ObservedObject private var onboarding = Onboarding.shared
     @ObservedObject private var all = AllServices.shared
+    @ObservedObject private var report = ReportCenter.shared
     @ObservedObject private var nav = Navigation.shared
     @EnvironmentObject private var telegram: TelegramProxyModel
     @EnvironmentObject private var warp: WarpTunnelModel
@@ -353,6 +357,7 @@ struct ContentView: View {
         .ignoresSafeArea()
         .preferredColorScheme(.dark)
         .background(WindowConfigurator())
+        .sheet(isPresented: $report.isShown) { ReportSheet() }
         .animation(.easeInOut(duration: 0.5), value: model.reports.count)
         .animation(.easeInOut(duration: 0.3), value: onboarding.isShown)
         .animation(.easeOut(duration: 0.15), value: nav.page)

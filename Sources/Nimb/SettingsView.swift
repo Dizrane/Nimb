@@ -34,6 +34,21 @@ struct SettingsView: View {
                     SettingsSection(title: "Помощь") {
                         HStack(spacing: Space.m) {
                             VStack(alignment: .leading, spacing: 3) {
+                                Text("Сообщить о проблеме")
+                                    .font(Typo.name)
+                                    .foregroundStyle(Theme.textPrimary)
+                                Text("Отчёт придёт разработчику. Паролей и адресов в нём нет.")
+                                    .font(Typo.small)
+                                    .foregroundStyle(Theme.textSecondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer(minLength: Space.s)
+                            OutlineButton(title: "Отправить…", color: Theme.textPrimary) { ReportCenter.shared.isShown = true }
+                        }
+                        .card()
+
+                        HStack(spacing: Space.m) {
+                            VStack(alignment: .leading, spacing: 3) {
                                 Text("Первая настройка")
                                     .font(Typo.name)
                                     .foregroundStyle(Theme.textPrimary)
@@ -53,23 +68,6 @@ struct SettingsView: View {
                     }
 
 
-                    SettingsSection(title: "Удаление") {
-                        VStack(alignment: .leading, spacing: Space.s + 2) {
-                            Text("Удалить Nimb")
-                                .font(Typo.name)
-                                .foregroundStyle(Theme.textPrimary)
-                            Text("Вернёт DNS к автоматическому и удалит приложение вместе с настройками.")
-                                .font(Typo.small)
-                                .foregroundStyle(Theme.textSecondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                            HStack {
-                                Spacer()
-                                OutlineButton(title: "Удалить…", color: Theme.bad, action: model.uninstall)
-                                    .disabled(model.isLocked)
-                            }
-                        }
-                        .card()
-                    }
                     }
                     .frame(maxWidth: .infinity, alignment: .top)
 
@@ -98,6 +96,24 @@ struct SettingsView: View {
                             disabled: warp.isWorking || warp.isSettingAccess,
                             action: { warp.setPasswordless(!warp.passwordless) }
                         )
+                    }
+
+                    SettingsSection(title: "Удаление") {
+                        HStack(spacing: Space.m) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Удалить Nimb")
+                                    .font(Typo.name)
+                                    .foregroundStyle(Theme.textPrimary)
+                                Text("Вернёт DNS к автоматическому и удалит приложение вместе с настройками.")
+                                    .font(Typo.small)
+                                    .foregroundStyle(Theme.textSecondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer(minLength: Space.s)
+                            OutlineButton(title: "Удалить…", color: Theme.bad, action: model.uninstall)
+                                .disabled(model.isLocked)
+                        }
+                        .card()
                     }
 
                     if model.isSettingUp {

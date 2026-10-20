@@ -37,8 +37,8 @@ final class WarpTunnelModel: ObservableObject {
         case on(interface: String)
     }
 
-    @Published private(set) var phase: Phase = .off
-    @Published var errorMessage: String?
+    @Published private(set) var phase: Phase = .off { didSet { if phase != oldValue { AppLog.shared.add("tunnel", "состояние: \(phase)") } } }
+    @Published var errorMessage: String? { didSet { if let message = errorMessage { AppLog.shared.add("tunnel", "ошибка: \(message)") } } }
     @Published private(set) var checks: [SiteCheck] = []
     @Published private(set) var isChecking = false
     /// sudo lets this person start and stop the tunnel without a password.
@@ -343,6 +343,7 @@ final class WarpTunnelModel: ObservableObject {
         Task {
             let results = await SiteChecker.run()
             checks = results
+            AppLog.shared.add("tunnel", "проверка: " + results.map { "\($0.name) \($0.result)" }.joined(separator: "; "))
             isChecking = false
         }
     }

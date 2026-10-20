@@ -1,0 +1,12 @@
+name = "nimb-report"
+main = "index.js"
+compatibility_date = "2025-01-01"
+workers_dev = true
+
+# At most 5 reports a minute from one address.
+[[ratelimits]]
+name = "LIMITER"
+namespace_id = "1001"
+  [ratelimits.simple]
+  limit = 5
+  period = 60
