@@ -25,9 +25,13 @@ const (
 	TunnelUp         = "tunnel.up"
 	TunnelDown       = "tunnel.down"
 	TunnelUnregister = "tunnel.unregister"
+	DNSSet           = "dns.set"     // takes the ID of a provider from the list of the service
+	DNSRestore       = "dns.restore" // gives the DNS of the adapters back
 )
 
-var known = map[string]bool{Ping: true, Status: true, TunnelUp: true, TunnelDown: true, TunnelUnregister: true}
+var known = map[string]bool{
+	Ping: true, Status: true, TunnelUp: true, TunnelDown: true, TunnelUnregister: true, DNSSet: true, DNSRestore: true,
+}
 
 // MaxLine is the longest line the service reads.
 const MaxLine = 4096
@@ -35,6 +39,8 @@ const MaxLine = 4096
 // Request is what the window sends.
 type Request struct {
 	Cmd string `json:"cmd"`
+	// Provider is the ID of a Smart DNS provider, only for dns.set. The service has its own list and takes no addresses.
+	Provider string `json:"provider,omitempty"`
 }
 
 // Response is what the service answers.
@@ -42,6 +48,13 @@ type Response struct {
 	OK     bool          `json:"ok"`
 	Error  string        `json:"error,omitempty"` // worded for the person
 	Tunnel *TunnelStatus `json:"tunnel,omitempty"`
+	DNS    *DNSStatus    `json:"dns,omitempty"`
+}
+
+// DNSStatus is the state of Smart DNS.
+type DNSStatus struct {
+	Active   bool   `json:"active"`
+	Provider string `json:"provider,omitempty"`
 }
 
 // TunnelStatus is the state of the tunnel.
@@ -56,7 +69,7 @@ type TunnelStatus struct {
 
 // Handler does what a command asks.
 type Handler interface {
-	Handle(ctx context.Context, cmd string) Response
+	Handle(ctx context.Context, req Request) Response
 }
 
 // Serve answers the connections of the listener until the context ends. Commands run one at a time.
@@ -93,24 +106,24 @@ func serveOne(ctx context.Context, conn net.Conn, h Handler, mu *sync.Mutex) {
 		return
 	}
 	var req Request
-	if err := json.Unmarshal(line, &req); err != nil || !known[req.Cmd] {
+	if err := json.Unmarshal(line, &req); err != nil || !known[req.Cmd] || (req.Provider != "" && req.Cmd != DNSSet) {
 		write(conn, Response{Error: "неизвестная команда"})
 		return
 	}
 	mu.Lock()
-	resp := safely(ctx, h, req.Cmd)
+	resp := safely(ctx, h, req)
 	mu.Unlock()
 	write(conn, resp)
 }
 
 // safely keeps a mistake in one command from taking the service down.
-func safely(ctx context.Context, h Handler, cmd string) (resp Response) {
+func safely(ctx context.Context, h Handler, req Request) (resp Response) {
 	defer func() {
 		if r := recover(); r != nil {
 			resp = Response{Error: "внутренняя ошибка службы"}
 		}
 	}()
-	return h.Handle(ctx, cmd)
+	return h.Handle(ctx, req)
 }
 
 func readLine(r io.Reader) ([]byte, error) {
@@ -133,10 +146,10 @@ func write(conn net.Conn, resp Response) {
 
 // Call sends one command over the connection and reads the answer. A command may take long (the tunnel waits for the
 // server for up to 16 seconds), so the wait is generous.
-func Call(conn net.Conn, cmd string) (Response, error) {
+func Call(conn net.Conn, req Request) (Response, error) {
 	defer conn.Close()
 	conn.SetDeadline(time.Now().Add(60 * time.Second))
-	b, _ := json.Marshal(Request{Cmd: cmd})
+	b, _ := json.Marshal(req)
 	if _, err := conn.Write(append(b, '\n')); err != nil {
 		return Response{}, fmt.Errorf("служба не отвечает: %w", err)
 	}

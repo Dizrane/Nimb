@@ -157,6 +157,27 @@ func (t *Tunnel) Close() {
 	t.logf("tunnel is down")
 }
 
+// SetDNS changes the DNS servers of the tunnel while it is up (Smart DNS going on or off).
+func (t *Tunnel) SetDNS(servers []netip.Addr) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.closed {
+		return nil
+	}
+	var v4, v6 []netip.Addr
+	for _, s := range servers {
+		if s.Is4() {
+			v4 = append(v4, s)
+		} else {
+			v6 = append(v6, s)
+		}
+	}
+	if err := t.luid.SetDNS(windows.AF_INET, v4, nil); err != nil {
+		return err
+	}
+	return t.luid.SetDNS(windows.AF_INET6, v6, nil)
+}
+
 // Handshake returns when the last handshake with the server was, or the zero time.
 func (t *Tunnel) Handshake() time.Time {
 	text, err := t.dev.IpcGet()

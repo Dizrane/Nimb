@@ -19,6 +19,7 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/Dizrane/Nimb/windows/internal/awgconf"
+	"github.com/Dizrane/Nimb/windows/internal/dnsx"
 	"github.com/Dizrane/Nimb/windows/internal/ipc"
 	"github.com/Dizrane/Nimb/windows/internal/tunnel"
 	"github.com/Dizrane/Nimb/windows/internal/warp"
@@ -33,8 +34,9 @@ func DataDir() string {
 	return filepath.Join(base, "Nimb")
 }
 
-// The DNS of the tunnel. Without it the system keeps asking the router of the home network, which the tunnel does not reach.
-var tunnelDNS = []netip.Addr{netip.MustParseAddr("1.1.1.1"), netip.MustParseAddr("1.0.0.1")}
+// The DNS of the tunnel when Smart DNS is off. Without it the system keeps asking the router of the home network, which the
+// tunnel does not reach.
+var defaultTunnelDNS = []netip.Addr{netip.MustParseAddr("1.1.1.1"), netip.MustParseAddr("1.0.0.1")}
 
 // Helper carries out the commands.
 type Helper struct {
@@ -43,6 +45,10 @@ type Helper struct {
 
 	mu  sync.Mutex
 	tun *tunnel.Tunnel
+
+	// backup is what the adapters had before Smart DNS; nil when Smart DNS is off.
+	backup *dnsx.Backup
+	watch  *dnsWatcher
 }
 
 // New prepares the folder (closed to everybody but the system and the administrators) and returns a helper.
@@ -53,25 +59,46 @@ func New(dir string, logf func(string, ...any)) (*Helper, error) {
 	if err := secureDir(dir); err != nil {
 		return nil, fmt.Errorf("папка службы: %w", err)
 	}
-	return &Helper{dir: dir, logf: logf}, nil
+	h := &Helper{dir: dir, logf: logf}
+	h.backup = h.loadBackup()
+	h.startWatching()
+	return h, nil
 }
 
-// Close takes the tunnel down.
+// Close takes the tunnel down. Smart DNS stays as it is: the settings are on the adapters and the backup is on the disk, and
+// the window (or the uninstaller) gives them back when the person asks.
 func (h *Helper) Close() {
+	h.stopWatching()
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.down()
 }
 
 // Handle implements ipc.Handler.
-func (h *Helper) Handle(ctx context.Context, cmd string) ipc.Response {
+func (h *Helper) Handle(ctx context.Context, req ipc.Request) ipc.Response {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	switch cmd {
+	switch req.Cmd {
 	case ipc.Ping:
 		return ipc.Response{OK: true}
 	case ipc.Status:
-		return ipc.Response{OK: true, Tunnel: h.status()}
+		return ipc.Response{OK: true, Tunnel: h.status(), DNS: h.dnsStatus()}
+	case ipc.DNSSet:
+		provider, ok := dnsx.Find(req.Provider)
+		if !ok {
+			return ipc.Response{Error: "неизвестный провайдер DNS", DNS: h.dnsStatus()}
+		}
+		if err := h.dnsSet(provider); err != nil {
+			h.logf("dns.set %s: %v", provider.ID, err)
+			return ipc.Response{Error: err.Error(), DNS: h.dnsStatus()}
+		}
+		return ipc.Response{OK: true, DNS: h.dnsStatus()}
+	case ipc.DNSRestore:
+		if err := h.dnsRestore(); err != nil {
+			h.logf("dns.restore: %v", err)
+			return ipc.Response{Error: err.Error(), DNS: h.dnsStatus()}
+		}
+		return ipc.Response{OK: true, DNS: h.dnsStatus()}
 	case ipc.TunnelUp:
 		if err := h.up(ctx); err != nil {
 			h.logf("tunnel.up: %v", err)
@@ -114,7 +141,7 @@ func (h *Helper) up(ctx context.Context) error {
 		return fmt.Errorf("настройки туннеля не прошли проверку: %w", err)
 	}
 	h.logf("bringing the tunnel up")
-	t, err := tunnel.Up(cfg, tunnel.Options{Name: "Nimb", DNS: tunnelDNS, Logf: h.logf})
+	t, err := tunnel.Up(cfg, tunnel.Options{Name: "Nimb", DNS: h.tunnelDNS(), Logf: h.logf})
 	if err != nil {
 		if errors.Is(err, tunnel.ErrNoHandshake) {
 			return errors.New("сервер не ответил за 16 секунд, интернет остался прежним")

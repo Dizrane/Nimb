@@ -10,12 +10,12 @@ import (
 
 type fake struct{ calls []string }
 
-func (f *fake) Handle(_ context.Context, cmd string) Response {
-	f.calls = append(f.calls, cmd)
-	if cmd == TunnelUp {
+func (f *fake) Handle(_ context.Context, req Request) Response {
+	f.calls = append(f.calls, req.Cmd+" "+req.Provider)
+	if req.Cmd == TunnelUp {
 		panic("a bug in a command")
 	}
-	return Response{OK: true, Tunnel: &TunnelStatus{Up: cmd == Status, HandshakeAgo: -1}}
+	return Response{OK: true, Tunnel: &TunnelStatus{Up: req.Cmd == Status, HandshakeAgo: -1}}
 }
 
 func start(t *testing.T) (*fake, string) {
@@ -49,11 +49,11 @@ func call(t *testing.T, addr, raw string) string {
 func TestKnownCommandsAreAnswered(t *testing.T) {
 	f, addr := start(t)
 	c, _ := net.Dial("tcp", addr)
-	resp, err := Call(c, Status)
+	resp, err := Call(c, Request{Cmd: Status})
 	if err != nil || !resp.OK || resp.Tunnel == nil || !resp.Tunnel.Up {
 		t.Fatalf("resp=%+v err=%v", resp, err)
 	}
-	if len(f.calls) != 1 || f.calls[0] != Status {
+	if len(f.calls) != 1 || f.calls[0] != "status " {
 		t.Fatalf("calls=%v", f.calls)
 	}
 }
@@ -67,6 +67,7 @@ func TestOnlyTheClosedSetOfCommandsGetsThrough(t *testing.T) {
 		`not json` + "\n",
 		`{"cmd":"TUNNEL.UP"}` + "\n",
 		strings.Repeat("a", MaxLine+10) + "\n",
+		`{"cmd":"ping","provider":"geohide"}` + "\n", // a provider only goes with dns.set
 	} {
 		out := call(t, addr, raw)
 		if !strings.Contains(out, `"error"`) {
@@ -98,5 +99,15 @@ func TestARequestWithoutANewlineStillWorks(t *testing.T) {
 	n, _ := c.Read(buf)
 	if !strings.Contains(string(buf[:n]), `"ok":true`) {
 		t.Fatalf("got %q", buf[:n])
+	}
+}
+
+func TestAProviderGoesOnlyWithDNSSet(t *testing.T) {
+	f, addr := start(t)
+	if out := call(t, addr, `{"cmd":"dns.set","provider":"geohide"}`+"\n"); !strings.Contains(out, `"ok":true`) {
+		t.Fatalf("got %q", out)
+	}
+	if len(f.calls) != 1 || f.calls[0] != "dns.set geohide" {
+		t.Fatalf("calls=%v", f.calls)
 	}
 }
