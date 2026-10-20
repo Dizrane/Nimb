@@ -60,16 +60,19 @@ struct ReportSheet: View {
                         .accessibilityLabel("Что случилось")
                         .font(Typo.body)
                         .scrollContentBackground(.hidden)
-                        .padding(6)
-                        .frame(height: 72)
+                        // The text starts where the placeholder does: 10 pt from the left (5 here and 5 of the text view), 8 pt from the top.
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 8)
+                        .frame(height: 76)
                         .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.white.opacity(0.06)))
                         .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(Color.white.opacity(0.12), lineWidth: 1))
                     if description.text.isEmpty {
                         Text("Что вы делали и что пошло не так. Можно в двух словах.")
                             .font(Typo.body)
-                            .foregroundStyle(Theme.textSecondary.opacity(0.7))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 14)
+                            // The same grey as the placeholder of the field below, which the system draws.
+                            .foregroundStyle(Color(nsColor: .placeholderTextColor))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
                             .allowsHitTesting(false)
                     }
                 }
