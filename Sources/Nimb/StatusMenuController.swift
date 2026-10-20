@@ -105,8 +105,9 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     // MARK: Menu
 
     private let master = NSMenuItem()
-    /// Shown only while a newer version exists: it opens the window, where the button that installs it is.
+    /// Shown only while a newer version exists (or is being installed): pressing it installs the update, the window is not needed.
     private let updateItem = NSMenuItem()
+    private let updateSeparator = NSMenuItem.separator()
     private let aiItem = NSMenuItem()
     private let aiToggle = NSMenuItem()
     private var aiProviders: [NSMenuItem] = []
@@ -120,9 +121,11 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     /// The items are made once and only changed afterwards. A menu that is rebuilt on every opening shows the state of the
     /// moment it opened and never changes while it is open: that is why a person had to open it again and again.
     private func build(_ menu: NSMenu) {
-        updateItem.target = self; updateItem.action = #selector(showWindow); updateItem.image = symbol("arrow.down.circle")
+        updateItem.target = self; updateItem.action = #selector(installUpdate); updateItem.image = symbol("arrow.down.circle")
         updateItem.isHidden = true
+        updateSeparator.isHidden = true
         menu.addItem(updateItem)
+        menu.addItem(updateSeparator)
         master.target = self; master.action = #selector(toggleAll); master.image = symbol("power")
         menu.addItem(master)
         menu.addItem(.separator())
@@ -163,11 +166,25 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         guard let dns, let telegram, let warp else { return }
         let all = AllServices.shared
 
-        if case .available(let release) = UpdateViewModel.shared.state {
-            updateItem.title = "Доступно обновление \(release.version)"
+        switch UpdateViewModel.shared.state {
+        case .available(let release):
+            updateItem.title = "Обновить до \(release.version)"
+            updateItem.isEnabled = !dns.isLocked
             updateItem.isHidden = false
-        } else {
+            updateSeparator.isHidden = false
+        case .installing(let text):
+            updateItem.title = text
+            updateItem.isEnabled = false
+            updateItem.isHidden = false
+            updateSeparator.isHidden = false
+        case .failed:
+            updateItem.title = "Не удалось обновить, открыть Nimb"
+            updateItem.isEnabled = true
+            updateItem.isHidden = false
+            updateSeparator.isHidden = false
+        default:
             updateItem.isHidden = true
+            updateSeparator.isHidden = true
         }
         master.title = all.isRunning ? "Подождите…" : (all.allOn ? "Выключить всё" : "Включить всё")
         master.isEnabled = !all.isBusy
@@ -285,4 +302,15 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     @objc private func quit() { AppDelegate.quit() }
 
     @objc private func showWindow() { AppDelegate.showMainWindow() }
+
+    /// The line at the top of the menu: downloads and installs the new version, the same as the button at the bottom of the window. After a
+    /// failure it opens the window, where the reason is written.
+    @objc private func installUpdate() {
+        let updates = UpdateViewModel.shared
+        if case .available(let release) = updates.state, let dns, !dns.isLocked {
+            updates.install(release)
+        } else {
+            showWindow()
+        }
+    }
 }
