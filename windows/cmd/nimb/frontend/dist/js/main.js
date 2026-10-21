@@ -214,15 +214,18 @@ window.addEventListener('load', async () => {
   try { S = await api().GetState(); } catch (e) { S = null; }
   if (!S) return;
   prevOn = { ai: S.ai.on, telegram: S.telegram.on, media: S.media.on };
-  buildShell();
-  showPage(first);
   // The first setup shows on a computer that has nothing set up yet; one that already has something on was set up by hand.
+  // It is decided before the first picture, so that the window opens on the setup and not on the home page.
+  let firstSetup = false;
   try {
     if (!(await api().Onboarded())) {
       if (ORDER.some(isOn)) await api().FinishOnboarding();
-      else { await readAutostart(); onb = new Onboarding(actions); render(); }
+      else { await readAutostart(); firstSetup = true; }
     }
   } catch (e) { /* no first setup */ }
+  buildShell();
+  showPage(first);
+  if (firstSetup) { onb = new Onboarding(actions); render(); }
   preloadIcons();
   setInterval(() => { if (document.visibilityState === 'visible') refresh(); }, 2000);
   window.addEventListener('focus', refresh);

@@ -1,11 +1,38 @@
 import { Animator, makeCanvas, begin } from './anim.js';
 import { Gate } from './gate.js';
-import { img } from './art.js';
+import { img, preload } from './art.js';
 import { drawHalo, drawSparkle } from './halo.js';
-import { KINDS, player, playIcon } from './icons.js';
+import { KINDS, SCAN, player, playIcon } from './icons.js';
 import { esc, setHTML } from './common.js';
 
 const LAST = 4;
+
+// The scan of the welcome step (WelcomeScan.swift): the small halo goes down through the black disc, and what it has passed turns
+// into the planet (every second tap goes to the lower edge) or into static noise (the others go to the middle).
+const smoother = (u) => u * u * u * (u * (u * 6 - 15) + 10);
+function scanProgress(t) {
+  if (t < SCAN.down) return smoother(t / SCAN.down);
+  if (t < SCAN.down + SCAN.hold) return 1;
+  if (t < SCAN.total) return 1 - smoother((t - SCAN.down - SCAN.hold) / SCAN.up);
+  return 0;
+}
+function scanRing(p, edge) {
+  const y1 = edge ? SCAN.yEdge : SCAN.yMid;
+  const y = SCAN.rest + (y1 - SCAN.rest) * p;
+  const a = Math.abs(y) / SCAN.radius;
+  const bump = a < 1 ? Math.cos(Math.PI / 2 * a) ** 2 : 0;
+  const scale = SCAN.restScale * (1 + SCAN.hug * bump);
+  const rx = 80 * scale;
+  return { y, scale, rx, ry: rx * 0.3125 };
+}
+const arcY = (x, r) => { const e = Math.min(Math.abs(x) / r.rx, 1); return r.y - r.ry * Math.sqrt(1 - e * e); };
+function hash(a, b, c) {
+  let h = (Math.imul(a, 374761393) + Math.imul(b, 668265263) + Math.imul(c, 1274126177)) >>> 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0;
+  h = (h ^ (h >>> 16)) >>> 0;
+  return h / 4294967296;
+}
+
 
 /** An icon of a step: a black glass disc with a white sign, the small halo of Nimb above it. A press plays its story. */
 class StepIcon {
@@ -14,12 +41,14 @@ class StepIcon {
     this.w = size * 1.62; this.h = size * 1.3;
     [this.canvas, this.ctx, this.dpr] = makeCanvas(this.w, this.h);
     this.pl = player(kind);
+    if (kind === 'welcome') preload(['icon-ai/planet.png']);
     this.anim = new Animator((t) => this.draw(t), { fps: 15, fastFps: 30, wants: () => true, brief: () => this.pl.playing });
     this.pl.subs.add(() => this.anim.invalidate());
     this.canvas.style.cursor = 'pointer';
     this.canvas.addEventListener('click', () => playIcon(kind));
   }
   draw(t) {
+    if (this.kind === 'welcome') return this.drawWelcome(t);
     const { ctx, size: s } = this;
     begin(ctx, this.dpr, this.w, this.h);
     const k = s / 80, still = Gate.reducedMotion;
@@ -33,6 +62,56 @@ class StepIcon {
     if (frame) ctx.drawImage(frame, mid.x - 40 * k, mid.y - 40 * k, 80 * k, 80 * k);
     drawHalo(ctx, 'front', ring, scale * life.s, life.o);
     drawSparkle(ctx, ring, scale * life.s, life.o, still ? 0 : t);
+  }
+  drawWelcome(t) {
+    const { ctx, size: s } = this;
+    begin(ctx, this.dpr, this.w, this.h);
+    const k = s / 80, still = Gate.reducedMotion;
+    const mid = { x: this.w / 2, y: this.h - s / 2 - s * 0.02 };
+    const playing = this.pl.playing && !still;
+    const e = playing ? Math.max(t - this.pl.started, 0) : 0;
+    const p = playing ? scanProgress(e) : 0;
+    const edge = this.pl.taps % 2 === 0;
+    const ring = scanRing(p, edge);
+    let dx = 0, dy = ring.y;
+    if (playing && p >= 1) {
+      if (!edge) { const n = Math.floor(e * 24); dx = (hash(n, 1, 2) - 0.5) * 0.8; dy += (hash(n, 2, 3) - 0.5) * 0.4; }
+      else dy += Math.sin(1.6 * e) * 0.45;
+    }
+    const center = { x: mid.x + dx * k, y: mid.y + dy * k };
+    const life = still ? { o: 1, s: 1 } : { o: 0.93 + 0.07 * Math.sin(1.7 * t), s: 1 + 0.012 * Math.sin(1.3 * t) };
+    drawHalo(ctx, 'back', center, ring.scale * k * life.s, life.o);
+    const disc = img(`${KINDS.welcome.folder}/${KINDS.welcome.still}`);
+    if (disc) ctx.drawImage(disc, mid.x - 40 * k, mid.y - 40 * k, 80 * k, 80 * k);
+    if (playing && p > 0) {
+      const r = SCAN.radius;
+      ctx.save();
+      ctx.translate(mid.x, mid.y); ctx.scale(k, k);
+      ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.clip();
+      ctx.beginPath(); ctx.moveTo(-r - 1, -r - 2); ctx.lineTo(r + 1, -r - 2);
+      for (let x = r + 1; x >= -(r + 1); x -= 1) ctx.lineTo(x, arcY(x, ring));
+      ctx.closePath(); ctx.clip();
+      if (edge) {
+        const planet = img('icon-ai/planet.png');
+        if (planet) ctx.drawImage(planet, -40, -40, 80, 80);
+      } else {
+        const frame = Math.floor(e * 30);
+        const gain = (0.55 + 0.45 * Math.sin(e * 6.3) ** 2) * Math.min(p * 2.5, 1);
+        for (let y = -r; y <= r; y += 2) {
+          const tear = hash(Math.floor(y / 2), 7, frame) > 0.93;
+          for (let x = -r; x <= r; x += 2) {
+            if (x * x + y * y > r * r) continue;
+            const grey = tear ? 235 : hash(x, y, frame) * 230;
+            const a = Math.min((tear ? 1 : 0.9) * gain, 1);
+            ctx.fillStyle = `rgba(${grey | 0},${grey | 0},${grey | 0},${a})`;
+            ctx.fillRect(x, y, 2, 2);
+          }
+        }
+      }
+      ctx.restore();
+    }
+    drawHalo(ctx, 'front', center, ring.scale * k * life.s, life.o);
+    drawSparkle(ctx, center, ring.scale * k * life.s, life.o, still ? 0 : t);
   }
   destroy() { this.anim.destroy(); }
 }

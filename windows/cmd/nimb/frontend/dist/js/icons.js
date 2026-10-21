@@ -20,16 +20,21 @@ export const KINDS = {
   welcome: { folder: 'icon-welcome', still: 'disc.png', dimmed: 'disc-off.png', segments: [] },
   gear: { folder: 'icon-gear', still: 'gear.png', dimmed: 'gear-off.png', segments: [{ p: 'turn-%02d.png', n: 24, s: 1 }] },
 };
-const duration = (k) => KINDS[k].segments.reduce((a, s) => a + s.s, 0);
+// The scan of the welcome step (WelcomeScan.swift): the halo goes down through the disc, holds, and comes back.
+export const SCAN = { radius: 30, rest: -36.4, restScale: 0.38, hug: 0.14, yMid: 0, yEdge: 28.2, down: 1.8, hold: 2.0, up: 1.8 };
+SCAN.total = SCAN.down + SCAN.hold + SCAN.up;
+const duration = (k) => (k === 'welcome' ? SCAN.total : KINDS[k].segments.reduce((a, s) => a + s.s, 0));
 
 class Player {
-  constructor(kind) { this.kind = kind; this.playing = false; this.started = 0; this.second = false; this.subs = new Set(); }
+  constructor(kind) { this.kind = kind; this.playing = false; this.started = 0; this.second = false; this.taps = 0; this.subs = new Set(); }
   play() {
     if (this.playing) return;
     const k = KINDS[this.kind];
+    this.taps += 1;
     this.playing = true; this.started = now();
     if (Gate.reducedMotion) {
-      this.second = !!k.second; this.notify();
+      if (!k.second) { this.playing = false; return; }
+      this.second = true; this.notify();
       setTimeout(() => { this.second = false; this.playing = false; this.notify(); }, 2000);
       return;
     }
