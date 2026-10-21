@@ -143,6 +143,8 @@ Section "Uninstall"
     ${If} $R1 != "."
     ${AndIf} $R1 != ".."
       RMDir /r "$R0\Users\$R1\AppData\Roaming\Nimb"
+      ; the cache of WebView2 of the builds before the window had its own folder for it
+      RMDir /r "$R0\Users\$R1\AppData\Roaming\Nimb.exe"
     ${EndIf}
     FindNext $R2 $R1
   ${EndWhile}

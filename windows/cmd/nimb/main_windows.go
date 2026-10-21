@@ -8,6 +8,7 @@ import (
 	"context"
 	"embed"
 	"os"
+	"path/filepath"
 	"slices"
 
 	"github.com/wailsapp/wails/v2"
@@ -49,6 +50,8 @@ func main() {
 				DarkModeBorder:            windows.RGB(28, 28, 30),
 				DarkModeBorderInactive:    windows.RGB(28, 28, 30),
 			},
+			// The cache of WebView2 goes inside the folder that the uninstaller removes (by default it is %APPDATA%\Nimb.exe).
+			WebviewUserDataPath:  filepath.Join(dataDir(), "WebView2"),
 			WebviewIsTransparent: false,
 			DisableWindowIcon:    false,
 		},

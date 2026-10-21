@@ -13,6 +13,7 @@ function Snapshot {
     $dirs = @("$env:ProgramFiles\Nimb", "$env:ProgramData\Nimb", "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Nimb.lnk")
     Get-ChildItem 'C:\Users' -Directory -Force -ErrorAction SilentlyContinue | ForEach-Object {
         $dirs += "$($_.FullName)\AppData\Roaming\Nimb"
+        $dirs += "$($_.FullName)\AppData\Roaming\Nimb.exe"
         $dirs += "$($_.FullName)\AppData\Local\Nimb"
     }
     foreach ($d in $dirs) {
