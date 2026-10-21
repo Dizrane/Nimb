@@ -382,9 +382,17 @@ import Testing
     private let noon = Date(timeIntervalSince1970: 1_800_000_000)
 
     @Test func readsTheNoteOfTheHelper() throws {
-        let note = try #require(TunnelDrop.parse("1800000000 no-handshake\n"))
+        let note = try #require(TunnelDrop.parse("1800000000 daemon-exited\n"))
         #expect(note.when == noon)
-        #expect(note.reason == "no-handshake")
+        #expect(note.reason == "daemon-exited")
+    }
+
+    @Test func theMessageSaysWhatHappenedAndThatTheInternetIsAsItWas() {
+        let ended = TunnelDrop.message(for: "daemon-exited")
+        #expect(ended.contains("неожиданно завершилась"))
+        #expect(ended.contains("Интернет работает как обычно"))
+        #expect(TunnelDrop.message(for: "no-handshake").contains("Cloudflare не отвечал"), "a note of the earlier helper")
+        #expect(TunnelDrop.message(for: "something else") == ended)
     }
 
     @Test func aNoteWithoutAReasonIsStillANote() throws {

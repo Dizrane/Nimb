@@ -231,9 +231,9 @@ import Testing
         #expect(!ReportChecks.tunnel(on: false, routes: 0, interface: "utun3", warp: "off", dropped: nil).agrees, "another VPN carries the traffic")
     }
 
-    @Test func whenTheHelperTookTheTunnelDownTheReportSaysSo() {
-        let check = ReportChecks.tunnel(on: false, routes: 0, interface: "en0", warp: "off", dropped: "no-handshake в 10-21 21:40")
-        #expect(check.seen.contains("помощник выключил туннель сам (no-handshake в 10-21 21:40)"))
+    @Test func whenTheTunnelEndedByItselfTheReportSaysSo() {
+        let check = ReportChecks.tunnel(on: false, routes: 0, interface: "en0", warp: "off", dropped: "daemon-exited в 10-21 21:40")
+        #expect(check.seen.contains("туннель остановился сам (daemon-exited в 10-21 21:40)"))
     }
 
     @Test func readsTheProxiesThatAreOn() {

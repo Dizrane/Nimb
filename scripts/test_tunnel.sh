@@ -33,39 +33,37 @@ check "the watcher ends when the daemon is gone" '! kill -0 "$watcher" 2>/dev/nu
 check "it deleted the default routes of the tunnel" 'grep -q "delete -net 0.0.0.0/1 -interface utun99" "$WORK/route.log" && grep -q "delete -net 128.0.0.0/1 -interface utun99" "$WORK/route.log"'
 check "it deleted the route to the server" 'grep -q "delete -host 203.0.113.7" "$WORK/route.log"'
 check "it removed the state file" '[ ! -f "$WORK/run/t.state" ]'
+check "it left a note that the daemon had ended by itself" 'grep -Eq "^[0-9]+ daemon-exited$" "$WORK/run/t.dropped"'
 kill "$watcher" 2>/dev/null
 
-# The server stops answering: the watcher takes the routes out and stops the daemon, so the Mac keeps its internet, and leaves a note for
-# Nimb. It does not do so while the handshake is fresh, while the Mac is offline, or while the daemon does not say anything.
+# The server does not answer: nothing is done to the tunnel. (An earlier helper switched it off after five minutes of silence, and it
+# switched off tunnels that worked.) The watcher only follows the network and ends when the daemon ends.
 now=$(date +%s)
-reply() { printf 'private_key=00\nlast_handshake_time_sec=%s\nlast_handshake_time_nsec=0\nerrno=0\n' "$2" > "$WORK/run/$1.reply"; }
-start_watch() { # start_watch NAME INTERFACE: a daemon that never ends by itself, its state, and a watcher
-    sleep 120 & eval "$1_daemon=\$!"
-    eval "d=\$$1_daemon"
-    printf 'pid=%s\ninterface=%s\nroute=-host 203.0.113.7 192.0.2.1\nroute=-net 0.0.0.0/1 -interface %s\nroute=-net 128.0.0.0/1 -interface %s\nuplink=192.0.2.1 en0\n' "$d" "$2" "$2" "$2" > "$WORK/run/$1.state"
-    NIMB_TUNNEL_TEST=1 NIMB_TUNNEL_DIR="$WORK" NIMB_TUNNEL_RUN="$WORK/run/$1" NIMB_TUNNEL_PATH="$WORK/bin" NIMB_NC_REPLY="$WORK/run/$1.reply" \
-        "$HELPER" watch-test "$d" 203.0.113.7 >/dev/null 2>&1 &
-    eval "$1_watcher=\$!"
-}
+printf 'private_key=00\nlast_handshake_time_sec=%s\nlast_handshake_time_nsec=0\nerrno=0\n' $((now - 1000)) > "$WORK/run/q.reply"
+echo "192.0.2.1 en0" > "$WORK/run/q.fake-uplink"
+sleep 120 & quiet_daemon=$!
+printf 'pid=%s\ninterface=utun98\nroute=-host 203.0.113.7 192.0.2.1\nroute=-net 0.0.0.0/1 -interface utun98\nroute=-net 128.0.0.0/1 -interface utun98\nuplink=192.0.2.1 en0\n' "$quiet_daemon" > "$WORK/run/q.state"
 : > "$WORK/route.log"
-reply stale $((now - 1000)); echo "192.0.2.1 en0" > "$WORK/run/stale.fake-uplink"; start_watch stale utun98
-reply fresh "$now";          echo "192.0.2.1 en0" > "$WORK/run/fresh.fake-uplink"; start_watch fresh utun97
-reply offline $((now - 1000)); : > "$WORK/run/offline.fake-uplink";                 start_watch offline utun96
-: > "$WORK/run/silent.reply"; echo "192.0.2.1 en0" > "$WORK/run/silent.fake-uplink"; start_watch silent utun95
-i=0; while kill -0 "$stale_watcher" 2>/dev/null && [ $i -lt 20 ]; do sleep 1; i=$((i + 1)); done
-wait "$stale_daemon" 2>/dev/null
-sleep 6 # the others have had more than one round of the watcher by now
-check "a silent server: the watcher ends" '! kill -0 "$stale_watcher" 2>/dev/null'
-check "a silent server: the daemon is stopped" '! kill -0 "$stale_daemon" 2>/dev/null'
-check "a silent server: the routes are taken out" 'grep -q "delete -net 0.0.0.0/1 -interface utun98" "$WORK/route.log" && grep -q "delete -net 128.0.0.0/1 -interface utun98" "$WORK/route.log"'
-check "a silent server: the state is removed" '[ ! -f "$WORK/run/stale.state" ]'
-check "a silent server: the note says why" 'grep -Eq "^[0-9]+ no-handshake$" "$WORK/run/stale.dropped"'
-for name in fresh offline silent; do
-    eval "d=\$${name}_daemon; w=\$${name}_watcher"
-    check "$name: the tunnel is left alone" 'kill -0 "$d" 2>/dev/null && kill -0 "$w" 2>/dev/null && [ ! -f "$WORK/run/$name.dropped" ] && [ -f "$WORK/run/$name.state" ]'
-done
-check "the others kept their routes" '! grep -q "delete -net 0.0.0.0/1 -interface utun9[567]" "$WORK/route.log"'
-for name in fresh offline silent; do eval "kill \$${name}_watcher \$${name}_daemon" 2>/dev/null; done
+NIMB_TUNNEL_TEST=1 NIMB_TUNNEL_DIR="$WORK" NIMB_TUNNEL_RUN="$WORK/run/q" NIMB_TUNNEL_PATH="$WORK/bin" NIMB_NC_REPLY="$WORK/run/q.reply" \
+    "$HELPER" watch-test "$quiet_daemon" 203.0.113.7 >/dev/null 2>&1 &
+quiet_watcher=$!
+sleep 12 # more than two rounds of the watcher, with a handshake that is a thousand seconds old
+check "a silent server: the daemon is left alone" 'kill -0 "$quiet_daemon" 2>/dev/null'
+check "a silent server: the watcher goes on" 'kill -0 "$quiet_watcher" 2>/dev/null'
+check "a silent server: no route is taken out" '! grep -q "delete" "$WORK/route.log"'
+check "a silent server: no note is left" '[ ! -f "$WORK/run/q.dropped" ] && [ -f "$WORK/run/q.state" ]'
+kill "$quiet_watcher" "$quiet_daemon" 2>/dev/null
+wait 2>/dev/null
+
+# `down` by the person: the watcher goes first, then the daemon; no note is left, because nothing happened that the person did not do.
+sleep 120 & down_daemon=$!
+sleep 120 & down_watcher=$!
+printf 'pid=%s\ninterface=utun97\nroute=-net 0.0.0.0/1 -interface utun97\nwatcher=%s\n' "$down_daemon" "$down_watcher" > "$WORK/run/d.state"
+: > "$WORK/route.log"
+NIMB_TUNNEL_TEST=1 NIMB_TUNNEL_DIR="$WORK" NIMB_TUNNEL_RUN="$WORK/run/d" NIMB_TUNNEL_PATH="$WORK/bin" "$HELPER" down
+sleep 1
+check "down stops the daemon and the watcher" '! kill -0 "$down_daemon" 2>/dev/null && ! kill -0 "$down_watcher" 2>/dev/null'
+check "down removes the state and the routes and leaves no note" '[ ! -f "$WORK/run/d.state" ] && grep -q "delete -net 0.0.0.0/1 -interface utun97" "$WORK/route.log" && [ ! -f "$WORK/run/d.dropped" ]'
 wait 2>/dev/null
 
 # `down` with nothing running does nothing and does not fail.

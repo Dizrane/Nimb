@@ -28,13 +28,19 @@ enum WarpPaths {
     static let removeScript = "[ ! -x '\(helper)' ] || { '\(helper)' down; '\(helper)' unregister || true; }; /bin/rm -f '\(sudoersPath)'; /bin/rm -rf '\(dir)' /var/run/nimb-tunnel.state /var/run/nimb-tunnel.log /var/run/nimb-tunnel.name /var/run/nimb-tunnel.dropped"
 }
 
-/// The helper took the tunnel down by itself: the server did not answer for minutes, and a full tunnel without a server leaves the Mac
-/// with no internet. It writes "<unix time> <reason>" in `WarpPaths.droppedFile`; the person is told once.
+/// The tunnel ended without the person: the program of the tunnel exited by itself (`daemon-exited`; an older helper also wrote
+/// `no-handshake` when it switched the tunnel off for a silent server). The helper writes "<unix time> <reason>" in `WarpPaths.droppedFile`
+/// and has already taken the routes out, so the internet is as it was; the person is told once.
 enum TunnelDrop {
     /// A note older than this is history, not news (the file stays until the next start of the tunnel or a restart of the Mac).
     static let newsFor: TimeInterval = 24 * 3600
 
-    static let message = "Туннель выключился сам: Cloudflare не отвечал несколько минут. Интернет снова работает как обычно. Когда связь вернётся, включите туннель ещё раз."
+    static func message(for reason: String) -> String {
+        if reason == "no-handshake" {
+            return "Туннель выключился сам: Cloudflare не отвечал несколько минут. Интернет снова работает как обычно. Когда связь вернётся, включите туннель ещё раз."
+        }
+        return "Туннель остановился сам: его программа неожиданно завершилась. Интернет работает как обычно. Включите туннель ещё раз."
+    }
 
     static func parse(_ text: String) -> (when: Date, reason: String)? {
         let parts = text.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: " ", maxSplits: 1).map(String.init)
@@ -126,14 +132,14 @@ final class WarpTunnelModel: ObservableObject {
         if next != phase { phase = next }
     }
 
-    /// The helper has taken the tunnel down because the server stopped answering: the person is told once, on the page and in the diary.
+    /// The tunnel has ended by itself: the person is told once, on the page and in the diary.
     private func noticeDrop() {
         guard let text = try? String(contentsOfFile: WarpPaths.droppedFile, encoding: .utf8), let drop = TunnelDrop.parse(text) else { return }
         let defaults = UserDefaults.standard
         guard TunnelDrop.isNews(drop.when, seen: defaults.double(forKey: Self.droppedSeenKey), now: Date()) else { return }
         defaults.set(drop.when.timeIntervalSince1970, forKey: Self.droppedSeenKey)
-        AppLog.shared.add("tunnel", "помощник выключил туннель сам: \(drop.reason)")
-        errorMessage = TunnelDrop.message
+        AppLog.shared.add("tunnel", "туннель остановился сам: \(drop.reason)")
+        errorMessage = TunnelDrop.message(for: drop.reason)
     }
 
     /// The end of an operation: "working" gives way straight to the real state, with no "off" in between.

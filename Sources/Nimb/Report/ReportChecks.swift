@@ -75,7 +75,7 @@ enum ReportChecks {
             return ServiceCheck(name: name, expected: "маршруты туннеля стоят, трафик идёт через него, Cloudflare видит WARP (warp=on)",
                                 seen: seen, agrees: routes > 0 && viaTunnel && warp == "on")
         }
-        if let dropped { seen += "; помощник выключил туннель сам (\(dropped))" }
+        if let dropped { seen += "; туннель остановился сам (\(dropped))" }
         return ServiceCheck(name: name, expected: "выключен: маршрутов туннеля нет, трафик идёт напрямую (warp=off)",
                             seen: seen, agrees: routes == 0 && !viaTunnel && warp != "on")
     }
