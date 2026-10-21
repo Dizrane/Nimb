@@ -1,5 +1,5 @@
 #!/bin/sh
-# nimb-tunnel 6: brings the Nimb WARP tunnel up and down. It runs as root, from /usr/local/libexec/nimb, which only root
+# nimb-tunnel 7: brings the Nimb WARP tunnel up and down. It runs as root, from /usr/local/libexec/nimb, which only root
 # can write to. The settings are read from warp.conf next to it, a file of plain key=value lines that Nimb wrote after
 # checking every value; nothing in it is ever executed.
 #
@@ -25,6 +25,15 @@ say() { printf '%s\n' "$*"; }
 fail() { printf '%s\n' "$*" >&2; exit 1; }
 
 alive() { [ -n "$1" ] && kill -0 "$1" 2>/dev/null; }
+
+# The log of the daemon is verbose, so that the reason is there when it ends by itself. It is cut to its last lines when it grows (the
+# daemon keeps appending to the same file), and Nimb's own marks are written in the same form: "NIMB: <time> <what>".
+log_mark() { printf 'NIMB: %s %s\n' "$(date '+%Y/%m/%d %H:%M:%S')" "$1" >> "$LOG"; }
+trim_log() {
+    [ -f "$LOG" ] && [ "$(wc -c < "$LOG" | tr -d ' ')" -gt 262144 ] || return 0
+    tail -n 400 "$LOG" > "$LOG.tmp" && cat "$LOG.tmp" > "$LOG"
+    rm -f "$LOG.tmp"
+}
 
 state_get() { [ -f "$STATE" ] && sed -n "s/^$1=//p" "$STATE" | head -1; }
 
@@ -68,6 +77,7 @@ drop_routes() {
 watch_network() { # watch_network <daemon pid> <endpoint host>
     while alive "$1"; do
         sleep 5
+        trim_log
         now=$(uplink_now)
         [ -n "$now" ] && [ "$now" != "$(state_get uplink)" ] && retarget "$2" "$now"
     done
@@ -76,6 +86,7 @@ watch_network() { # watch_network <daemon pid> <endpoint host>
     if [ -f "$STATE" ]; then
         printf '%s daemon-exited\n' "$(date +%s)" > "$RUN.dropped"
         chmod 644 "$RUN.dropped"
+        log_mark "daemon-exited"
     fi
     iface=$(state_get interface)
     drop_routes
@@ -159,8 +170,13 @@ persistent_keepalive_interval=25" ;; esac
 
     # 2. Start the daemon; it makes a utun interface of its own.
     rm -f "$RUN.name"
-    loglevel=error
+    # A hangup of whatever started this script (its session, its terminal) must not take the daemon and the watcher with it: an ignored
+    # signal stays ignored in the processes started from here.
+    trap '' HUP
+    loglevel=verbose
     [ -n "${NIMB_TUNNEL_TEST:-}" ] && loglevel=${NIMB_TUNNEL_LOG_LEVEL:-error}
+    trim_log
+    log_mark "up"
     WG_TUN_NAME_FILE="$RUN.name" LOG_LEVEL="$loglevel" "$BIN" -f utun >>"$LOG" 2>&1 &
     pid=$!
     i=0; while [ ! -s "$RUN.name" ] && alive "$pid" && [ $i -lt 40 ]; do sleep 0.25; i=$((i + 1)); done

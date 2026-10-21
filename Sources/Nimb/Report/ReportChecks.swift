@@ -29,6 +29,8 @@ struct SystemSnapshot {
     var routes = 0
     /// What the helper wrote when it took the tunnel down itself, if that was lately.
     var dropped: String?
+    /// The last lines of the log of the tunnel daemon (empty: no log).
+    var daemonLog: [String] = []
     var proxies: [String] = []
     var hostsMentions: [String] = []
     var vpnConnected = 0
@@ -78,6 +80,12 @@ enum ReportChecks {
         if let dropped { seen += "; туннель остановился сам (\(dropped))" }
         return ServiceCheck(name: name, expected: "выключен: маршрутов туннеля нет, трафик идёт напрямую (warp=off)",
                             seen: seen, agrees: routes == 0 && !viaTunnel && warp != "on")
+    }
+
+    /// The last `limit` non-empty lines of the log of the tunnel daemon; where the daemon wrote nothing there is a word about it.
+    static func logTail(_ text: String, limit: Int = 25) -> [String] {
+        let lines = text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        return lines.isEmpty ? ["пусто"] : Array(lines.suffix(limit))
     }
 
     // MARK: What may be in the way

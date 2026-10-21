@@ -257,6 +257,20 @@ import Testing
         #expect(ReportChecks.hostsMentions(in: hosts, domains: ["chatgpt.com", "api.anthropic.com", "t.me"]) == ["api.anthropic.com"])
     }
 
+    @Test func theTailOfTheDaemonLogIsTheLastLinesWithoutEmptyOnes() {
+        let text = (1...40).map { "line \($0)" }.joined(separator: "\n\n") + "\n"
+        let tail = ReportChecks.logTail(text, limit: 3)
+        #expect(tail == ["line 38", "line 39", "line 40"])
+        #expect(ReportChecks.logTail("\n \n") == ["пусто"])
+    }
+
+    @Test func theDaemonLogLosesAddressesAndKeysInTheReport() {
+        let line = "VERBOSE: (utun4) 2026/10/22 03:49:59 peer(bmXO…fgyo) - Failed to send handshake initiation: write udp4 0.0.0.0:55656->162.159.195.2:500: network is unreachable"
+        let clean = ReportRedactor.clean(ReportChecks.logTail(line).joined(separator: "\n"))
+        #expect(!clean.contains("162.159.195.2"))
+        #expect(clean.contains("network is unreachable"))
+    }
+
     @Test func countsTheConnectedVPNs() {
         let list = """
         * (Connected)      AAA VPN (x) "One"  [VPN:x]

@@ -53,6 +53,7 @@ enum DiagnosticReport {
 
         out.append(section("Сеть", system.lines))
         out.append(section("Что могло помешать", ReportChecks.interference(system)))
+        if !system.daemonLog.isEmpty { out.append(section("Процесс туннеля (последние строки его журнала)", system.daemonLog)) }
 
         // The diary: first the events of the last day (what was switched on and off, and every error), then its last lines as they are.
         let diary = AppLog.shared.recent(500)
@@ -173,6 +174,7 @@ enum DiagnosticReport {
            Date().timeIntervalSince(drop.when) < TunnelDrop.newsFor {
             system.dropped = "\(drop.reason) в \(drop.when.formatted(.dateTime.month(.twoDigits).day(.twoDigits).hour().minute()))"
         }
+        if let text = try? String(contentsOfFile: WarpPaths.daemonLog, encoding: .utf8) { system.daemonLog = ReportChecks.logTail(text) }
         system.proxies = ReportChecks.proxies(from: run("/usr/sbin/scutil", ["--proxy"]))
         system.vpnConnected = ReportChecks.connectedVPNs(from: run("/usr/sbin/scutil", ["--nc", "list"]))
         let domains = ProbeTarget.all.map(\.host) + ["telegram.org", "t.me", "youtube.com", "discord.com"]

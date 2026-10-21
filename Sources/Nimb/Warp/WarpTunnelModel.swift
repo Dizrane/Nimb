@@ -15,6 +15,7 @@ enum WarpPaths {
     static let stateFile = "/var/run/nimb-tunnel.state"
     /// The note the helper leaves when it takes the tunnel down itself (the server stopped answering).
     static let droppedFile = "/var/run/nimb-tunnel.dropped"
+    static let daemonLog = "/var/run/nimb-tunnel.log"
     /// The sudoers rule that lets the person start and stop the tunnel without a password (opt-in, like the one for DNS).
     static let sudoersPath = "/etc/sudoers.d/nimb-tunnel"
     static let passwordlessCommands = ["\(helper) up", "\(helper) down"]

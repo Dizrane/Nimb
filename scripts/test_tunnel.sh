@@ -34,6 +34,7 @@ check "it deleted the default routes of the tunnel" 'grep -q "delete -net 0.0.0.
 check "it deleted the route to the server" 'grep -q "delete -host 203.0.113.7" "$WORK/route.log"'
 check "it removed the state file" '[ ! -f "$WORK/run/t.state" ]'
 check "it left a note that the daemon had ended by itself" 'grep -Eq "^[0-9]+ daemon-exited$" "$WORK/run/t.dropped"'
+check "the log says that the daemon ended by itself" 'grep -Eq "^NIMB: [0-9/]+ [0-9:]+ daemon-exited$" "$WORK/run/t.log"'
 kill "$watcher" 2>/dev/null
 
 # The server does not answer: nothing is done to the tunnel. (An earlier helper switched it off after five minutes of silence, and it
@@ -41,6 +42,8 @@ kill "$watcher" 2>/dev/null
 now=$(date +%s)
 printf 'private_key=00\nlast_handshake_time_sec=%s\nlast_handshake_time_nsec=0\nerrno=0\n' $((now - 1000)) > "$WORK/run/q.reply"
 echo "192.0.2.1 en0" > "$WORK/run/q.fake-uplink"
+# A log that has grown too big is cut to its last lines while the watcher goes on.
+i=0; while [ $i -lt 5000 ]; do echo "VERBOSE: (utun98) 2026/10/22 03:49:59 line $i of a log that has grown, with some more words to fill it up"; i=$((i + 1)); done > "$WORK/run/q.log"
 sleep 120 & quiet_daemon=$!
 printf 'pid=%s\ninterface=utun98\nroute=-host 203.0.113.7 192.0.2.1\nroute=-net 0.0.0.0/1 -interface utun98\nroute=-net 128.0.0.0/1 -interface utun98\nuplink=192.0.2.1 en0\n' "$quiet_daemon" > "$WORK/run/q.state"
 : > "$WORK/route.log"
@@ -51,6 +54,7 @@ sleep 12 # more than two rounds of the watcher, with a handshake that is a thous
 check "a silent server: the daemon is left alone" 'kill -0 "$quiet_daemon" 2>/dev/null'
 check "a silent server: the watcher goes on" 'kill -0 "$quiet_watcher" 2>/dev/null'
 check "a silent server: no route is taken out" '! grep -q "delete" "$WORK/route.log"'
+check "a big log is cut to its last lines" '[ "$(wc -l < "$WORK/run/q.log" | tr -d " ")" -le 401 ] && tail -1 "$WORK/run/q.log" | grep -q "line 4999 "'
 check "a silent server: no note is left" '[ ! -f "$WORK/run/q.dropped" ] && [ -f "$WORK/run/q.state" ]'
 kill "$quiet_watcher" "$quiet_daemon" 2>/dev/null
 wait 2>/dev/null
