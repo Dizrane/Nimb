@@ -141,12 +141,21 @@ final class AllServices: ObservableObject {
         Task {
             defer { isRunning = false; intent = .none }
             if !telegram.isRunning { telegram.start(); await settle() }
-            if dns.active == nil {
+            let needDNS = dns.active == nil, needWarp = warpAvailable && !warp.isOn
+            if needDNS && needWarp && dns.asksPassword && warp.asksPassword(turningOn: true) {
+                // Both want the administrator password: it is asked once, for the two together.
+                PrivilegedBatch.shared.expect(2)
+                dns.toggle()
+                toggleWarp()
+                await settle()
+                return
+            }
+            if needDNS {
                 dns.toggle(); await settle()
                 // The password was refused: do not ask again for the next one.
                 if dns.active == nil { return }
             }
-            if warpAvailable && !warp.isOn { toggleWarp(); await settle() }
+            if needWarp { toggleWarp(); await settle() }
         }
     }
 
@@ -157,6 +166,13 @@ final class AllServices: ObservableObject {
         Task {
             defer { isRunning = false; intent = .none }
             if telegram.isRunning { telegram.stop() }
+            if dns.active != nil && warp.isOn && dns.asksPassword && warp.asksPassword(turningOn: false) {
+                PrivilegedBatch.shared.expect(2)
+                dns.toggle()
+                warp.disconnect()
+                await settle()
+                return
+            }
             if dns.active != nil {
                 dns.toggle(); await settle()
                 if dns.active != nil { return }
@@ -190,8 +206,15 @@ final class AllServices: ObservableObject {
         intent = .off
         defer { isRunning = false; intent = .none }
         if telegram.isRunning { telegram.stop() }
-        if dns.active != nil { dns.toggle(); await settle() }
-        if warp.isOn { warp.disconnect(); await settle() }
+        if dns.active != nil && warp.isOn && dns.asksPassword && warp.asksPassword(turningOn: false) {
+            PrivilegedBatch.shared.expect(2)
+            dns.toggle()
+            warp.disconnect()
+            await settle()
+        } else {
+            if dns.active != nil { dns.toggle(); await settle() }
+            if warp.isOn { warp.disconnect(); await settle() }
+        }
         warp.refresh()
         return stillWorking
     }

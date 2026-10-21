@@ -27,7 +27,7 @@ enum Updater {
 
     // MARK: Checking
 
-    private struct GitHubRelease: Decodable {
+    struct GitHubRelease: Decodable {
         struct Asset: Decodable {
             let name: String
             let browser_download_url: URL
@@ -36,11 +36,15 @@ enum Updater {
         let body: String?
         let html_url: URL
         let assets: [Asset]
+        let draft: Bool?
+        let prerelease: Bool?
     }
 
-    /// The newest release. GitHub's API lets 60 requests an hour through for one address, and many people share an address (a VPN,
-    /// the exit of Cloudflare WARP, which Nimb itself turns on), so when the API refuses, the page of the latest release is read
-    /// instead: it has no such limit.
+    /// The newest release for the Mac. The repository also holds releases of the Windows version (`windows-v…`), so "the latest release" of
+    /// GitHub is not enough: it is whichever of them was made last. The list is read and the releases that are not for the Mac are left out.
+    ///
+    /// GitHub's API lets 60 requests an hour through for one address, and many people share an address (a VPN, the exit of Cloudflare
+    /// WARP, which Nimb itself turns on), so when the API refuses, the pages of the release are read instead: they have no such limit.
     static func latestRelease() async throws -> Release {
         do {
             return try await latestFromAPI()
@@ -51,7 +55,7 @@ enum Updater {
     }
 
     private static func latestFromAPI() async throws -> Release {
-        var request = URLRequest(url: URL(string: "https://api.github.com/repos/\(repository)/releases/latest")!)
+        var request = URLRequest(url: URL(string: "https://api.github.com/repos/\(repository)/releases?per_page=20")!)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.timeoutInterval = 15
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -61,31 +65,51 @@ enum Updater {
                 ? "GitHub ограничил число запросов с вашего адреса. Попробуйте через несколько минут."
                 : "GitHub не отдал информацию о релизе.")
         }
-        let github = try JSONDecoder().decode(GitHubRelease.self, from: data)
-        guard let asset = github.assets.first(where: { $0.name.hasPrefix("Nimb") && $0.name.hasSuffix(".zip") }) else {
-            throw UpdateError("В последнем релизе нет файла Nimb-*.zip.")
+        guard let release = newestForMac(in: try JSONDecoder().decode([GitHubRelease].self, from: data)) else {
+            throw UpdateError("На GitHub нет релиза Nimb для Mac с файлом Nimb-*.zip.")
         }
-        let body = github.body ?? ""
+        return release
+    }
+
+    /// A tag of a release for the Mac: `v0.9.9`. Not `windows-v0.1.0`, not a version with a word after it.
+    static func isMacTag(_ tag: String) -> Bool {
+        tag.range(of: #"^[vV]?[0-9]+(\.[0-9]+)*$"#, options: .regularExpression) != nil
+    }
+
+    static func isMacArchive(_ name: String) -> Bool { name.hasPrefix("Nimb") && name.hasSuffix(".zip") }
+
+    /// Published, not a pre-release, a tag of the Mac, and the archive is there.
+    static func isForMac(_ release: GitHubRelease) -> Bool {
+        release.draft != true && release.prerelease != true && isMacTag(release.tag_name) && release.assets.contains { isMacArchive($0.name) }
+    }
+
+    /// The release with the highest version among those for the Mac (not the first in the list: the order is the order of making them).
+    static func newestForMac(in releases: [GitHubRelease]) -> Release? {
+        let best = releases.filter(isForMac).reduce(nil as GitHubRelease?) { best, next in
+            guard let best else { return next }
+            return isNewer(next.tag_name, than: best.tag_name) ? next : best
+        }
+        guard let best, let asset = best.assets.first(where: { isMacArchive($0.name) }) else { return nil }
+        let body = best.body ?? ""
         return Release(
-            version: github.tag_name.trimmingCharacters(in: CharacterSet(charactersIn: "vV")),
+            version: best.tag_name.trimmingCharacters(in: CharacterSet(charactersIn: "vV")),
             assetName: asset.name,
             zipURL: asset.browser_download_url,
             sha256: sha256(for: asset.name, in: body) ?? firstSHA256(in: body),
-            pageURL: github.html_url
+            pageURL: best.html_url
         )
     }
 
-    /// The same from the web page of the latest release: `/releases/latest` leads to `/releases/tag/<tag>`, the archive is named
-    /// `Nimb-<version>.zip` and its hash stands in the description, in a line with the file name.
+    /// The same from the web pages: the feed of releases names the tags (the newest of the Mac's is taken), and the page of that release
+    /// has the archive and, in its description, the hash on the line with the file name (`Nimb-<version>.zip`).
     static func latestFromReleasePage() async throws -> Release {
-        var request = URLRequest(url: URL(string: "https://github.com/\(repository)/releases/latest")!)
+        let tag = try await newestMacTag()
+        var request = URLRequest(url: URL(string: "https://github.com/\(repository)/releases/tag/\(tag)")!)
         request.timeoutInterval = 15
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200, let page = http.url,
-              let marker = page.path.range(of: "/releases/tag/") else {
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200, let page = http.url else {
             throw UpdateError("GitHub не отдал страницу релиза.")
         }
-        let tag = String(page.path[marker.upperBound...])
         let version = tag.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
         let name = "Nimb-\(version).zip"
         let html = String(decoding: data, as: UTF8.self)
@@ -93,6 +117,37 @@ enum Updater {
             throw UpdateError("На странице релиза нет файла \(name).")
         }
         return Release(version: version, assetName: name, zipURL: zip, sha256: sha256(for: name, in: html), pageURL: page)
+    }
+
+    /// The newest tag of the Mac in the feed of releases; if the feed cannot be read, the one that `/releases/latest` leads to, when it is a
+    /// tag of the Mac.
+    private static func newestMacTag() async throws -> String {
+        var feed = URLRequest(url: URL(string: "https://github.com/\(repository)/releases.atom")!)
+        feed.timeoutInterval = 15
+        if let (data, response) = try? await URLSession.shared.data(for: feed), (response as? HTTPURLResponse)?.statusCode == 200,
+           let tag = newestMacTag(inFeed: String(decoding: data, as: UTF8.self)) {
+            return tag
+        }
+        var latest = URLRequest(url: URL(string: "https://github.com/\(repository)/releases/latest")!)
+        latest.timeoutInterval = 15
+        let (_, response) = try await URLSession.shared.data(for: latest)
+        if let path = (response as? HTTPURLResponse)?.url?.path, let marker = path.range(of: "/releases/tag/"),
+           isMacTag(String(path[marker.upperBound...])) {
+            return String(path[marker.upperBound...])
+        }
+        throw UpdateError("GitHub не отдал страницу релиза.")
+    }
+
+    /// The tags in an Atom feed of releases (`…/releases/tag/<tag>`), the newest of those of the Mac by version.
+    static func newestMacTag(inFeed feed: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: #"/releases/tag/([^"?#/<>\s]+)"#) else { return nil }
+        let tags = regex.matches(in: feed, range: NSRange(feed.startIndex..., in: feed)).compactMap { match in
+            Range(match.range(at: 1), in: feed).map { String(feed[$0]) }
+        }.filter(isMacTag)
+        return tags.reduce(nil as String?) { best, next in
+            guard let best else { return next }
+            return isNewer(next, than: best) ? next : best
+        }
     }
 
     /// The hash written on the same line as the file name, lowercased: the notes list one "hash  file" line per archive.

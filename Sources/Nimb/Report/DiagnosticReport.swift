@@ -47,7 +47,8 @@ enum DiagnosticReport {
         let log = AppLog.shared.recent(60)
         out.append(section("Журнал (последние строки)", log.isEmpty ? ["пусто"] : log))
 
-        return ReportRedactor.clean(out.joined(separator: "\n\n"))
+        let services = await Task.detached(priority: .utility) { DNSManager.physicalServices() }.value
+        return ReportRedactor.clean(out.joined(separator: "\n\n"), services: services)
     }
 
     /// The head of the report: the number, what the person wrote, how to answer.

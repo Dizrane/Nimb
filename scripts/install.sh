@@ -19,14 +19,45 @@ fail() { echo "Ошибка: $1" >&2; exit 1; }
 WORK="$(mktemp -d)"
 trap '[ -n "$WORK" ] && rm -rf "$WORK"' EXIT
 
+# The newest release for the Mac. The repository also holds releases of the Windows version, so "the latest release" of GitHub is not
+# enough: this takes the first published one that is not a pre-release, has a tag like v0.9.9 and has the archive Nimb-<version>.zip.
+# GitHub lists the newest first. The release is read with plutil, which takes JSON apart (macOS 12 and newer).
+pick_release() { # pick_release FILE: prints "<archive address>" and the notes of the release (NOTES), or nothing
+    i=0
+    while tag=$(plutil -extract "$i.tag_name" raw -o - "$1" 2>/dev/null); do
+        draft=$(plutil -extract "$i.draft" raw -o - "$1" 2>/dev/null)
+        pre=$(plutil -extract "$i.prerelease" raw -o - "$1" 2>/dev/null)
+        case "$tag" in
+            "" | *[!0-9.vV]*) ;; # windows-v0.1.0, v1.0-beta and the like are not releases of the Mac
+            [vV][0-9]* | [0-9]*)
+                if [ "$draft" = false ] && [ "$pre" = false ]; then
+                    j=0
+                    while name=$(plutil -extract "$i.assets.$j.name" raw -o - "$1" 2>/dev/null); do
+                        case "$name" in
+                            Nimb-[0-9]*.zip)
+                                plutil -extract "$i.assets.$j.browser_download_url" raw -o - "$1"
+                                plutil -extract "$i.body" raw -o - "$1" 2>/dev/null
+                                return 0 ;;
+                        esac
+                        j=$((j + 1))
+                    done
+                fi ;;
+        esac
+        i=$((i + 1))
+    done
+    return 1
+}
+
 echo "Ищу последнюю версию…"
-curl -fsSL -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/releases/latest" -o "$WORK/release.json" \
+command -v plutil >/dev/null 2>&1 || fail "не нашёл plutil: нужна macOS 12 или новее."
+curl -fsSL -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/releases?per_page=20" -o "$WORK/release.json" \
     || fail "GitHub не отвечает."
 
-URL="$(grep -o '"browser_download_url": *"[^"]*/Nimb-[0-9][^"]*\.zip"' "$WORK/release.json" | head -1 | sed 's/.*"\(https[^"]*\)"/\1/')"
-[ -n "$URL" ] || fail "в последнем релизе нет Nimb-*.zip."
+PICKED="$(pick_release "$WORK/release.json")" || fail "в списке релизов нет релиза Nimb для Mac с файлом Nimb-*.zip."
+URL="$(printf '%s\n' "$PICKED" | head -1)"
+NOTES="$(printf '%s\n' "$PICKED" | tail -n +2)"
 NAME="${URL##*/}"
-HASH="$(grep -o "[0-9a-f]\{64\}  *$NAME" "$WORK/release.json" | head -1 | cut -c1-64)"
+HASH="$(printf '%s\n' "$NOTES" | grep -o "[0-9a-f]\{64\}  *$NAME" | head -1 | cut -c1-64)"
 [ -n "$HASH" ] || fail "в описании релиза нет SHA-256 для $NAME, установка отменена."
 
 echo "Скачиваю $NAME…"

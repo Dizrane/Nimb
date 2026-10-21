@@ -407,3 +407,268 @@ import Testing
         #expect(!TunnelDrop.isNews(noon, seen: 0, now: noon.addingTimeInterval(TunnelDrop.newsFor + 1)))
     }
 }
+
+/// Which release of the list the updater takes: the newest one for the Mac, whatever else the repository holds.
+@Suite struct UpdaterChoiceTests {
+    private func release(_ tag: String, draft: Bool = false, prerelease: Bool = false, assets: [String]? = nil, body: String = "") -> Updater.GitHubRelease {
+        let version = tag.drop(while: { !$0.isNumber })
+        let names = assets ?? ["Nimb-\(version).dmg", "Nimb-\(version).zip"]
+        let json = """
+        {"tag_name": "\(tag)", "draft": \(draft), "prerelease": \(prerelease), "body": "\(body)", "html_url": "https://example.test/\(tag)",
+         "assets": [\(names.map { "{\"name\": \"\($0)\", \"browser_download_url\": \"https://example.test/\(tag)/\($0)\"}" }.joined(separator: ","))]}
+        """
+        return try! JSONDecoder().decode(Updater.GitHubRelease.self, from: Data(json.utf8))
+    }
+
+    @Test(arguments: [("v0.9.9", true), ("0.9.9", true), ("V1.0", true), ("windows-v0.1.0", false), ("v1.0.0-beta", false), ("latest", false), ("", false)])
+    func tellsTheTagsOfTheMac(tag: String, isMac: Bool) {
+        #expect(Updater.isMacTag(tag) == isMac)
+    }
+
+    @Test func aWindowsReleaseNeverWins() {
+        let windows = release("windows-v0.1.0", assets: ["Nimb-Setup-0.1.0-amd64.exe", "Nimb-9.9.9.zip"])
+        let newest = Updater.newestForMac(in: [windows, release("v0.9.9")])
+        #expect(newest?.version == "0.9.9")
+        #expect(newest?.assetName == "Nimb-0.9.9.zip")
+    }
+
+    @Test func prereleasesAndDraftsAreLeftOut() {
+        let list = [release("v1.0.0", prerelease: true), release("v0.9.10", draft: true), release("v0.9.9")]
+        #expect(Updater.newestForMac(in: list)?.version == "0.9.9")
+    }
+
+    @Test func aReleaseWithoutTheArchiveIsLeftOut() {
+        let list = [release("v0.9.10", assets: ["Nimb-0.9.10.dmg"]), release("v0.9.9")]
+        #expect(Updater.newestForMac(in: list)?.version == "0.9.9")
+    }
+
+    @Test func theHighestVersionWinsNotTheFirstInTheList() {
+        let list = [release("v0.9.9"), release("v0.10.0"), release("v0.9.10")]
+        #expect(Updater.newestForMac(in: list)?.version == "0.10.0")
+    }
+
+    @Test func nothingForTheMacIsNil() {
+        #expect(Updater.newestForMac(in: [release("windows-v0.1.0")]) == nil)
+        #expect(Updater.newestForMac(in: []) == nil)
+    }
+
+    @Test func theHashComesFromTheNotesOfTheChosenRelease() {
+        let hash = String(repeating: "c", count: 64)
+        let list = [release("windows-v0.1.0", body: String(repeating: "d", count: 64) + "  Nimb-Setup.exe"),
+                    release("v0.9.9", body: hash + "  Nimb-0.9.9.zip")]
+        #expect(Updater.newestForMac(in: list)?.sha256 == hash)
+    }
+
+    @Test func theFeedGivesTheNewestTagOfTheMac() {
+        let feed = """
+        <entry><link rel="alternate" type="text/html" href="https://github.com/Dizrane/Nimb/releases/tag/windows-v0.2.0"/></entry>
+        <entry><link rel="alternate" type="text/html" href="https://github.com/Dizrane/Nimb/releases/tag/v0.9.9"/></entry>
+        <entry><link rel="alternate" type="text/html" href="https://github.com/Dizrane/Nimb/releases/tag/v0.10.0"/></entry>
+        <entry><link rel="alternate" type="text/html" href="https://github.com/Dizrane/Nimb/releases/tag/v0.9.0"/></entry>
+        """
+        #expect(Updater.newestMacTag(inFeed: feed) == "v0.10.0")
+        #expect(Updater.newestMacTag(inFeed: "<entry>nothing</entry>") == nil)
+        #expect(Updater.newestMacTag(inFeed: "href=\"https://github.com/Dizrane/Nimb/releases/tag/windows-v0.2.0\"") == nil)
+    }
+}
+
+/// What root installs must be what the app staged: a file that changes on the way stops everything.
+@Suite struct StagedFilesTests {
+    private func shell(_ script: String) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", script]
+        let out = Pipe(), err = Pipe()
+        process.standardOutput = out
+        process.standardError = err
+        try process.run()
+        let output = out.fileHandleForReading.readDataToEndOfFile()
+        let errors = err.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { throw DNSError.failed(String(decoding: errors, as: UTF8.self)) }
+        return String(decoding: output, as: UTF8.self)
+    }
+
+    private func folder(_ name: String) throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("nimb-test-\(name)-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    /// The script of root as a test runs it: the checks, then a copy to `destination`. Returns what is left in the folder of root.
+    private func run(_ staged: StagedFiles, root: URL, destination: URL) throws -> [String] {
+        let script = (["set -e"] + staged.guardedCopy(into: root.path) + ["/bin/cp \"$stage/tool\" '\(destination.path)/tool'"]).joined(separator: "; ")
+        _ = try shell(script)
+        return try FileManager.default.contentsOfDirectory(atPath: root.path)
+    }
+
+    @Test func installsWhatWasStagedAndLeavesNothingBehind() throws {
+        let root = try folder("root"), destination = try folder("dest")
+        let staged = try StagedFiles([("tool", Data("the real tool".utf8)), ("other", Data("x".utf8))])
+        defer { staged.remove(); try? FileManager.default.removeItem(at: root); try? FileManager.default.removeItem(at: destination) }
+        let left = try run(staged, root: root, destination: destination)
+        #expect(try String(contentsOf: destination.appendingPathComponent("tool"), encoding: .utf8) == "the real tool")
+        #expect(left.isEmpty, "the folder of root is removed when the script ends")
+    }
+
+    @Test func stopsWhenAFileChangedWhileThePasswordWasTyped() throws {
+        let root = try folder("root"), destination = try folder("dest")
+        let staged = try StagedFiles([("tool", Data("the real tool".utf8))])
+        defer { staged.remove(); try? FileManager.default.removeItem(at: root); try? FileManager.default.removeItem(at: destination) }
+        try Data("something else".utf8).write(to: staged.folder.appendingPathComponent("tool"))
+        #expect(throws: DNSError.self) { _ = try run(staged, root: root, destination: destination) }
+        #expect(!FileManager.default.fileExists(atPath: destination.appendingPathComponent("tool").path))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: root.path).isEmpty)
+    }
+
+    @Test func stopsWhenAFileIsReplacedByALink() throws {
+        let root = try folder("root"), destination = try folder("dest"), elsewhere = try folder("else")
+        let staged = try StagedFiles([("tool", Data("the real tool".utf8))])
+        defer { staged.remove(); for url in [root, destination, elsewhere] { try? FileManager.default.removeItem(at: url) } }
+        try Data("a link to another file".utf8).write(to: elsewhere.appendingPathComponent("other"))
+        let path = staged.folder.appendingPathComponent("tool")
+        try FileManager.default.removeItem(at: path)
+        try FileManager.default.createSymbolicLink(at: path, withDestinationURL: elsewhere.appendingPathComponent("other"))
+        #expect(throws: DNSError.self) { _ = try run(staged, root: root, destination: destination) }
+        #expect(!FileManager.default.fileExists(atPath: destination.appendingPathComponent("tool").path))
+    }
+
+    @Test func theMessageSaysWhatHappened() throws {
+        let root = try folder("root"), destination = try folder("dest")
+        let staged = try StagedFiles([("tool", Data("the real tool".utf8))])
+        defer { staged.remove(); try? FileManager.default.removeItem(at: root); try? FileManager.default.removeItem(at: destination) }
+        try Data("changed".utf8).write(to: staged.folder.appendingPathComponent("tool"))
+        do { _ = try run(staged, root: root, destination: destination); Issue.record("must fail") } catch {
+            #expect(error.localizedDescription.contains("изменились по дороге"))
+        }
+    }
+}
+
+/// Jobs that ask for the password at the same moment go under one prompt, each with its own result.
+@Suite struct PrivilegedBatchTests {
+    /// Stands for root: runs the script in a shell of this user, and fails the way `runPrivileged` does.
+    private final class FakeRoot: @unchecked Sendable {
+        private let lock = NSLock()
+        private(set) var scripts: [String] = []
+        var refuse = false
+        var calls: Int { lock.lock(); defer { lock.unlock() }; return scripts.count }
+
+        func run(_ script: String) throws -> String {
+            lock.lock(); scripts.append(script); let refused = refuse; lock.unlock()
+            if refused { throw DNSError.cancelled }
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/sh")
+            process.arguments = ["-c", script]
+            let out = Pipe(), err = Pipe()
+            process.standardOutput = out
+            process.standardError = err
+            try process.run()
+            let output = out.fileHandleForReading.readDataToEndOfFile()
+            let errors = err.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else {
+                let message = String(decoding: errors, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+                throw DNSError.failed(message.isEmpty ? "Команда завершилась с кодом \(process.terminationStatus)." : message)
+            }
+            return String(decoding: output, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+
+    private func batch(_ root: FakeRoot) -> PrivilegedBatch {
+        PrivilegedBatch(workFolder: String(NSTemporaryDirectory().dropLast())) { try root.run($0) }
+    }
+
+    /// Calls `run` for each script at the same time, each on a thread of its own, and waits for all of them.
+    private func together(_ batch: PrivilegedBatch, _ scripts: [String]) -> [Result<String, Error>] {
+        let lock = NSLock()
+        var results = [Result<String, Error>?](repeating: nil, count: scripts.count)
+        let group = DispatchGroup()
+        for (index, script) in scripts.enumerated() {
+            group.enter()
+            DispatchQueue.global().async {
+                let result = Result { try batch.run(script) }
+                lock.lock(); results[index] = result; lock.unlock()
+                group.leave()
+            }
+        }
+        group.wait()
+        return results.map { $0! }
+    }
+
+    @Test func aCallWithNothingExpectedGoesAloneAndAtOnce() throws {
+        let root = FakeRoot()
+        #expect(try batch(root).run("echo hi") == "hi")
+        #expect(root.calls == 1)
+        #expect(root.scripts == ["echo hi"], "not wrapped: it is the script as it is")
+    }
+
+    @Test func twoCallsAreOnePromptAndEachHasItsOwnAnswer() throws {
+        let root = FakeRoot()
+        let jobs = batch(root)
+        jobs.expect(2)
+        let results = together(jobs, ["echo one", "echo two >&2; exit 3"])
+        #expect(root.calls == 1)
+        #expect(try results[0].get() == "one")
+        #expect { try results[1].get() } throws: { "\($0)".contains("two") || $0.localizedDescription.contains("two") }
+    }
+
+    @Test func aFailureOfOneDoesNotHideTheSuccessOfTheOther() throws {
+        let root = FakeRoot()
+        let jobs = batch(root)
+        jobs.expect(2)
+        let results = together(jobs, ["exit 7", "echo fine"])
+        #expect(root.calls == 1)
+        if case .success = results[0] { Issue.record("the first must fail") }
+        #expect(try results[1].get() == "fine")
+        if case .failure(let error) = results[0] { #expect(error.localizedDescription.contains("7")) }
+    }
+
+    @Test func eachScriptRunsInAShellOfItsOwn() throws {
+        let root = FakeRoot()
+        let jobs = batch(root)
+        jobs.expect(2)
+        let results = together(jobs, ["x=leaked; echo \"it's\"", "echo \"${x:-clean}\""])
+        let texts = try results.map { try $0.get() }
+        #expect(Set(texts) == ["it's", "clean"])
+    }
+
+    @Test func aRefusedPasswordStopsBoth() {
+        let root = FakeRoot()
+        root.refuse = true
+        let jobs = batch(root)
+        jobs.expect(2)
+        let results = together(jobs, ["echo a", "echo b"])
+        #expect(root.calls == 1, "one prompt, refused once")
+        for result in results {
+            if case .failure(let error) = result, case DNSError.cancelled = error {} else { Issue.record("must be cancelled") }
+        }
+    }
+
+    @Test func aMissingSecondCallDoesNotHoldTheFirstForLong() throws {
+        let root = FakeRoot()
+        let jobs = batch(root)
+        jobs.expect(2, within: 0.3)
+        let started = Date()
+        #expect(try jobs.run("echo alone") == "alone")
+        #expect(Date().timeIntervalSince(started) < 5)
+        #expect(root.scripts == ["echo alone"])
+    }
+
+    @Test func whatWasExpectedIsForgottenAfterTheBatch() throws {
+        let root = FakeRoot()
+        let jobs = batch(root)
+        jobs.expect(2)
+        _ = together(jobs, ["echo a", "echo b"])
+        let started = Date()
+        #expect(try jobs.run("echo c") == "c")
+        #expect(Date().timeIntervalSince(started) < 2, "a later call is not kept waiting for a partner")
+        #expect(root.calls == 2)
+    }
+
+    @Test func theLinesOfAnAnswerAreReadBackWhateverElseIsPrinted() {
+        let results = PrivilegedBatch.results(in: "noise\nNIMB-RESULT 1 0 x x\nNIMB-RESULT 0 5 x x\nNIMB-RESULT 9 0 x x\nbroken NIMB-RESULT", count: 3)
+        #expect((try? results[1].get()) == "")
+        if case .failure(let error) = results[0] { #expect(error.localizedDescription == "Команда завершилась с кодом 5.") } else { Issue.record("0 must fail") }
+        if case .failure = results[2] {} else { Issue.record("a job without a line must fail") }
+    }
+}

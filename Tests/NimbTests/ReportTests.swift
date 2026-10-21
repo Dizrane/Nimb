@@ -107,3 +107,43 @@ import Testing
         #expect(!ReportConfig.developerHandle.hasPrefix("@"))
     }
 }
+
+/// A report must not carry names that someone chose: a router, a phone, a company's VPN.
+@Suite struct ReportServiceNamesTests {
+    @Test(arguments: ["Wi-Fi", "Ethernet", "Ethernet 2", "Ethernet Adapter (en6)", "Thunderbolt Bridge", "Thunderbolt Ethernet Slot 1",
+                      "USB 10/100/1000 LAN", "iPhone USB", "iPad USB 2", "Bluetooth PAN"])
+    func theNamesOfMacOSAreGeneric(name: String) {
+        #expect(ReportRedactor.isGenericService(name))
+    }
+
+    @Test(arguments: ["Daniil’s iPhone", "Home router 5G", "Acme Corp", "Wi-Fi (Ivan)", "Ethernet Adapter (en6) Ivan"])
+    func aNameSomeoneChoseIsNotGeneric(name: String) {
+        #expect(!ReportRedactor.isGenericService(name))
+    }
+
+    @Test func aChosenNameIsReplacedAndAGenericOneStays() {
+        let services = ["Wi-Fi", "Daniil’s iPhone", "Thunderbolt Bridge", "Home router 5G"]
+        let text = ReportRedactor.clean("DNS на «Wi-Fi»: авто\nDNS на «Daniil’s iPhone»: авто\nнет на: Home router 5G, Thunderbolt Bridge", services: services)
+        #expect(text.contains("«Wi-Fi»"))
+        #expect(text.contains("Thunderbolt Bridge"))
+        #expect(!text.contains("Daniil"))
+        #expect(!text.contains("router"))
+        #expect(text.contains("‹подключение 2›"))
+        #expect(text.contains("‹подключение 4›"))
+    }
+
+    @Test func aShortNameInsideAWordIsLeftAlone() {
+        #expect(ReportRedactor.clean("LANDING и Landlord", services: ["LAN x"]) == "LANDING и Landlord")
+        #expect(ReportRedactor.clean("слово Lan и ещё слово", services: ["Lan"]) == "слово ‹подключение 1› и ещё слово")
+        #expect(ReportRedactor.clean("Landing", services: ["Lan"]) == "Landing")
+    }
+
+    @Test func theNameOfAVPNIsHidden() {
+        let text = ReportRedactor.clean("Включён VPN «Acme Corp»: он может использовать свой DNS.")
+        #expect(text == "Включён VPN «‹название›»: он может использовать свой DNS.")
+    }
+
+    @Test func noConnectionsMeansNothingIsReplaced() {
+        #expect(ReportRedactor.clean("DNS на «Home router 5G»: авто") == "DNS на «Home router 5G»: авто")
+    }
+}

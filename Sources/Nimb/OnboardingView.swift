@@ -62,7 +62,7 @@ struct OnboardingView: View {
         StepFrame(
             kind: .welcome,
             title: "Добро пожаловать в Nimb",
-            text: "За пару минут настроим всё, чтобы работали нейросети, Telegram, YouTube и Discord. Ничего устанавливать и вводить не нужно: Nimb делает всё сам. Когда понадобится пароль от вашего Mac, он попросит."
+            text: "За пару минут настроим всё, чтобы работали нейросети, Telegram, YouTube и Discord. Ничего устанавливать и вводить не нужно: Nimb делает всё сам. Когда понадобится пароль от вашего Mac, он попросит его в окне macOS: оно может называться «osascript», так система подписывает запрос Nimb."
         ) {
             VStack(alignment: .leading, spacing: 8) {
                 Bullet("Нейросети: ChatGPT, Claude, Gemini и другие")

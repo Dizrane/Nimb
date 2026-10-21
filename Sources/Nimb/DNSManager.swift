@@ -330,9 +330,16 @@ enum DNSManager {
         if !failures.isEmpty { throw DNSError.failed(failures.joined(separator: "\n")) }
     }
 
-    /// Runs a shell script as root after the system's password (or Touch ID) prompt; returns what it printed.
+    /// Runs a shell script as root after the system's password (or Touch ID) prompt; returns what it printed. Calls that come together
+    /// after `PrivilegedBatch.shared.expect` are done under one prompt.
     @discardableResult
     static func runPrivileged(_ script: String) throws -> String {
+        try PrivilegedBatch.shared.run(script)
+    }
+
+    /// The prompt itself, for one script.
+    @discardableResult
+    static func runPrivilegedNow(_ script: String) throws -> String {
         let escaped = script
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
@@ -357,7 +364,7 @@ enum DNSManager {
 
     // MARK: Helpers
 
-    private static func shellQuote(_ value: String) -> String {
+    static func shellQuote(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 

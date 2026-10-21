@@ -1,5 +1,5 @@
 #!/bin/sh
-# Runs every check of the project: the Swift tests, the tests of the relay of reports (Node.js) and of the tunnel helper.
+# Runs every check of the project: the Swift tests, the tests of the relay of reports (Node.js), of the tunnel helper and of the installer script.
 #   ./scripts/test.sh
 # The Swift tests are built outside the project folder: in a folder synced by iCloud, macOS puts marks on the files and the signature fails.
 cd "$(dirname "$0")/.." || exit 1
@@ -14,5 +14,7 @@ echo "== Relay of reports"
 (cd report-relay && { [ -d node_modules ] || npm install --no-audit --no-fund >/dev/null; } && node test.mjs) || status=1
 echo "== Tunnel helper"
 ./scripts/test_tunnel.sh || status=1
+echo "== Installer script"
+./scripts/test_install.sh || status=1
 [ $status = 0 ] && echo "ALL GOOD" || echo "SOMETHING FAILED"
 exit $status

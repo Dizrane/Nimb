@@ -39,6 +39,9 @@ final class DNSViewModel: ObservableObject {
 
     var passwordless: Bool { access.enabled }
 
+    /// A change of DNS goes to the password prompt (there is no rule for it that covers every connection).
+    var asksPassword: Bool { !(access.enabled && access.missing.isEmpty) }
+
     /// True while a DNS change or a service check is running; both need the network undisturbed.
     var isLocked: Bool { isBusy || isProbing || isSettingUp }
 
