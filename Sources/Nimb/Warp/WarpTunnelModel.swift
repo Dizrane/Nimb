@@ -306,9 +306,15 @@ final class WarpTunnelModel: ObservableObject {
     }
 
     /// The number in the first lines of a helper script ("# nimb-tunnel 2: ...").
-    private static func helperVersion(at path: String) -> Int? {
+    nonisolated private static func helperVersion(at path: String) -> Int? {
         guard let text = try? String(contentsOfFile: path, encoding: .utf8), let range = text.range(of: #"# nimb-tunnel (\d+)"#, options: .regularExpression) else { return nil }
         return Int(text[range].dropFirst("# nimb-tunnel ".count))
+    }
+
+    /// The versions of the helper: the one installed in the folder of root and the one inside this app (a report asks).
+    nonisolated static func helperVersions() -> (installed: Int?, bundled: Int?) {
+        let bundled = Bundle.main.url(forResource: "nimb-tunnel", withExtension: "sh").flatMap { helperVersion(at: $0.path) }
+        return (helperVersion(at: WarpPaths.helper), bundled)
     }
 
     /// The installed helper is older than the one inside this app (after an update of Nimb): it is replaced together with

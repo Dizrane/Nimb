@@ -48,6 +48,9 @@ final class TelegramProxyModel: ObservableObject {
         }
     }
 
+    /// The port is really listening (a report asks).
+    var isListening: Bool { engine.isListening }
+
     /// `tg://proxy` link: Telegram Desktop opens a dialog that adds this proxy.
     var link: String { "tg://proxy?server=127.0.0.1&port=\(port)&secret=dd\(secretHex)" }
 

@@ -147,3 +147,201 @@ import Testing
         #expect(ReportRedactor.clean("DNS на «Home router 5G»: авто") == "DNS на «Home router 5G»: авто")
     }
 }
+
+/// «Ждали / увидели»: each service says what must be there and what is there; a disagreement is spelled out.
+@Suite struct ServiceCheckTests {
+    private let provider = DNSProvider.all[0]
+    private let router = ["192.168.0.1"]
+
+    @Test func dnsOnAndEverywhereAndAskedIsAgreed() {
+        let check = ReportChecks.dns(active: provider, serviceServers: [provider.addresses, provider.addresses], resolver: provider.addresses)
+        #expect(check.agrees)
+        #expect(check.lines.last == "  итог: совпало")
+        #expect(check.seen.contains("2 из 2"))
+    }
+
+    @Test func dnsOnButOneConnectionIsAutomaticDisagrees() {
+        let check = ReportChecks.dns(active: provider, serviceServers: [provider.addresses, []], resolver: provider.addresses)
+        #expect(!check.agrees)
+        #expect(check.seen.contains("1 из 2"))
+        #expect(check.lines.last == "  итог: РАСХОДИТСЯ")
+    }
+
+    @Test func dnsOnButTheSystemAsksTheRouterDisagrees() {
+        let check = ReportChecks.dns(active: provider, serviceServers: [provider.addresses], resolver: router)
+        #expect(!check.agrees, "set everywhere, but something else decides: a VPN, a profile, a browser of its own")
+        #expect(check.seen.contains("192.168.0.1"))
+    }
+
+    @Test func dnsOffIsAgreedWhenNothingOfNimbIsLeft() {
+        #expect(ReportChecks.dns(active: nil, serviceServers: [[], router], resolver: router).agrees)
+        let left = ReportChecks.dns(active: nil, serviceServers: [DNSProvider.all[1].addresses, []], resolver: router)
+        #expect(!left.agrees)
+        #expect(left.seen.contains("1 из 2"))
+    }
+
+    @Test func aProxyThatWorksIsAgreed() {
+        var stats = TelegramProxyStats()
+        stats.totalConnections = 18; stats.webSocket = 18
+        let check = ReportChecks.telegram(running: true, port: 1443, listening: true, stats: stats)
+        #expect(check.agrees)
+        #expect(check.seen.contains("через WebSocket 18"))
+    }
+
+    @Test func aProxyThatHasNotMetTelegramYetIsAgreedAndSaysSo() {
+        let check = ReportChecks.telegram(running: true, port: 1443, listening: true, stats: TelegramProxyStats())
+        #expect(check.agrees)
+        #expect(check.seen.contains("ещё не подключался"))
+    }
+
+    @Test func aProxyThatDoesNotListenDisagrees() {
+        #expect(!ReportChecks.telegram(running: true, port: 1443, listening: false, stats: TelegramProxyStats()).agrees)
+    }
+
+    @Test func aProxyWithManyErrorsOrAnotherKeyDisagrees() {
+        var many = TelegramProxyStats()
+        many.totalConnections = 10; many.failures = 3
+        #expect(!ReportChecks.telegram(running: true, port: 1443, listening: true, stats: many).agrees)
+        var key = TelegramProxyStats()
+        key.totalConnections = 10; key.wrongSecret = 1
+        #expect(!ReportChecks.telegram(running: true, port: 1443, listening: true, stats: key).agrees)
+        var fine = TelegramProxyStats()
+        fine.totalConnections = 10; fine.failures = 2
+        #expect(ReportChecks.telegram(running: true, port: 1443, listening: true, stats: fine).agrees)
+    }
+
+    @Test func aProxyThatIsOffButStillListensDisagrees() {
+        #expect(ReportChecks.telegram(running: false, port: 1443, listening: false, stats: TelegramProxyStats()).agrees)
+        #expect(!ReportChecks.telegram(running: false, port: 1443, listening: true, stats: TelegramProxyStats()).agrees)
+    }
+
+    @Test func aTunnelThatWorksIsAgreed() {
+        #expect(ReportChecks.tunnel(on: true, routes: 3, interface: "utun5", warp: "on", dropped: nil).agrees)
+    }
+
+    @Test func aTunnelThatIsOnButNotCarryingTrafficDisagrees() {
+        #expect(!ReportChecks.tunnel(on: true, routes: 3, interface: "utun5", warp: "off", dropped: nil).agrees, "Cloudflare does not see WARP")
+        #expect(!ReportChecks.tunnel(on: true, routes: 3, interface: "en0", warp: "on", dropped: nil).agrees, "the traffic does not go into the tunnel")
+        #expect(!ReportChecks.tunnel(on: true, routes: 0, interface: "utun5", warp: "on", dropped: nil).agrees)
+        #expect(!ReportChecks.tunnel(on: true, routes: 3, interface: "utun5", warp: nil, dropped: nil).agrees, "Cloudflare did not answer")
+    }
+
+    @Test func aTunnelThatIsOffIsAgreedWhenTheTrafficIsDirect() {
+        #expect(ReportChecks.tunnel(on: false, routes: 0, interface: "en0", warp: "off", dropped: nil).agrees)
+        #expect(!ReportChecks.tunnel(on: false, routes: 0, interface: "utun3", warp: "off", dropped: nil).agrees, "another VPN carries the traffic")
+    }
+
+    @Test func whenTheHelperTookTheTunnelDownTheReportSaysSo() {
+        let check = ReportChecks.tunnel(on: false, routes: 0, interface: "en0", warp: "off", dropped: "no-handshake в 10-21 21:40")
+        #expect(check.seen.contains("помощник выключил туннель сам (no-handshake в 10-21 21:40)"))
+    }
+
+    @Test func readsTheProxiesThatAreOn() {
+        let output = """
+        <dictionary> {
+          HTTPEnable : 1
+          HTTPPort : 8080
+          HTTPProxy : proxy.example.test
+          HTTPSEnable : 0
+          SOCKSEnable : 1
+          ProxyAutoConfigEnable : 0
+        }
+        """
+        #expect(ReportChecks.proxies(from: output) == ["HTTP", "SOCKS"])
+        #expect(ReportChecks.proxies(from: "<dictionary> {\n  HTTPEnable : 0\n}").isEmpty)
+        #expect(!ReportChecks.proxies(from: output).joined().contains("example"), "only the kinds, never the addresses")
+    }
+
+    @Test func findsTheDomainsThatHaveALineInTheHostsFile() {
+        let hosts = "127.0.0.1 localhost\n# 1.2.3.4 chatgpt.com\n0.0.0.0 api.anthropic.com\n"
+        #expect(ReportChecks.hostsMentions(in: hosts, domains: ["chatgpt.com", "api.anthropic.com", "t.me"]) == ["api.anthropic.com"])
+    }
+
+    @Test func countsTheConnectedVPNs() {
+        let list = """
+        * (Connected)      AAA VPN (x) "One"  [VPN:x]
+        * (Disconnected)   BBB VPN (y) "Two"  [VPN:y]
+        * (Connected)      CCC VPN (z) "Three"  [VPN:z]
+        """
+        #expect(ReportChecks.connectedVPNs(from: list) == 2)
+    }
+}
+
+/// The events of the last day, out of the lines of the diary.
+@Suite struct ReportChronologyTests {
+    private static let stamp: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return f
+    }()
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    private func line(_ minutesAgo: Double, _ tag: String, _ message: String) -> String {
+        "\(Self.stamp.string(from: now.addingTimeInterval(-minutesAgo * 60))) [\(tag)] \(message)"
+    }
+
+    @Test func keepsTheStatesAndErrorsOfTheServices() {
+        let events = ReportChronology.events(from: [
+            line(50, "dns", "DNS: GeoHide (EU)"), line(40, "telegram", "прокси включён, порт 1443"), line(30, "tunnel", "ошибка: нет рукопожатия"),
+        ], now: now)
+        #expect(events.count == 3)
+        #expect(events[0].hasSuffix("[dns] DNS: GeoHide (EU)"))
+        #expect(events[2].hasSuffix("[tunnel] ошибка: нет рукопожатия"))
+    }
+
+    @Test func leavesOutTheChecksOfUpdatesThatFoundNothing() {
+        let events = ReportChronology.events(from: [
+            line(60, "update", "проверяю обновления"), line(60, "update", "версия 0.9.9 актуальна"), line(20, "dns", "DNS: выключен"),
+        ], now: now)
+        #expect(events.count == 1)
+        #expect(events[0].hasSuffix("[dns] DNS: выключен"))
+    }
+
+    @Test func leavesOutTheMomentsInWork() {
+        let events = ReportChronology.events(from: [
+            line(30, "tunnel", "состояние: working(\"Включаю…\")"), line(29, "tunnel", "состояние: on(interface: \"utun4\")"),
+        ], now: now)
+        #expect(events.count == 1)
+        #expect(events[0].contains("on(interface"))
+    }
+
+    @Test func keepsAFailedCheckAndANewVersion() {
+        let events = ReportChronology.events(from: [
+            line(60, "update", "проверка обновлений не удалась: нет сети"), line(10, "update", "есть новая версия 0.9.10"),
+        ], now: now)
+        #expect(events.count == 2)
+    }
+
+    @Test func tellsALineThatComesAgainAndAgainOnceWithACount() {
+        let events = ReportChronology.events(from: [
+            line(30, "update", "проверка обновлений не удалась: нет сети"), line(20, "update", "проверка обновлений не удалась: нет сети"),
+            line(10, "update", "проверка обновлений не удалась: нет сети"), line(5, "dns", "DNS: выключен"),
+        ], now: now)
+        #expect(events.count == 2)
+        #expect(events[0].hasSuffix("не удалась: нет сети (×3)"))
+    }
+
+    @Test func leavesOutWhatIsOlderThanADay() {
+        let events = ReportChronology.events(from: [line(25 * 60, "dns", "DNS: GeoHide (EU)"), line(23 * 60, "dns", "DNS: выключен")], now: now)
+        #expect(events.count == 1)
+        #expect(events[0].hasSuffix("DNS: выключен"))
+    }
+
+    @Test func keepsTheLastOnesWhenThereAreTooMany() {
+        let lines = (0..<100).map { line(Double(200 - $0), "dns", "DNS: \($0)") }
+        let events = ReportChronology.events(from: lines, now: now, limit: 10)
+        #expect(events.count == 10)
+        #expect(events.last?.hasSuffix("DNS: 99") == true)
+        #expect(events.first?.hasSuffix("DNS: 90") == true)
+    }
+
+    @Test func skipsLinesThatAreNotOfTheDiary() {
+        let events = ReportChronology.events(from: ["", "nonsense", "2026-13-45 99:99:99 [dns] x", line(5, "dns", "DNS: выключен")], now: now)
+        #expect(events.count == 1)
+    }
+
+    @Test func saysWhenThereWasNothing() {
+        #expect(ReportChronology.events(from: [], now: now) == ["за последние сутки событий нет"])
+    }
+}

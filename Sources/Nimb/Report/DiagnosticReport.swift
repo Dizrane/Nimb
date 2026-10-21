@@ -9,13 +9,17 @@ enum DiagnosticReport {
     static func collect(dns: DNSViewModel, telegram: TelegramProxyModel, warp: WarpTunnelModel) async -> String {
         var out: [String] = []
 
+        let system = await Task.detached(priority: .utility) { snapshot() }.value
+        let helper = WarpTunnelModel.helperVersions()
+
         out.append(section("Программа", [
             "Nimb \(Updater.currentVersion) (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"))",
             "macOS \(ProcessInfo.processInfo.operatingSystemVersionString), \(architecture)",
-            "Язык системы: \(Locale.preferredLanguages.first ?? "?")",
+            "Язык системы: \(Locale.preferredLanguages.first ?? "?"), часовой пояс UTC\(utcOffset)",
             "Окно: \(Int(NSApp.windows.first { $0.canBecomeMain }?.frame.width ?? 0))×\(Int(NSApp.windows.first { $0.canBecomeMain }?.frame.height ?? 0))",
             "Прошлый запуск закончился неожиданно: \(yes(SessionMarker.previousEndedBadly))",
             "Работа в фоне: \(yes(BackgroundMode.shared.enabled)), автозапуск: \(yes(LaunchAtLogin.shared.isOn))",
+            "Помощник туннеля: стоит версия \(helper.installed.map(String.init) ?? "нет"), в приложении \(helper.bundled.map(String.init) ?? "нет")",
         ]))
 
         out.append(section("Сервисы", [
@@ -24,6 +28,12 @@ enum DiagnosticReport {
             "Telegram (прокси): \(telegram.isRunning ? "включено, порт \(telegram.port)" : "выключено"); соединений \(telegram.stats.totalConnections), ошибок \(telegram.stats.failures), чужой ключ \(telegram.stats.wrongSecret)",
             "YouTube и Discord (туннель): \(phaseText(warp.phase)); без пароля: \(yes(warp.passwordless)); установлен: \(yes(warp.isInstalled))",
         ]))
+
+        out.append(section("Что ждали и что увидели", [
+            ReportChecks.dns(active: dns.active, serviceServers: system.serviceServers, resolver: system.resolver),
+            ReportChecks.telegram(running: telegram.isRunning, port: telegram.port, listening: telegram.isListening, stats: telegram.stats),
+            ReportChecks.tunnel(on: warp.isOn, routes: system.routes, interface: system.interface, warp: system.warp, dropped: system.dropped),
+        ].flatMap(\.lines)))
 
         let shown = [dns.errorMessage, telegram.errorMessage, warp.errorMessage].compactMap { $0 }
         if !shown.isEmpty { out.append(section("Ошибки на экране", shown)) }
@@ -41,11 +51,14 @@ enum DiagnosticReport {
             }))
         }
 
-        let system = await Task.detached(priority: .utility) { systemFacts() }.value
-        out.append(section("Сеть", system))
+        out.append(section("Сеть", system.lines))
+        out.append(section("Что могло помешать", ReportChecks.interference(system)))
 
-        let log = AppLog.shared.recent(60)
-        out.append(section("Журнал (последние строки)", log.isEmpty ? ["пусто"] : log))
+        // The diary: first the events of the last day (what was switched on and off, and every error), then its last lines as they are.
+        let diary = AppLog.shared.recent(500)
+        out.append(section("Хронология (последние сутки)", ReportChronology.events(from: diary, now: Date())))
+        let tail = Array(diary.suffix(30))
+        out.append(section("Журнал (последние строки)", tail.isEmpty ? ["пусто"] : tail))
 
         let services = await Task.detached(priority: .utility) { DNSManager.physicalServices() }.value
         return ReportRedactor.clean(out.joined(separator: "\n\n"), services: services)
@@ -83,6 +96,13 @@ enum DiagnosticReport {
 
     private static func yes(_ value: Bool) -> String { value ? "да" : "нет" }
 
+    /// «+7», «-5», «+5:30»: the times of the diary are in this zone.
+    private static var utcOffset: String {
+        let seconds = TimeZone.current.secondsFromGMT()
+        let minutes = abs(seconds) / 60 % 60
+        return (seconds < 0 ? "-" : "+") + "\(abs(seconds) / 3600)" + (minutes == 0 ? "" : ":\(String(format: "%02d", minutes))")
+    }
+
     private static var architecture: String {
         #if arch(arm64)
         "Apple Silicon"
@@ -102,10 +122,12 @@ enum DiagnosticReport {
     }
 
     /// Facts of the network, asked of the system and of Cloudflare. Never anything that names the person.
-    nonisolated private static func systemFacts() -> [String] {
+    nonisolated private static func snapshot() -> SystemSnapshot {
+        var system = SystemSnapshot()
         var lines: [String] = []
         let route = run("/sbin/route", ["-n", "get", "1.1.1.1"])
         let interface = route.split(separator: "\n").first { $0.contains("interface:") }.map { $0.split(separator: ":").last.map { $0.trimmingCharacters(in: .whitespaces) } ?? "?" } ?? "?"
+        system.interface = interface
         lines.append("Трафик в интернет идёт через интерфейс: \(interface)\(interface.hasPrefix("utun") ? " (туннель)" : "")")
 
         let trace = run("/usr/bin/curl", ["-s", "-m", "6", "--connect-timeout", "4", "https://www.cloudflare.com/cdn-cgi/trace"])
@@ -118,13 +140,19 @@ enum DiagnosticReport {
                 return parts.count == 2 && wanted.contains(parts[0]) ? "\(parts[0])=\(parts[1])" : nil
             }
             lines.append("Cloudflare: \(facts.joined(separator: ", "))")
+            system.warp = trace.split(separator: "\n").compactMap { line -> String? in
+                let parts = line.split(separator: "=", maxSplits: 1).map(String.init)
+                return parts.count == 2 && parts[0] == "warp" ? parts[1] : nil
+            }.first
         }
 
         let services = DNSManager.physicalServices()
         for service in services {
             let servers = DNSManager.servers(of: service)
+            system.serviceServers.append(servers)
             lines.append("DNS на «\(service)»: \(servers.isEmpty ? "автоматический" : servers.joined(separator: ", "))")
         }
+        system.resolver = DNSManager.mainResolverServers()
 
         let state = (try? String(contentsOfFile: WarpPaths.stateFile, encoding: .utf8)) ?? ""
         if state.isEmpty {
@@ -135,11 +163,21 @@ enum DiagnosticReport {
                 let parts = line.split(separator: "=", maxSplits: 1).map(String.init)
                 return parts.count == 2 && keys.contains(parts[0]) ? "\(parts[0])=\(parts[1])" : nil
             }.joined(separator: ", "))
-            let routes = state.split(separator: "\n").filter { $0.hasPrefix("route=") }.count
-            lines.append("Маршрутов туннеля: \(routes)")
+            system.routes = state.split(separator: "\n").filter { $0.hasPrefix("route=") }.count
+            lines.append("Маршрутов туннеля: \(system.routes)")
         }
         lines.append("Помощник туннеля: \(FileManager.default.isExecutableFile(atPath: WarpPaths.helper) ? "есть" : "нет"), настройки: \(FileManager.default.fileExists(atPath: WarpPaths.config) ? "есть" : "нет")")
-        return lines
+        system.lines = lines
+
+        if let text = try? String(contentsOfFile: WarpPaths.droppedFile, encoding: .utf8), let drop = TunnelDrop.parse(text),
+           Date().timeIntervalSince(drop.when) < TunnelDrop.newsFor {
+            system.dropped = "\(drop.reason) в \(drop.when.formatted(.dateTime.month(.twoDigits).day(.twoDigits).hour().minute()))"
+        }
+        system.proxies = ReportChecks.proxies(from: run("/usr/sbin/scutil", ["--proxy"]))
+        system.vpnConnected = ReportChecks.connectedVPNs(from: run("/usr/sbin/scutil", ["--nc", "list"]))
+        let domains = ProbeTarget.all.map(\.host) + ["telegram.org", "t.me", "youtube.com", "discord.com"]
+        system.hostsMentions = ReportChecks.hostsMentions(in: (try? String(contentsOfFile: "/etc/hosts", encoding: .utf8)) ?? "", domains: domains)
+        return system
     }
 
     nonisolated private static func run(_ path: String, _ arguments: [String]) -> String {

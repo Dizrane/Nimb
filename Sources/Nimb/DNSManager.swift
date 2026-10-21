@@ -85,6 +85,11 @@ enum DNSManager {
         return warnings
     }
 
+    /// The servers that the system asks first for an ordinary name: the unscoped resolver without a domain, from `scutil --dns`.
+    static func mainResolverServers() -> [String] {
+        systemResolvers().first { $0.domain == nil && !$0.isSupplemental }?.nameservers ?? []
+    }
+
     private struct Resolver {
         var domain: String?
         var nameservers: [String] = []
