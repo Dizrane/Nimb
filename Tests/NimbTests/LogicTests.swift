@@ -319,6 +319,12 @@ import Testing
         #expect(Notifier.showsBanner(identifier: Notifier.testIdentifier, appIsActive: false))
     }
 
+    @Test func testNotificationIsNotRepeatedWhileItIsStillThere() {
+        #expect(Notifier.testIsDue(delivered: []))
+        #expect(Notifier.testIsDue(delivered: ["nimb-update"]))
+        #expect(!Notifier.testIsDue(delivered: ["nimb-update", Notifier.testIdentifier]))
+    }
+
     @Test func updateNotificationIsHiddenInFront() {
         #expect(!Notifier.showsBanner(identifier: "nimb-update", appIsActive: true))
         #expect(Notifier.showsBanner(identifier: "nimb-update", appIsActive: false))
