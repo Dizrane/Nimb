@@ -81,6 +81,7 @@ enum DNSManager {
            !main.nameservers.contains(where: provider.addresses.contains) {
             warnings.append("Системный DNS сейчас \(main.nameservers.joined(separator: ", ")), а не \(provider.name). Вероятно, он не включён на основном подключении.")
         }
+        if let browser = BrowserDNS.currentWarning() { warnings.append(browser) }
         return warnings
     }
 

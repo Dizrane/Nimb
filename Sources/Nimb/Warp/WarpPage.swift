@@ -20,7 +20,7 @@ struct WarpPage: View {
         case .notInstalled: return "Включите, чтобы открывались YouTube и Discord. Всё настроится само."
         case .off: return "Включите, чтобы открывались YouTube и Discord."
         case .working(let text): return text
-        case .on: return "Трафик идёт через Cloudflare WARP."
+        case .on: return "Весь трафик этого Mac идёт через Cloudflare WARP. Если не открывается банк или Госуслуги, выключите туннель."
         }
     }
 
@@ -84,7 +84,7 @@ struct WarpPage: View {
             Text("Что произойдёт при включении")
                 .font(Typo.name)
                 .foregroundStyle(Theme.textPrimary)
-            Text("Nimb создаст для этого Mac анонимный аккаунт Cloudflare WARP и запросит пароль. Включая, вы принимаете условия Cloudflare WARP.")
+            Text("Nimb создаст для этого Mac анонимный аккаунт Cloudflare WARP и запросит пароль. Пока туннель включён, через Cloudflare идёт весь трафик Mac, и некоторые сайты, например банки и Госуслуги, могут не открываться: тогда выключите туннель. Включая, вы принимаете условия Cloudflare WARP.")
                 .font(Typo.small)
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)

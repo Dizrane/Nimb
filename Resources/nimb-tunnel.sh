@@ -1,9 +1,10 @@
 #!/bin/sh
-# nimb-tunnel 4: brings the Nimb WARP tunnel up and down. It runs as root, from /usr/local/libexec/nimb, which only root
+# nimb-tunnel 5: brings the Nimb WARP tunnel up and down. It runs as root, from /usr/local/libexec/nimb, which only root
 # can write to. The settings are read from warp.conf next to it, a file of plain key=value lines that Nimb wrote after
 # checking every value; nothing in it is ever executed.
 #
-#   nimb-tunnel up      start amneziawg-go, configure it, add the routes, wait for the handshake
+#   nimb-tunnel up      start amneziawg-go, configure it, add the routes, wait for the handshake; a small watcher then follows
+#                       the network and takes the tunnel down if the server stops answering
 #   nimb-tunnel down    remove the routes and stop it
 #   nimb-tunnel status  print "up <interface> <pid>" or "down"
 #   nimb-tunnel unregister  delete this Mac's anonymous WARP account at Cloudflare (best effort)
@@ -64,13 +65,49 @@ drop_routes() {
     done
 }
 
+# How long the server may stay silent before the tunnel takes itself down. While the network works WireGuard renews its session every
+# couple of minutes (a keepalive makes it try without end), so this long without a handshake means that the server cannot be reached.
+# A full tunnel would then go on swallowing every packet of the Mac, and the Mac would have no internet while Nimb says "on".
+STALE_AFTER=300
+
+handshake_time() { # handshake_time SOCKET: when the server last answered (unix seconds, 0 if it never did); fails if the daemon did not say
+    reply=$(printf 'get=1\n\n' | uapi "$1" | tr -d '\r')
+    case "$reply" in *errno=0*) ;; *) return 1 ;; esac
+    shake=$(printf '%s\n' "$reply" | sed -n 's/^last_handshake_time_sec=//p' | head -1)
+    case "$shake" in ''|*[!0-9]*) shake=0 ;; esac
+    echo "$shake"
+}
+
 watch_network() { # watch_network <daemon pid> <endpoint host>
+    sock="$SOCKDIR/$(state_get interface).sock"
+    started=$(date +%s); tick=$started
+    quiet_since=0 # the silence of the server counts from here: later than the last handshake when the Mac was offline or has just woken up
     while alive "$1"; do
         sleep 5
-        now=$(uplink_now)
-        [ -n "$now" ] && [ "$now" != "$(state_get uplink)" ] && retarget "$2" "$now"
+        clock=$(date +%s)
+        # The loop stops while the Mac sleeps, and after waking the network needs a moment before the server can answer.
+        [ $((clock - tick)) -gt 30 ] && quiet_since=$((clock + 90))
+        tick=$clock
+        up=$(uplink_now)
+        [ -n "$up" ] && [ "$up" != "$(state_get uplink)" ] && retarget "$2" "$up"
+        # Without a network the server cannot answer, and that is not its fault: the tunnel waits for the network.
+        [ -n "$up" ] || { quiet_since=$clock; continue; }
+        shake=$(handshake_time "$sock") || continue
+        ref=$shake
+        [ "$shake" -eq 0 ] && ref=$started
+        [ "$quiet_since" -gt "$ref" ] && ref=$quiet_since
+        if [ $((clock - ref)) -gt "$STALE_AFTER" ]; then
+            # The routes go first, so that the internet is back at once; the note tells Nimb why the tunnel is gone.
+            printf '%s no-handshake\n' "$clock" > "$RUN.dropped"
+            chmod 644 "$RUN.dropped"
+            drop_routes
+            kill "$1" 2>/dev/null
+            i=0; while alive "$1" && [ $i -lt 20 ]; do sleep 0.25; i=$((i + 1)); done
+            alive "$1" && kill -9 "$1" 2>/dev/null
+            break
+        fi
     done
-    # The daemon stopped without `down` (killed, crashed): the Mac is not left cut off from the internet.
+    # The daemon stopped without `down` (killed, crashed, or taken down just now): the Mac is not left cut off from the internet.
     iface=$(state_get interface)
     drop_routes
     [ -n "$iface" ] && rm -f "$SOCKDIR/$iface.sock"
@@ -102,6 +139,7 @@ cmd_up() {
     pid=$(state_get pid)
     if alive "$pid"; then say "already up"; return 0; fi
     cmd_down
+    rm -f "$RUN.dropped"
     [ -x "$BIN" ] || fail "нет $BIN"
     [ -f "$CONF" ] || fail "нет $CONF"
 

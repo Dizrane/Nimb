@@ -8,7 +8,7 @@ for path in /Applications/Nimb.app "$HOME/Applications/Nimb.app" /Applications/R
     "$HOME/Library/HTTPStorages/com.nimb.app" "$HOME/Library/Saved Application State/com.nimb.app.savedState" \
     "$HOME/Library/Application Support/com.nimb.app" "$HOME/Library/WebKit/com.nimb.app" "$HOME/Library/Logs/Nimb" \
     /usr/local/libexec/nimb /etc/sudoers.d/nimb /etc/sudoers.d/nimb-tunnel \
-    /var/run/nimb-tunnel.state /var/run/nimb-tunnel.log /var/run/nimb-tunnel.name; do
+    /var/run/nimb-tunnel.state /var/run/nimb-tunnel.log /var/run/nimb-tunnel.name /var/run/nimb-tunnel.dropped; do
     [ -e "$path" ] && found "$path"
 done
 pgrep -x Nimb >/dev/null && found "процесс Nimb"

@@ -13,6 +13,8 @@ enum WarpPaths {
     static let binary = "\(dir)/amneziawg-go"
     static let config = "\(dir)/warp.conf"
     static let stateFile = "/var/run/nimb-tunnel.state"
+    /// The note the helper leaves when it takes the tunnel down itself (the server stopped answering).
+    static let droppedFile = "/var/run/nimb-tunnel.dropped"
     /// The sudoers rule that lets the person start and stop the tunnel without a password (opt-in, like the one for DNS).
     static let sudoersPath = "/etc/sudoers.d/nimb-tunnel"
     static let passwordlessCommands = ["\(helper) up", "\(helper) down"]
@@ -23,7 +25,27 @@ enum WarpPaths {
     }
 
     /// Stops the tunnel and deletes everything that was installed. Used by "remove" and by the uninstall.
-    static let removeScript = "[ ! -x '\(helper)' ] || { '\(helper)' down; '\(helper)' unregister || true; }; /bin/rm -f '\(sudoersPath)'; /bin/rm -rf '\(dir)' /var/run/nimb-tunnel.state /var/run/nimb-tunnel.log /var/run/nimb-tunnel.name"
+    static let removeScript = "[ ! -x '\(helper)' ] || { '\(helper)' down; '\(helper)' unregister || true; }; /bin/rm -f '\(sudoersPath)'; /bin/rm -rf '\(dir)' /var/run/nimb-tunnel.state /var/run/nimb-tunnel.log /var/run/nimb-tunnel.name /var/run/nimb-tunnel.dropped"
+}
+
+/// The helper took the tunnel down by itself: the server did not answer for minutes, and a full tunnel without a server leaves the Mac
+/// with no internet. It writes "<unix time> <reason>" in `WarpPaths.droppedFile`; the person is told once.
+enum TunnelDrop {
+    /// A note older than this is history, not news (the file stays until the next start of the tunnel or a restart of the Mac).
+    static let newsFor: TimeInterval = 24 * 3600
+
+    static let message = "Туннель выключился сам: Cloudflare не отвечал несколько минут. Интернет снова работает как обычно. Когда связь вернётся, включите туннель ещё раз."
+
+    static func parse(_ text: String) -> (when: Date, reason: String)? {
+        let parts = text.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: " ", maxSplits: 1).map(String.init)
+        guard let first = parts.first, let seconds = TimeInterval(first), seconds > 0 else { return nil }
+        return (Date(timeIntervalSince1970: seconds), parts.count > 1 ? parts[1] : "")
+    }
+
+    /// Whether this note has not been told yet and is recent. `seen` is the time of the last note that was told, as unix seconds.
+    static func isNews(_ when: Date, seen: TimeInterval, now: Date) -> Bool {
+        when.timeIntervalSince1970 > seen && now.timeIntervalSince(when) < newsFor
+    }
 }
 
 /// The WARP tunnel: AmneziaWG (WireGuard with extra camouflage) to Cloudflare, so that YouTube and Discord open.
@@ -46,6 +68,7 @@ final class WarpTunnelModel: ObservableObject {
     @Published private(set) var isSettingAccess = false
 
     private var timer: Timer?
+    private static let droppedSeenKey = "tunnelDroppedSeen"
 
     init() {
         refresh()
@@ -97,9 +120,20 @@ final class WarpTunnelModel: ObservableObject {
 
     func refresh() {
         if isWorking { return }
+        noticeDrop()
         // Only a change is published: this runs every few seconds, and an unchanged value would redraw every page.
         let next = currentPhase()
         if next != phase { phase = next }
+    }
+
+    /// The helper has taken the tunnel down because the server stopped answering: the person is told once, on the page and in the diary.
+    private func noticeDrop() {
+        guard let text = try? String(contentsOfFile: WarpPaths.droppedFile, encoding: .utf8), let drop = TunnelDrop.parse(text) else { return }
+        let defaults = UserDefaults.standard
+        guard TunnelDrop.isNews(drop.when, seen: defaults.double(forKey: Self.droppedSeenKey), now: Date()) else { return }
+        defaults.set(drop.when.timeIntervalSince1970, forKey: Self.droppedSeenKey)
+        AppLog.shared.add("tunnel", "помощник выключил туннель сам: \(drop.reason)")
+        errorMessage = TunnelDrop.message
     }
 
     /// The end of an operation: "working" gives way straight to the real state, with no "off" in between.

@@ -124,7 +124,7 @@ struct OnboardingView: View {
         StepFrame(
             kind: .media,
             title: "YouTube и Discord",
-            text: "Nimb создаст для этого Mac собственный анонимный аккаунт Cloudflare WARP и включит туннель. Личных данных он не передаёт. Понадобится пароль от Mac."
+            text: "Nimb создаст для этого Mac собственный анонимный аккаунт Cloudflare WARP и включит туннель. Личных данных он не передаёт. Пока туннель включён, через Cloudflare идёт весь трафик Mac: если не открывается банк или Госуслуги, выключите его. Понадобится пароль от Mac."
         ) {
             if warp.isOn {
                 DoneRow(text: "Туннель работает")

@@ -343,3 +343,67 @@ import Testing
         #expect(told == ["0.9.6", "0.9.7"])
     }
 }
+
+@Suite struct BrowserDNSTests {
+    private func prefs(_ mode: Int) -> String { "user_pref(\"network.trr.mode\", \(mode));\nuser_pref(\"other\", 1);" }
+
+    @Test(arguments: [(5, true), (0, true), (2, false), (3, false)])
+    func readsWhetherDNSOverHTTPSIsOff(mode: Int, off: Bool) {
+        #expect(BrowserDNS.switchedOff(prefs(mode)) == off)
+    }
+
+    @Test func noLineMeansTheBrowserMayStillUseIt() {
+        #expect(!BrowserDNS.switchedOff("user_pref(\"browser.startup.page\", 3);"))
+        #expect(!BrowserDNS.switchedOff(""))
+    }
+
+    @Test func theLastLineAboutItWins() {
+        #expect(BrowserDNS.switchedOff(prefs(2) + "\n" + prefs(5)))
+        #expect(!BrowserDNS.switchedOff(prefs(5) + "\n" + prefs(3)))
+    }
+
+    @Test func saysNothingWithoutFirefoxOrWithoutProfiles() {
+        #expect(BrowserDNS.firefoxWarning(installed: false, profiles: [prefs(2)]) == nil)
+        #expect(BrowserDNS.firefoxWarning(installed: true, profiles: []) == nil)
+    }
+
+    @Test func saysItWhenAProfileMayAskCloudflare() {
+        #expect(BrowserDNS.firefoxWarning(installed: true, profiles: [""]) == BrowserDNS.firefoxText)
+        #expect(BrowserDNS.firefoxWarning(installed: true, profiles: [prefs(2)]) == BrowserDNS.firefoxText)
+        #expect(BrowserDNS.firefoxWarning(installed: true, profiles: [prefs(5), ""]) == BrowserDNS.firefoxText, "one profile left on is enough to say it")
+    }
+
+    @Test func saysNothingWhenEveryProfileHasItOff() {
+        #expect(BrowserDNS.firefoxWarning(installed: true, profiles: [prefs(5), prefs(0)]) == nil)
+    }
+}
+
+@Suite struct TunnelDropTests {
+    private let noon = Date(timeIntervalSince1970: 1_800_000_000)
+
+    @Test func readsTheNoteOfTheHelper() throws {
+        let note = try #require(TunnelDrop.parse("1800000000 no-handshake\n"))
+        #expect(note.when == noon)
+        #expect(note.reason == "no-handshake")
+    }
+
+    @Test func aNoteWithoutAReasonIsStillANote() throws {
+        #expect(try #require(TunnelDrop.parse("1800000000")).reason == "")
+    }
+
+    @Test(arguments: ["", "no-handshake", "0 no-handshake", "-5 x", "abc def"])
+    func refusesWhatIsNotANote(text: String) {
+        #expect(TunnelDrop.parse(text) == nil)
+    }
+
+    @Test func aNoteIsToldOnce() {
+        let now = noon.addingTimeInterval(60)
+        #expect(TunnelDrop.isNews(noon, seen: 0, now: now))
+        #expect(!TunnelDrop.isNews(noon, seen: noon.timeIntervalSince1970, now: now))
+        #expect(TunnelDrop.isNews(noon.addingTimeInterval(3600), seen: noon.timeIntervalSince1970, now: now.addingTimeInterval(7200)), "a later drop is news again")
+    }
+
+    @Test func anOldNoteIsHistory() {
+        #expect(!TunnelDrop.isNews(noon, seen: 0, now: noon.addingTimeInterval(TunnelDrop.newsFor + 1)))
+    }
+}
