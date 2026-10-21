@@ -37,9 +37,9 @@ struct SidebarView: View {
         return HStack(spacing: 8) {
             if page.isService {
                 // A service: pressing the row only opens its page. The icon plays its little story when the service is switched on, and
-                // when the icon itself is pressed.
+                // when the icon itself is pressed (a dimmed icon of a service that is off does nothing).
                 HStack(spacing: 6) {
-                    Button { PlayableIcon.play(page, reduceMotion: reduceMotion) } label: {
+                    Button { if all.isOn(page) { PlayableIcon.play(page, reduceMotion: reduceMotion) } } label: {
                         icon(page).frame(width: 26, height: 24).contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
