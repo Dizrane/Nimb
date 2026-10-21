@@ -46,7 +46,6 @@ struct WarpPage: View {
                     if let message = warp.errorMessage {
                         NoticeCard(lines: [message], color: Theme.bad, symbol: "xmark.octagon")
                     }
-                    if warp.isInstalled && !warp.passwordless && !warp.isWorking { passwordHint }
                     if warp.isInstalled && !warp.isWorking { removeRow }
                     sitesRow
             }
@@ -114,20 +113,6 @@ struct WarpPage: View {
                 OutlineButton(title: "Проверить YouTube и Discord", color: Theme.textPrimary, action: warp.runChecks)
                     .disabled(warp.isChecking)
             }
-        }
-        .card()
-    }
-
-    /// The tunnel asks for the administrator password each time; the person may allow it without.
-    private var passwordHint: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Text("Включение туннеля каждый раз просит пароль. Можно разрешить включать и выключать его без пароля.")
-                .font(Typo.small)
-                .foregroundStyle(Theme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 4)
-            OutlineButton(title: "Без пароля", color: Theme.textPrimary) { warp.setPasswordless(true) }
-                .disabled(warp.isSettingAccess)
         }
         .card()
     }
