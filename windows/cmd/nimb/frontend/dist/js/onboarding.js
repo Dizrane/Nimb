@@ -178,7 +178,7 @@ export class Onboarding {
     }
     if (step === 3) {
       const s = S.media;
-      return head('YouTube и Discord', 'Nimb создаст для этого компьютера собственный анонимный аккаунт Cloudflare WARP и включит туннель. Личных данных он не передаёт.')
+      return head('YouTube и Discord', 'Nimb создаст для этого компьютера собственный анонимный аккаунт Cloudflare WARP и включит туннель. Личных данных он не передаёт. Пока туннель включён, через Cloudflare идёт весь трафик компьютера: если не открывается банк или Госуслуги, выключите его.')
         + (s.on ? done('Туннель работает') + next()
           : s.busy ? busy('Включаю…')
           : go('media', 'Включить', !S.serviceOk) + `<div class="sm" style="text-align:center;font-size:12px;color:var(--t2)">Включая, вы принимаете условия Cloudflare WARP.</div>

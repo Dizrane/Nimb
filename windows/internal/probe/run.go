@@ -110,6 +110,11 @@ func each(n int, f func(i int)) {
 	wg.Wait()
 }
 
+// Resolve is resolve for other programs: the IPv4 addresses that the servers give for host (the first server that answers).
+func (p *Prober) Resolve(ctx context.Context, host string, servers []string) []string {
+	return p.resolve(ctx, host, servers)
+}
+
 // resolve gives the IPv4 answers of the provider's own DNS server for host; the second server is a fallback.
 func (p *Prober) resolve(ctx context.Context, host string, servers []string) []string {
 	port := or(p.DNSPort, "53")

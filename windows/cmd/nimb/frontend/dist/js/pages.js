@@ -87,20 +87,25 @@ export class AIPage {
         ${a.provider === best.id ? '<span class="chosen"><svg viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 6.5l2.5 2.5 4.5-5"/></svg>Выбран</span>'
           : `<button class="btn warnbtn" data-a="prov" data-v="${best.id}" data-f="bestsel" id="bestsel" ${pr.running || a.busy ? 'disabled' : ''}>Выбрать</button>`}</div>` : '';
     const locked = pr.running || a.busy;
+    // After the check the cards stand two by two (as far as the width lets them) and all have the same two lines at the top: the name and
+    // the choice, then «активен» and the speed. Before it each card is one line.
+    const two = pr.reports.length > 0;
     const cards = S.providers.map((p) => {
-      const sel = p.id === a.provider, r = view[p.id], isBest = best && best.id === p.id;
+      const sel = p.id === a.provider, r = view[p.id], isBest = best && best.id === p.id, active = sel && a.on;
+      const radio = `<span class="radio" style="border-color:rgba(255,255,255,${sel ? 0.9 : 0.28})">${sel ? '<i></i>' : ''}</span>`;
+      const gem = isBest ? '<span class="gem" title="Лучший по итогам проверки">◆</span>' : '';
       const row = `<button class="prov" role="radio" aria-checked="${sel}" data-a="prov" data-v="${p.id}" data-f="prov-${p.id}" id="prov-${p.id}" ${locked ? 'disabled' : ''}>
-        <span class="nm">${esc(p.name)}</span>${isBest ? '<span class="gem" title="Лучший по итогам проверки">◆</span>' : ''}${sel && a.on ? '<span class="on">· активен</span>' : ''}<span class="grow"></span>
-        ${r ? speed(r.median ?? null) + '<span class="ispace"></span>' : ''}
-        <span class="radio" style="border-color:rgba(255,255,255,${sel ? 0.9 : 0.28})">${sel ? '<i></i>' : ''}</span></button>`;
+        <span class="nm">${esc(p.name)}</span>${two ? '' : gem + (active ? '<span class="on">· активен</span>' : '')}<span class="grow"></span>${two ? gem : ''}${radio}</button>`;
       const info = r ? `<button class="info" data-a="det" data-v="${p.id}" data-f="det-${p.id}" id="det-${p.id}" aria-label="Подробности проверки" aria-expanded="${this.open === p.id}" title="Подробности проверки">
         <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><circle cx="8" cy="8" r="6.5"/><path d="M8 7.2v4.2M8 4.6v.1" stroke-linecap="round"/></svg></button>` : '';
+      // the second line takes the click of the mouse too (the first line is the button for the keyboard)
+      const second = two ? `<div class="r2" ${locked ? '' : `data-a="prov" data-v="${p.id}"`}>${active ? '<span class="on">активен</span>' : ''}<span class="grow"></span>${r ? speed(r.median ?? null) : ''}${info}</div>` : '';
       const pills = r ? `<div class="pills">${r.services.map(pill).join('')}</div>` : '';
-      return `<div class="provc ${sel ? 'sel' : ''} ${locked ? 'dim' : ''}">${row}${info}${pills}${r && this.open === p.id ? details(r, p.name) : ''}</div>`;
+      return `<div class="provc ${sel ? 'sel' : ''} ${locked ? 'dim' : ''} ${two ? 'c' : ''}">${row}${second}${pills}${r && this.open === p.id ? details(r, p.name) : ''}</div>`;
     }).join('');
     const warnings = (a.warnings || []).map((w) => notice(w, 'warn')).join('');
     setHTML(this.right, `<div class="prov-head"><div class="label">DNS-провайдеры</div>${button}</div>${banner}
-      <div class="grid" role="radiogroup" aria-label="DNS-провайдеры">${cards}</div>${warnings}${notice(a.error)}`);
+      <div class="grid ${two ? 'two-up' : ''}" role="radiogroup" aria-label="DNS-провайдеры">${cards}</div>${warnings}${notice(a.error)}`);
   }
   destroy() { this.hero.destroy(); }
 }
@@ -152,12 +157,12 @@ export class MediaPage {
     this.hero.update({
       on: m.on, busy: m.busy, disabled: m.busy || !S.serviceOk,
       title: m.busy ? 'Подождите' : m.on ? 'Включено' : 'Выключено',
-      subtitle: m.busy ? (m.on ? 'Выключаю туннель…' : 'Включаю туннель…') : m.on ? 'Трафик идёт через Cloudflare WARP.' : 'Включите, чтобы открывались YouTube и Discord. Всё настроится само.',
+      subtitle: m.busy ? (m.on ? 'Выключаю туннель…' : 'Включаю туннель…') : m.on ? 'Весь трафик этого компьютера идёт через Cloudflare WARP. Если не открывается банк или Госуслуги, выключите туннель.' : 'Включите, чтобы открывались YouTube и Discord. Всё настроится само.',
       label: m.on ? 'Выключить туннель WARP' : 'Включить туннель WARP',
     });
     if (same(this, 'rj', [m.on, m.error])) return;
     const first = m.on ? '' : `<div class="card"><div class="nm">Что произойдёт при включении</div>
-      <div class="sm" style="line-height:1.45">Nimb создаст для этого компьютера анонимный аккаунт Cloudflare WARP. Включая, вы принимаете условия Cloudflare WARP.</div>
+      <div class="sm" style="line-height:1.45">Nimb создаст для этого компьютера анонимный аккаунт Cloudflare WARP. Пока туннель включён, через Cloudflare идёт весь трафик компьютера, и некоторые сайты, например банки и Госуслуги, могут не открываться: тогда выключите туннель. Включая, вы принимаете условия Cloudflare WARP.</div>
       <button class="link" data-a="terms" data-f="terms" id="terms" style="margin-top:4px;color:#6ea8ff">Условия Cloudflare WARP</button></div>`;
     const sites = `<div style="display:flex;align-items:center;gap:4px;padding:0 2px"><span style="font-size:12px;color:var(--t2)">Туннель даёт доступ и к другим сервисам</span>
       <button data-a="sites" data-f="sites" id="sites" aria-label="Что ещё открывает туннель" title="Что ещё открывает туннель" style="width:20px;height:22px;display:flex;align-items:center;justify-content:center;color:var(--t2)">
@@ -189,15 +194,24 @@ export function showSites() {
 
 // ---------------------------------------------------------------------------------------------------------------- Settings
 
+/** The switch for the notifications about new versions; the test button is there only while they are on. */
+function notifyCard(S, extra) {
+  const on = S.update.notify;
+  return `<div class="card row"><div class="grow"><div class="nm">Уведомления об обновлениях</div><div class="sm">Nimb скажет, когда выйдет новая версия.</div>
+    ${on ? `<button class="btn" style="margin-top:8px" data-a="notifytest" data-f="notifytest" id="notifytest" aria-label="Отправить тестовое уведомление" ${extra.testSent ? 'disabled' : ''}>${extra.testSent ? 'Отправлено' : 'Отправить тестовое уведомление'}</button>` : ''}</div>
+    <button class="pill ${on ? 'on' : ''}" role="switch" aria-checked="${on}" aria-label="Уведомления об обновлениях" data-a="notify" data-f="notify" id="notify"></button></div>`;
+}
+
 export class SettingsPage {
   constructor(actions) { this.actions = actions; }
   mount(root) { root.innerHTML = shell('Настройки', '<div class="settings" id="body"></div>'); this.body = root.querySelector('#body'); }
   update(S, extra) {
-    if (same(this, 'rj', [extra.autostart, S.version])) return;
+    if (same(this, 'rj', [extra.autostart, S.version, S.update.notify, extra.testSent])) return;
     const card = (title, text, button) => `<div class="card row"><div class="grow"><div class="nm">${title}</div><div class="sm">${text}</div></div>${button}</div>`;
     setHTML(this.body, `<div class="col">
         <div class="group"><div class="label" style="padding:0 2px">Работа</div>
           ${card('Работа в фоне', 'Закрытие окна не выключает Nimb: он остаётся у часов. Выйти можно из меню значка или кнопкой справа.', '<button class="btn" data-a="quit" data-f="quit" id="quit">Выйти из Nimb</button>')}
+          ${notifyCard(S, extra)}
           ${card('Запускать вместе с Windows', 'Nimb стартует тихо, значком у часов.', `<button class="pill ${extra.autostart ? 'on' : ''}" role="switch" aria-checked="${extra.autostart}" aria-label="Запускать вместе с Windows" data-a="autostart" data-f="autostart" id="autostart"></button>`)}
         </div>
         <div class="group"><div class="label" style="padding:0 2px">Помощь</div>

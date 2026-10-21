@@ -12,6 +12,7 @@ let page = 'home';            // home, ai, telegram, media, settings, report
 let current = null;           // the object of the page that is shown
 let onb = null;               // the first setup, while it is shown
 let rep = null;               // the report about a problem
+let testSent = false;         // the test notification was just sent: the button says so for 3 seconds
 let autostart = false;        // whether Nimb starts with Windows (read when the settings open)
 let prevOn = null;            // what worked at the last look, to play an icon when a service goes on
 const icons = {};             // the animated icons of the sidebar
@@ -36,7 +37,7 @@ function buildShell() {
         <button class="rl" data-a="nav" data-v="settings" data-f="nav-settings" id="nav-settings">Настройки</button></div></div>
     </nav>
     <main class="main"><div id="banner"></div><div id="content" style="flex:1;min-height:0;display:flex;flex-direction:column"></div>
-      <div class="foot"><span id="version"></span><button data-a="channel" data-f="channel" id="channel">Канал в Telegram ↗</button></div></main>`;
+      <div class="foot"><span id="version"></span><span id="upd"></span><button data-a="channel" data-f="channel" id="channel">Канал в Telegram ↗</button></div></main>`;
 
   for (const k of ORDER) {
     icons[k] = new IconView(SV[k].icon, 32, () => !S || !S[k].on);
@@ -55,8 +56,16 @@ function buildShell() {
 function updateShell() {
   document.getElementById('version').textContent = `Версия ${S.version}`;
   const banner = document.getElementById('banner');
-  const text = S.serviceOk ? '' : S.serviceError;
+  const text = S.serviceOk ? (S.update.error || '') : S.serviceError;
   if (banner.dataset.text !== text) { banner.dataset.text = text; banner.innerHTML = text ? `<div class="banner" role="alert">${esc(text)}</div>` : ''; }
+  // A newer version: the button at the bottom of the window, as on the Mac. While it is being installed it says what goes on.
+  const u = S.update, upd = document.getElementById('upd');
+  const key = u.installing ? `i|${u.installing}` : u.available ? `a|${u.version}` : '';
+  if (upd.dataset.key !== key) {
+    upd.dataset.key = key;
+    upd.innerHTML = u.installing ? `<span class="upd busy"><span class="spin"></span>${esc(u.installing)}</span>`
+      : u.available ? `<button class="upd" data-a="update" data-f="update" id="update">Обновить до ${esc(u.version)}</button>` : '';
+  }
   const sel = page === 'report' ? 'settings' : page;
   for (const id of ['home', ...ORDER, 'settings']) document.getElementById(`row-${id}`).classList.toggle('sel', id === sel);
   for (const k of ORDER) {
@@ -90,7 +99,7 @@ function showPage(name) {
 function render() {
   if (!S) return;
   updateShell();
-  current.update(S, { autostart });
+  current.update(S, { autostart, testSent });
   if (onb) onb.update(S, { autostart });
 }
 
@@ -190,6 +199,9 @@ document.addEventListener('click', async (e) => {
     case 'openTg': { const r = await api().OpenTelegram(); if (!r.ok) note(r.error); break; }
     case 'copy': { const r = await api().CopyLink(); note(r.ok ? 'Ссылка скопирована' : r.error); break; }
     case 'channel': api().OpenChannel(); break;
+    case 'notify': { S.update.notify = !S.update.notify; render(); await api().SetNotify(S.update.notify); await refresh(); break; }
+    case 'notifytest': { const r = await api().SendTestNotification(); if (r.ok) { testSent = true; render(); setTimeout(() => { testSent = false; render(); }, 3000); } break; }
+    case 'update': { S.update.installing = 'Загрузка…'; render(); await api().InstallUpdate(); await refresh(); break; }
     case 'terms': api().OpenTerms(); break;
     case 'sites': showSites(); break;
     case 'quit': api().Quit(); break;

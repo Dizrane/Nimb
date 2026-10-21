@@ -12,6 +12,9 @@ import (
 	"github.com/Dizrane/Nimb/windows/internal/version"
 )
 
+// serviceLogLines is how much of the log of the service goes to the window (the report makes the events of the day of it).
+const serviceLogLines = 300
+
 // diag is what the service tells for a report about a problem: its version, the state of the adapters and of the tunnel, and the
 // end of its own log. No keys, no tokens, no contents of the files of the account.
 func (h *Helper) diag() []string {
@@ -50,7 +53,7 @@ func (h *Helper) diag() []string {
 			lines = append(lines, "Подходящих сетевых подключений (Wi-Fi, Ethernet) нет")
 		}
 	}
-	if tail := tailFile(filepath.Join(h.dir, "service.log"), 40); len(tail) > 0 {
+	if tail := tailFile(filepath.Join(h.dir, "service.log"), serviceLogLines); len(tail) > 0 {
 		lines = append(lines, "", "Журнал службы:")
 		lines = append(lines, tail...)
 	}

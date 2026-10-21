@@ -22,6 +22,8 @@ import (
 	"github.com/Dizrane/Nimb/windows/internal/dnsx"
 	"github.com/Dizrane/Nimb/windows/internal/ipc"
 	"github.com/Dizrane/Nimb/windows/internal/tunnel"
+	"github.com/Dizrane/Nimb/windows/internal/tunneldrop"
+	"github.com/Dizrane/Nimb/windows/internal/version"
 	"github.com/Dizrane/Nimb/windows/internal/warp"
 )
 
@@ -50,6 +52,11 @@ type Helper struct {
 	backup  *dnsx.Backup
 	watch   *dnsWatcher
 	started time.Time
+
+	// stopWatch is closed when the tunnel is taken down by hand, so that the end of its program is not taken for a stop by itself (see
+	// package tunneldrop). drop is the note of the last time the tunnel stopped by itself.
+	stopWatch chan struct{}
+	drop      *tunneldrop.Note
 }
 
 // New prepares the folder (closed to everybody but the system and the administrators) and returns a helper.
@@ -62,6 +69,7 @@ func New(dir string, logf func(string, ...any)) (*Helper, error) {
 	}
 	h := &Helper{dir: dir, logf: logf, started: time.Now()}
 	h.backup = h.loadBackup()
+	h.drop = h.loadDrop()
 	h.startWatching()
 	return h, nil
 }
@@ -85,7 +93,7 @@ func (h *Helper) Handle(ctx context.Context, req ipc.Request) ipc.Response {
 	case ipc.Status:
 		return ipc.Response{OK: true, Tunnel: h.status(), DNS: h.dnsStatus()}
 	case ipc.Diag:
-		return ipc.Response{OK: true, Lines: h.diag()}
+		return ipc.Response{OK: true, Lines: h.diag(), Version: version.Version}
 	case ipc.DNSSet:
 		provider, ok := dnsx.Find(req.Provider)
 		if !ok {
@@ -128,6 +136,9 @@ func (h *Helper) status() *ipc.TunnelStatus {
 		}
 		st.Received, st.Sent = h.tun.Counters()
 	}
+	if h.drop != nil {
+		st.DroppedAt, st.DropReason = h.drop.When.Unix(), h.drop.Reason
+	}
 	return st
 }
 
@@ -152,14 +163,68 @@ func (h *Helper) up(ctx context.Context) error {
 		return err
 	}
 	h.tun = t
+	h.clearDrop()
+	h.watchTunnel(t)
 	return nil
 }
 
 func (h *Helper) down() {
+	if h.stopWatch != nil {
+		close(h.stopWatch)
+		h.stopWatch = nil
+	}
 	if h.tun != nil {
 		h.tun.Close()
 		h.tun = nil
 	}
+}
+
+func (h *Helper) dropPath() string { return filepath.Join(h.dir, "tunnel.dropped") }
+
+func (h *Helper) loadDrop() *tunneldrop.Note {
+	raw, err := os.ReadFile(h.dropPath())
+	if err != nil {
+		return nil
+	}
+	if n, ok := tunneldrop.ParseNote(string(raw)); ok {
+		return &n
+	}
+	return nil
+}
+
+// clearDrop forgets the note: the tunnel is up again.
+func (h *Helper) clearDrop() {
+	h.drop = nil
+	os.Remove(h.dropPath())
+}
+
+// watchTunnel looks after the tunnel that has just come up: if its program ends without being asked to, the tunnel is cleaned up.
+func (h *Helper) watchTunnel(t *tunnel.Tunnel) {
+	stop := make(chan struct{})
+	h.stopWatch = stop
+	go func() {
+		if tunneldrop.Unexpected(stop, t.Exited()) {
+			h.tunnelEnded(t, stop)
+		}
+	}()
+}
+
+// tunnelEnded: the program of the tunnel ended by itself. The note goes first (the window tells the person what happened), then the
+// routes (the internet goes on working), then the rest: DNS of the adapter, the adapter. Nothing else ever takes the tunnel down.
+func (h *Helper) tunnelEnded(t *tunnel.Tunnel, stop chan struct{}) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.tun != t || h.stopWatch != stop {
+		return // taken down by hand in the meantime
+	}
+	h.logf("the program of the tunnel ended by itself: taking the tunnel down")
+	note := tunneldrop.Note{When: time.Now(), Reason: tunneldrop.DaemonExited}
+	h.drop = &note
+	if err := os.WriteFile(h.dropPath(), []byte(note.Format()), 0o600); err != nil {
+		h.logf("the note of the stop: %v", err)
+	}
+	t.DropRoutes()
+	h.down()
 }
 
 // account returns the account of this installation, making one on the first use.

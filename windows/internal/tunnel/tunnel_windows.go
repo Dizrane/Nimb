@@ -199,6 +199,17 @@ func (t *Tunnel) Handshake() time.Time {
 	return time.Unix(sec, nsec)
 }
 
+// Exited is closed when the program of the tunnel (the daemon) has ended: by Close, or by itself.
+func (t *Tunnel) Exited() <-chan struct{} { return t.dev.Wait() }
+
+// DropRoutes removes the routes of the tunnel, so that the traffic goes through the real network again at once (Close does the
+// rest a moment later).
+func (t *Tunnel) DropRoutes() {
+	for _, family := range []winipcfg.AddressFamily{windows.AF_INET, windows.AF_INET6} {
+		t.luid.FlushRoutes(family)
+	}
+}
+
 // Counters returns the bytes received from and sent to the server.
 func (t *Tunnel) Counters() (rx, tx int64) {
 	text, err := t.dev.IpcGet()

@@ -23,6 +23,13 @@ type Settings struct {
 	Provider string `json:"provider"`
 	// OnboardingDone: the first setup was gone through (or skipped).
 	OnboardingDone bool `json:"onboardingDone"`
+	// TunnelDropSeen is the time (unix) of the last note of a tunnel that the service took down by itself and that the person was told
+	// about, so that the same drop is told once.
+	TunnelDropSeen int64 `json:"tunnelDropSeen,omitempty"`
+	// UpdateTold is the last version of Nimb that the person was told about with a notification (one for one version).
+	UpdateTold string `json:"updateTold,omitempty"`
+	// UpdateNotifyOff: the person turned the notifications about new versions off (they are on until then).
+	UpdateNotifyOff bool `json:"updateNotifyOff,omitempty"`
 }
 
 type settingsStore struct {

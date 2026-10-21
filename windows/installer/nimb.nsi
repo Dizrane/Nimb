@@ -10,6 +10,9 @@
 Unicode true
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
+!include "FileFunc.nsh"
+!insertmacro GetParameters
+!insertmacro GetOptions
 
 !ifndef ARCH
   !error "define ARCH"
@@ -115,6 +118,13 @@ Section "Nimb"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Nimb" "URLInfoAbout" "https://github.com/Dizrane/Nimb"
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Nimb" "NoModify" 1
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Nimb" "NoRepair" 1
+
+  ; An update that the window started (it passes /relaunch): the window comes back, as the person had it.
+  ${GetParameters} $R0
+  ${GetOptions} $R0 "/relaunch" $R1
+  ${IfNot} ${Errors}
+    Call LaunchNimb
+  ${EndIf}
 SectionEnd
 
 Section "Uninstall"

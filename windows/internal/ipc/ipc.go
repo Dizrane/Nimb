@@ -50,8 +50,9 @@ type Response struct {
 	Error  string        `json:"error,omitempty"` // worded for the person
 	Tunnel *TunnelStatus `json:"tunnel,omitempty"`
 	DNS    *DNSStatus    `json:"dns,omitempty"`
-	// Lines answer the command diag.
-	Lines []string `json:"lines,omitempty"`
+	// Lines answer the command diag; Version is the version of the service.
+	Lines   []string `json:"lines,omitempty"`
+	Version string   `json:"version,omitempty"`
 }
 
 // DNSStatus is the state of Smart DNS.
@@ -68,6 +69,10 @@ type TunnelStatus struct {
 	Received     int64 `json:"received"`
 	Sent         int64 `json:"sent"`
 	HasAccount   bool  `json:"hasAccount"`
+	// DroppedAt is the unix time at which the service took the tunnel down by itself (the server stopped answering), or 0; the
+	// window tells the person once. It stays until the tunnel is brought up again.
+	DroppedAt  int64  `json:"droppedAt,omitempty"`
+	DropReason string `json:"dropReason,omitempty"`
 }
 
 // Handler does what a command asks.

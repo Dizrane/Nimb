@@ -21,6 +21,7 @@ import (
 	"github.com/Dizrane/Nimb/windows/internal/dnsx"
 	"github.com/Dizrane/Nimb/windows/internal/ipc"
 	"github.com/Dizrane/Nimb/windows/internal/tgproxy"
+	"github.com/Dizrane/Nimb/windows/internal/tunneldrop"
 	"github.com/Dizrane/Nimb/windows/internal/version"
 )
 
@@ -42,7 +43,8 @@ type App struct {
 	reportID, reportFacts string
 	previousEndedBadly    bool
 
-	probe probeState // the check of the providers
+	probe probeState  // the check of the providers
+	upd   updateState // the look for a new version
 
 	hintMu sync.Mutex // the line about the DNS of Firefox
 	hint   string
@@ -66,6 +68,7 @@ func (a *App) startup(ctx context.Context) {
 		go a.startTelegram()
 	}
 	go a.watchTelegram()
+	go a.updateLoop()
 	startTray(a)
 }
 
@@ -127,9 +130,12 @@ type State struct {
 		Busy         bool   `json:"busy"`
 		Error        string `json:"error,omitempty"`
 		HandshakeAgo int    `json:"handshakeAgo"`
+		DroppedAt    int64  `json:"droppedAt,omitempty"`
+		DropReason   string `json:"dropReason,omitempty"`
 	} `json:"media"`
 	Providers []Provider `json:"providers"`
 	Probe     ProbeView  `json:"probe"`
+	Update    UpdateView `json:"update"`
 }
 
 func providerList() []Provider {
@@ -146,6 +152,8 @@ func (a *App) GetState() State {
 	st.Version = Version
 	st.Providers = providerList()
 	st.Probe = a.probe.view()
+	st.Update = a.upd.view()
+	st.Update.Notify = !a.settings.get().UpdateNotifyOff
 	st.AI.Warnings = []string{}
 	set := a.settings.get()
 	st.AI.Provider = set.Provider
@@ -177,6 +185,10 @@ func (a *App) GetState() State {
 		if resp.Tunnel != nil {
 			st.Media.On = resp.Tunnel.Up
 			st.Media.HandshakeAgo = resp.Tunnel.HandshakeAgo
+			st.Media.DroppedAt, st.Media.DropReason = resp.Tunnel.DroppedAt, resp.Tunnel.DropReason
+			if a.noticeDrop(resp.Tunnel) {
+				st.Media.Error = tunneldrop.MessageFor(resp.Tunnel.DropReason)
+			}
 		}
 	}
 	if a.tg != nil && a.tg.IsListening() {
@@ -186,6 +198,20 @@ func (a *App) GetState() State {
 		st.Telegram.Stats = a.tg.Stats()
 	}
 	return st
+}
+
+// noticeDrop: the tunnel stopped by itself (its program ended). The person is told once, on the page and in the
+// log (the message stays on the page until the next action, as on the Mac).
+func (a *App) noticeDrop(t *ipc.TunnelStatus) bool {
+	if t.Up || t.DroppedAt == 0 || !tunneldrop.IsNews(time.Unix(t.DroppedAt, 0), a.settings.get().TunnelDropSeen, time.Now()) {
+		return false
+	}
+	a.settings.update(func(s *Settings) { s.TunnelDropSeen = t.DroppedAt })
+	logLine("the tunnel stopped by itself: " + t.DropReason)
+	a.mu.Lock()
+	a.errs["media"] = tunneldrop.MessageFor(t.DropReason)
+	a.mu.Unlock()
+	return true
 }
 
 // Result is the answer to an action of the page.

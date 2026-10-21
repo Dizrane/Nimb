@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -14,6 +15,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -24,8 +26,10 @@ import (
 
 	"github.com/Dizrane/Nimb/windows/internal/dnsx"
 	"github.com/Dizrane/Nimb/windows/internal/ipc"
+	"github.com/Dizrane/Nimb/windows/internal/netfacts"
 	"github.com/Dizrane/Nimb/windows/internal/probe"
 	"github.com/Dizrane/Nimb/windows/internal/report"
+	"github.com/Dizrane/Nimb/windows/internal/tunneldrop"
 )
 
 // reportEnv says what names the person on this computer, so that a report can take it out.
@@ -56,16 +60,18 @@ type ReportPrep struct {
 	Facts string `json:"facts"`
 }
 
-// ReportPrepare collects the facts for a report (it takes a few seconds: it asks Cloudflare where the traffic leaves from).
+// ReportPrepare collects the facts for a report (it takes a while: it asks Cloudflare where the traffic leaves from and, when the
+// providers have not been checked lately, asks them).
 func (a *App) ReportPrepare() ReportPrep {
 	id := report.NewID()
 	st := a.GetState()
 	var out []string
 
+	_, offset := time.Now().Zone()
 	out = append(out, report.Section("Программа",
 		"Nimb для Windows "+Version,
 		"Windows "+windowsVersion()+", "+runtime.GOARCH,
-		"Язык системы: "+uiLanguage(),
+		"Язык системы: "+uiLanguage()+", часовой пояс UTC"+utcOffset(offset),
 		"Прошлый запуск закончился неожиданно: "+yesNo(a.previousEndedBadly),
 		"Автозапуск с Windows: "+yesNo(autostartOn()),
 	))
@@ -85,8 +91,45 @@ func (a *App) ReportPrepare() ReportPrep {
 	)
 	out = append(out, report.Section("Сервисы", svc...))
 
+	// The three things that are asked of the system, side by side (they all wait for the network).
+	var trace map[string]string
+	var probed []probe.ProviderReport
+	var diag *ipc.Response
+	var system, provider []string
+	host := probe.All[0].Host
+	var wg sync.WaitGroup
+	wg.Add(4)
+	go func() { defer wg.Done(); trace = cloudflareTrace() }()
+	go func() { defer wg.Done(); probed = a.probeForReport() }()
+	go func() {
+		defer wg.Done()
+		if resp, err := callService(ipc.Request{Cmd: ipc.Diag}); err == nil {
+			diag = &resp
+		}
+	}()
+	go func() { defer wg.Done(); system, provider = a.dnsAnswers(host, st.AI.On, st.AI.Provider) }()
+	wg.Wait()
+
+	adapters, _ := dnsx.Adapters()
+	var active *dnsx.Provider
+	if p, ok := dnsx.Find(st.AI.Provider); ok && st.AI.On {
+		active = &p
+	}
+	routes, via, viaTunnel := netfacts.Routes("Nimb")
+	dropped := ""
+	if st.Media.DroppedAt > 0 && time.Since(time.Unix(st.Media.DroppedAt, 0)) < tunneldrop.NewsFor {
+		dropped = st.Media.DropReason + " в " + time.Unix(st.Media.DroppedAt, 0).Format("01-02 15:04")
+	}
+	tg := st.Telegram.Stats
+	out = append(out, report.Section("Что ждали и что увидели", joinLines(
+		report.DNS(report.DNSFacts{Active: active, Adapters: adapters, Host: host, SystemAnswer: system, SystemFailed: system == nil && st.AI.On, ProviderAnswer: provider}).Lines(),
+		report.Telegram(report.TelegramFacts{Running: st.Telegram.On, Port: st.Telegram.Port, Listening: st.Telegram.On, Total: tg.Total, Failures: tg.Failures,
+			WrongSecret: tg.WrongSecret, WebSocket: tg.WebSocket, Direct: tg.DirectTCP}).Lines(),
+		report.Tunnel(report.TunnelFacts{On: st.Media.On, Routes: routes, Via: via, ViaTunnel: viaTunnel, Warp: trace["warp"], Dropped: dropped}).Lines(),
+	)...))
+
 	var shown []string
-	for _, e := range []string{st.AI.Error, st.Telegram.Error, st.Media.Error, st.ServiceError} {
+	for _, e := range []string{st.AI.Error, st.Telegram.Error, st.Media.Error, st.ServiceError, st.Update.Error} {
 		if e != "" {
 			shown = append(shown, e)
 		}
@@ -94,36 +137,67 @@ func (a *App) ReportPrepare() ReportPrep {
 	if len(shown) > 0 {
 		out = append(out, report.Section("Ошибки на экране", shown...))
 	}
-
-	out = append(out, report.Section("Сеть", cloudflareFacts()...))
-
-	// Which names go through which connection and which DNS: what keeps Smart DNS from working shows here (DNS of IPv6, other
-	// connections with a DNS of their own).
-	if facts, err := dnsx.Describe(); err == nil {
-		var lines []string
-		for _, f := range facts {
-			lines = append(lines, f.Line())
-		}
-		out = append(out, report.Section("Подключения и их DNS", lines...))
-	}
 	if hint := a.browserHint(); hint != "" {
-		out = append(out, report.Section("Браузер", "Firefox установлен, «DNS через HTTPS» в нём не выключен"))
+		out = append(out, report.Section("Предупреждения DNS", "Firefox установлен, «DNS через HTTPS» в нём не выключен"))
 	}
-
-	probed := a.probeForReport()
 	if len(probed) > 0 {
 		out = append(out, report.Section("Проверка DNS", probe.Lines(probed)...))
 	}
 
-	if resp, err := callService(ipc.Request{Cmd: ipc.Diag}); err == nil && len(resp.Lines) > 0 {
-		out = append(out, report.Section("Служба", resp.Lines...))
+	out = append(out, report.Section("Сеть", cloudflareLine(trace)))
+	// Which names go through which connection and which DNS: what keeps Smart DNS from working shows here (DNS of IPv6, other
+	// connections with a DNS of their own).
+	vpns := 0
+	if facts, err := dnsx.Describe(); err == nil {
+		var lines []string
+		for _, f := range facts {
+			lines = append(lines, f.Line())
+			if f.Up && !f.Hardware && !report.IsGenericConnection(f.Name) && f.Kind != "петля" {
+				vpns++
+			}
+		}
+		out = append(out, report.Section("Подключения и их DNS", lines...))
 	}
+	serviceVersion := ""
+	if diag != nil {
+		serviceVersion = diag.Version
+	}
+	wininet, wininetServer, wininetPAC := netfacts.WinINet()
+	winhttp, winhttpServer, winhttpPAC := netfacts.WinHTTP()
+	domains := []string{"telegram.org", "t.me", "youtube.com", "discord.com"}
+	for _, t := range probe.All {
+		domains = append(domains, t.Host)
+	}
+	out = append(out, report.Section("Что могло помешать", report.Interference(report.InterferenceFacts{
+		WinINet: report.ProxyKinds(wininet, wininetServer, wininetPAC), WinHTTP: report.ProxyKinds(winhttp, winhttpServer, winhttpPAC),
+		VPNs: vpns, Hosts: report.HostsMentions(netfacts.Hosts(), domains), WindowVersion: Version, ServiceVersion: serviceVersion, UTCOffset: utcOffset(offset),
+	})...))
 
-	log := tailLog(filepath.Join(dataDir(), "window.log"), 60)
-	if len(log) == 0 {
-		log = []string{"пусто"}
+	// The service says what it is and then its log: the log goes into the chronology, the head stays as it is.
+	var serviceHead, serviceLog []string
+	if diag != nil {
+		serviceHead = diag.Lines
+		for i, l := range diag.Lines {
+			if l == "Журнал службы:" {
+				serviceHead, serviceLog = diag.Lines[:i], diag.Lines[i+1:]
+				break
+			}
+		}
+		if len(serviceHead) > 0 {
+			out = append(out, report.Section("Служба", serviceHead...))
+		}
 	}
-	out = append(out, report.Section("Журнал окна (последние строки)", log...))
+	windowLog := tailLog(filepath.Join(dataDir(), "window.log"), 500)
+	events := append(report.ParseLog("окно", windowLog, time.Local), report.ParseLog("служба", serviceLog, time.Local)...)
+	out = append(out, report.Section("Хронология (последние сутки)", report.Events(events, time.Now(), 24*time.Hour, 40)...))
+	raw := windowLog
+	if len(raw) > 30 {
+		raw = raw[len(raw)-30:]
+	}
+	if len(raw) == 0 {
+		raw = []string{"пусто"}
+	}
+	out = append(out, report.Section("Журнал окна (последние строки)", raw...))
 
 	env := reportEnv()
 	env.Public = probe.Addresses(probed)
@@ -132,6 +206,45 @@ func (a *App) ReportPrepare() ReportPrep {
 	a.reportID, a.reportFacts = id, facts
 	a.mu.Unlock()
 	return ReportPrep{ID: id, Facts: facts}
+}
+
+func joinLines(parts ...[]string) []string {
+	var out []string
+	for _, p := range parts {
+		out = append(out, p...)
+	}
+	return out
+}
+
+func utcOffset(seconds int) string {
+	sign := "+"
+	if seconds < 0 {
+		sign, seconds = "-", -seconds
+	}
+	s := sign + strconv.Itoa(seconds/3600)
+	if m := seconds / 60 % 60; m != 0 {
+		s += fmt.Sprintf(":%02d", m)
+	}
+	return s
+}
+
+// dnsAnswers asks the system for host the way a program does, and the provider of Smart DNS for the same name. system is nil when the
+// system gave nothing; provider is nil when Smart DNS is off or the provider did not answer.
+func (a *App) dnsAnswers(host string, on bool, providerID string) (system, provider []string) {
+	if !on {
+		return nil, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	if ips, err := net.DefaultResolver.LookupIP(ctx, "ip4", host); err == nil {
+		for _, ip := range ips {
+			system = append(system, ip.String())
+		}
+	}
+	if p, ok := dnsx.Find(providerID); ok {
+		provider = (&probe.Prober{}).Resolve(ctx, host, p.Addresses)
+	}
+	return system, provider
 }
 
 func (a *App) reportText(description, contact string) (id, text string) {
@@ -232,25 +345,38 @@ func uiLanguage() string {
 	return "?"
 }
 
-// cloudflareFacts asks Cloudflare where the traffic leaves from (warp=on means through the tunnel).
-func cloudflareFacts() []string {
+// cloudflareTrace asks Cloudflare where the traffic leaves from (warp=on means through the tunnel); nil when it does not answer.
+func cloudflareTrace() map[string]string {
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancel()
 	req, _ := http.NewRequestWithContext(ctx, "GET", "https://www.cloudflare.com/cdn-cgi/trace", nil)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return []string{"Cloudflare не ответил за 6 секунд (интернета нет или он закрыт)"}
+		return nil
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
-	var facts []string
+	facts := map[string]string{}
 	for _, line := range strings.Split(string(raw), "\n") {
 		k, v, ok := strings.Cut(strings.TrimSpace(line), "=")
 		if ok && (k == "warp" || k == "loc" || k == "colo" || k == "http") {
-			facts = append(facts, k+"="+v)
+			facts[k] = v
 		}
 	}
-	return []string{"Cloudflare: " + strings.Join(facts, ", ")}
+	return facts
+}
+
+func cloudflareLine(facts map[string]string) string {
+	if facts == nil {
+		return "Cloudflare не ответил за 6 секунд (интернета нет или он закрыт)"
+	}
+	var parts []string
+	for _, k := range []string{"colo", "http", "loc", "warp"} {
+		if v, ok := facts[k]; ok {
+			parts = append(parts, k+"="+v)
+		}
+	}
+	return "Cloudflare: " + strings.Join(parts, ", ")
 }
 
 func tailLog(path string, n int) []string {
