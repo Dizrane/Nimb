@@ -81,11 +81,30 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
         AppLog.shared.add("notifications", "показал уведомление о версии \(version)")
     }
 
+    /// The person asked to see that notifications work (the button in the settings).
+    func sendTest() {
+        guard let center, isOn else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Проверка уведомлений"
+        content.body = "Если вы это видите, Nimb сможет сказать о новой версии."
+        center.add(UNNotificationRequest(identifier: Self.testIdentifier, content: content, trigger: nil)) { error in
+            if let error { AppLog.shared.add("notifications", "проверочное уведомление не показано: \(error.localizedDescription)") }
+        }
+        AppLog.shared.add("notifications", "показал проверочное уведомление")
+    }
+
+    static let testIdentifier = "nimb-test"
+
+    /// In front, the window already shows the button: no banner. The test one is the exception: it is asked for in that very window.
+    nonisolated static func showsBanner(identifier: String, appIsActive: Bool) -> Bool {
+        identifier == testIdentifier || !appIsActive
+    }
+
     // MARK: UNUserNotificationCenterDelegate
 
-    /// In front, the window already shows the button: no banner.
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        await MainActor.run { NSApp.isActive } ? [] : [.banner]
+        let active = await MainActor.run { NSApp.isActive }
+        return Self.showsBanner(identifier: notification.request.identifier, appIsActive: active) ? [.banner] : []
     }
 
     /// A click on the banner opens the window.
@@ -97,6 +116,7 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
 /// The switch for it, in the first set-up and in the settings.
 struct NotificationsCard: View {
     @ObservedObject private var notifier = Notifier.shared
+    @StateObject private var justSent = Flag()
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -110,6 +130,16 @@ struct NotificationsCard: View {
                     .font(Typo.small)
                     .foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
+                if notifier.isOn {
+                    OutlineButton(title: justSent.value ? "Отправлено" : "Отправить тестовое уведомление", color: Theme.textPrimary) {
+                        notifier.sendTest()
+                        justSent.value = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { justSent.value = false }
+                    }
+                    .disabled(justSent.value)
+                    .padding(.top, 5)
+                    .accessibilityLabel("Отправить тестовое уведомление")
+                }
             }
             Spacer(minLength: 8)
             PillSwitch(label: "Уведомления об обновлениях", isOn: notifier.isOn) { notifier.setOn(!notifier.isOn) }

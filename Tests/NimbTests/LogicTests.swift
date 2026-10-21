@@ -313,6 +313,18 @@ import Testing
 }
 
 /// One notification for one version, however often the check runs.
+@Suite struct NotifierBannerTests {
+    @Test func testNotificationShowsEvenInFront() {
+        #expect(Notifier.showsBanner(identifier: Notifier.testIdentifier, appIsActive: true))
+        #expect(Notifier.showsBanner(identifier: Notifier.testIdentifier, appIsActive: false))
+    }
+
+    @Test func updateNotificationIsHiddenInFront() {
+        #expect(!Notifier.showsBanner(identifier: "nimb-update", appIsActive: true))
+        #expect(Notifier.showsBanner(identifier: "nimb-update", appIsActive: false))
+    }
+}
+
 @Suite struct UpdateNoticeTests {
     @Test func theFirstTimeTellsAboutTheVersion() {
         #expect(UpdateNotice.shouldTell(version: "0.9.6", lastTold: nil))
