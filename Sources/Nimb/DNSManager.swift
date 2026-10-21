@@ -394,12 +394,16 @@ enum DNSManager {
         try process.run()
         let timedOut = TimedOut()
         if let timeout {
-            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+            // A thread of its own: the pool of the dispatch queues may be full of requests that wait (the check of the providers), and a
+            // time out that waits for a free thread is no time out.
+            Thread.detachNewThread {
+                Thread.sleep(forTimeInterval: timeout)
                 guard process.isRunning else { return }
                 timedOut.set()
                 process.terminate()
                 // A command that ignores the polite request is not waited for.
-                DispatchQueue.global().asyncAfter(deadline: .now() + 1) { if process.isRunning { kill(process.processIdentifier, SIGKILL) } }
+                Thread.sleep(forTimeInterval: 1)
+                if process.isRunning { kill(process.processIdentifier, SIGKILL) }
             }
         }
         let outData = out.fileHandleForReading.readDataToEndOfFile()

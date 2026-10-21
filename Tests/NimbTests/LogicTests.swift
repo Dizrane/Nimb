@@ -757,3 +757,48 @@ import Testing
         #expect(!LoginLaunch.wasLaunchedAtLogin(nil))
     }
 }
+
+/// What the check of the providers reads from curl: a trailer after the page, and whether a connection was made.
+@Suite struct ProbeTrailerTests {
+    @Test func readsTheTrailerAfterThePage() throws {
+        let result = try #require(ServiceProbe.splitTrailer("HTTP/2 200\r\n\r\nbody\n@@NIMB@@200 0.512 1234 0.130"))
+        #expect(result.head == "HTTP/2 200\r\n\r\nbody\n")
+        #expect(result.trailer == ServiceProbe.Trailer(code: 200, seconds: 0.512, size: 1234, connected: true))
+    }
+
+    @Test func noConnectionMeansADeadAddress() throws {
+        let result = try #require(ServiceProbe.splitTrailer("\n@@NIMB@@000 0.000000 0 0.000000"))
+        #expect(!result.trailer.connected)
+        #expect(result.trailer.code == 0)
+    }
+
+    @Test func aConnectionThatThenFailedIsNotADeadAddress() throws {
+        let result = try #require(ServiceProbe.splitTrailer("\n@@NIMB@@000 0.000000 0 0.041"))
+        #expect(result.trailer.connected, "the address answered, the page did not come: not the same as a dead one")
+    }
+
+    @Test func aTrailerOfAnOtherShapeIsNothing() {
+        #expect(ServiceProbe.splitTrailer("") == nil)
+        #expect(ServiceProbe.splitTrailer("page without a trailer") == nil)
+        #expect(ServiceProbe.splitTrailer("\n@@NIMB@@200 0.5 10") == nil, "the old trailer had three fields")
+    }
+
+    @Test func theLanesRunEverythingOnceWhateverTheirNumber() {
+        let lock = NSLock()
+        var seen = [Int](repeating: 0, count: 50)
+        ServiceProbe.inLanes(50, lanes: 4, laneOf: { $0 % 4 }, perLane: 3) { i in lock.lock(); seen[i] += 1; lock.unlock() }
+        #expect(seen.allSatisfy { $0 == 1 })
+    }
+
+    @Test func aLaneIsNeverAskedForMoreThanItsNumberAtOnce() {
+        let lock = NSLock()
+        var now = [Int](repeating: 0, count: 3), most = [Int](repeating: 0, count: 3)
+        ServiceProbe.inLanes(60, lanes: 3, laneOf: { $0 % 3 }, perLane: 4) { i in
+            let lane = i % 3
+            lock.lock(); now[lane] += 1; most[lane] = max(most[lane], now[lane]); lock.unlock()
+            Thread.sleep(forTimeInterval: 0.01)
+            lock.lock(); now[lane] -= 1; lock.unlock()
+        }
+        #expect(most.allSatisfy { $0 <= 4 })
+    }
+}

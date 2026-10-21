@@ -152,7 +152,7 @@ enum ServiceProbe {
         // 1. Ask each provider's DNS for every target.
         let pairs = providers.indices.flatMap { p in ProbeTarget.all.map { (p, $0) } }
         var resolved = [[String]](repeating: [], count: pairs.count)
-        DispatchQueue.concurrentPerform(iterations: pairs.count) { i in
+        inLanes(pairs.count, lanes: providers.count, laneOf: { pairs[$0].0 }) { i in
             let addresses = resolve(pairs[i].1.host, using: providers[pairs[i].0].addresses)
             lock.lock(); resolved[i] = addresses; lock.unlock()
         }
@@ -170,10 +170,21 @@ enum ServiceProbe {
 
         var samples = [ProbeSample?](repeating: nil, count: jobs.count)
         var done = 0
+        // An address that could not be connected to holds every request for the whole time out (three seconds): it is asked once, and the
+        // rest of the requests to it are counted as failed at once. The answer of the check is the same, and it comes much sooner.
+        var dead = Set<String>()
         progress(0, jobs.count)
-        DispatchQueue.concurrentPerform(iterations: jobs.count) { i in
+        inLanes(jobs.count, lanes: providers.count, laneOf: { jobs[$0].provider }) { i in
             let job = jobs[i]
-            let outcome = job.address.map { request(job.target, address: $0) } ?? .failed
+            var outcome = ProbeOutcome.failed
+            if let address = job.address {
+                lock.lock(); let known = dead.contains(address); lock.unlock()
+                if !known {
+                    let result = request(job.target, address: address)
+                    outcome = result.outcome
+                    if !result.connected { lock.lock(); dead.insert(address); lock.unlock() }
+                }
+            }
             lock.lock()
             samples[i] = ProbeSample(target: job.target, address: job.address, outcome: outcome)
             done += 1
@@ -187,6 +198,43 @@ enum ServiceProbe {
                 provider: providers[p],
                 samples: jobs.indices.filter { jobs[$0].provider == p }.compactMap { samples[$0] }
             )
+        }
+    }
+
+    /// How many requests go to one provider at a time. The providers are asked side by side, so the whole check lasts as long as the
+    /// slowest of them. Measured on 185 requests: 20 to 24 s with ten at a time (the number of cores), 8.5 s with 16 per provider, 7.7 s
+    /// with 24; the answers were the same each time. The time that is left is the waiting of the slowest requests (six seconds).
+    static let perProvider = 16
+
+    /// Runs `work` for 0..<count. Each lane (a provider) has `perLane` workers of its own; the lanes go side by side. Returns when all
+    /// are done.
+    static func inLanes(_ count: Int, lanes: Int, laneOf: (Int) -> Int, perLane: Int = perProvider, _ work: (Int) -> Void) {
+        let group = DispatchGroup()
+        let queue = DispatchQueue(label: "nimb.probe", attributes: .concurrent)
+        withoutActuallyEscaping(work) { work in
+            for lane in 0..<lanes {
+                let indices = (0..<count).filter { laneOf($0) == lane }
+                let next = Counter()
+                for _ in 0..<min(perLane, indices.count) {
+                    group.enter()
+                    queue.async {
+                        while let k = next.take(below: indices.count) { work(indices[k]) }
+                        group.leave()
+                    }
+                }
+            }
+            group.wait()
+        }
+    }
+
+    private final class Counter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = 0
+        func take(below limit: Int) -> Int? {
+            lock.lock(); defer { lock.unlock() }
+            guard value < limit else { return nil }
+            defer { value += 1 }
+            return value
         }
     }
 
@@ -208,20 +256,36 @@ enum ServiceProbe {
 
     private static let marker = "@@NIMB@@"
 
-    /// Requests the target at `address` (the provider's proxy) and judges the answer.
-    private static func request(_ target: ProbeTarget, address: String) -> ProbeOutcome {
+    /// What curl printed after the body: the status code, the time to the first byte, the size, and the time it took to connect (0 when it
+    /// could not).
+    struct Trailer: Equatable {
+        let code: Int
+        let seconds: Double
+        let size: Int
+        let connected: Bool
+    }
+
+    /// The trailer and the text before it, or nil when there is no trailer (curl did not even start).
+    static func splitTrailer(_ output: String) -> (head: String, trailer: Trailer)? {
+        guard let range = output.range(of: marker, options: .backwards) else { return nil }
+        let fields = output[range.upperBound...].split(separator: " ")
+        guard fields.count == 4, let code = Int(fields[0]), let seconds = Double(fields[1]), let size = Int(fields[2]),
+              let connect = Double(fields[3]) else { return nil }
+        return (String(output[..<range.lowerBound]), Trailer(code: code, seconds: seconds, size: size, connected: connect > 0))
+    }
+
+    /// Requests the target at `address` (the provider's proxy) and judges the answer. `connected` is false when no connection could be made:
+    /// the address is dead, and the same will be true of the next request to it.
+    private static func request(_ target: ProbeTarget, address: String) -> (outcome: ProbeOutcome, connected: Bool) {
         let output = capture("/usr/bin/curl", [
             "-s", "-i", "--connect-timeout", "3", "--max-time", "6",
             "--resolve", "\(target.host):443:\(address)",
-            "-w", "\n\(marker)%{http_code} %{time_starttransfer} %{size_download}",
+            "-w", "\n\(marker)%{http_code} %{time_starttransfer} %{size_download} %{time_connect}",
             "https://\(target.host)\(target.path)",
         ]) ?? ""
-        guard let range = output.range(of: marker, options: .backwards) else { return .failed }
-        let fields = output[range.upperBound...].split(separator: " ")
-        guard fields.count == 3, let code = Int(fields[0]), let seconds = Double(fields[1]), let size = Int(fields[2]) else { return .failed }
-
-        let (headers, body) = parse(String(output[..<range.lowerBound]))
-        return classify(target, code: code, seconds: seconds, bodySize: size, headers: headers, body: body)
+        guard let (head, trailer) = splitTrailer(output) else { return (.failed, false) }
+        let (headers, body) = parse(head)
+        return (classify(target, code: trailer.code, seconds: trailer.seconds, bodySize: trailer.size, headers: headers, body: body), trailer.connected)
     }
 
     /// Headers (lower-cased names) and the start of the body of the final response in `curl -i` output. Interim
