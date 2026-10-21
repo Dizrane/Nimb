@@ -283,6 +283,12 @@ final class UpdateViewModel: ObservableObject {
         }
     }
 
+    /// A check that goes on must not take an offered update off the screen: the button would blink every ten minutes.
+    static func stateWhileChecking(from state: State) -> State {
+        if case .available = state { return state }
+        return .checking
+    }
+
     func checkIfDue() {
         guard UpdateSchedule.isDue(lastTry: lastTry, now: Date()) else { return }
         check()
@@ -293,7 +299,7 @@ final class UpdateViewModel: ObservableObject {
         if case .checking = state { return }
         let before = state
         lastTry = Date()
-        state = .checking
+        state = Self.stateWhileChecking(from: before)
         AppLog.shared.add("update", "проверяю обновления")
         Task {
             do {
@@ -387,6 +393,11 @@ struct ContentView: View {
             AppDelegate.openMainWindow = { openWindow(id: "main") }
             // After the window is up, so that the question has something behind it.
             DispatchQueue.main.async {
+                // Started by macOS at login with the background mode on: no window and no questions.
+                if AppDelegate.takeStartHidden() {
+                    NSApp.windows.first { $0.canBecomeMain }?.close()
+                    return
+                }
                 MoveToApplications.offer()
                 onboarding.showIfFresh(existingSetup: model.active != nil || WarpPaths.isInstalled || UserDefaults.standard.object(forKey: "telegramProxyPort") != nil)
             }

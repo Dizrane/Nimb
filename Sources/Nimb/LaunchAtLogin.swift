@@ -35,7 +35,7 @@ struct LaunchAtLoginCard: View {
                     Text("Запускать при входе в систему")
                         .font(Typo.name)
                         .foregroundStyle(Theme.textPrimary)
-                    Text("Nimb откроется сам при входе в систему.")
+                    Text("Nimb откроется сам при входе в систему. Если включена работа в фоне, окно не откроется: останется значок в строке меню.")
                         .font(Typo.small)
                         .foregroundStyle(Theme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)

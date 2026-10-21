@@ -5,6 +5,8 @@ import AppKit
 @MainActor
 enum MoveToApplications {
     private static let declinedKey = "moveToApplicationsDeclined"
+    /// The question is asked once while the program runs: it is put again each time a window opens.
+    private static var askedThisRun = false
 
     /// Where the app is installed; the environment variable exists for testing the move in a scratch folder.
     private static var applicationsFolder: String {
@@ -31,11 +33,18 @@ enum MoveToApplications {
             || path.hasPrefix(home + "/Downloads/") || path.hasPrefix(home + "/Desktop/")
     }
 
+    /// The copy that is moved goes to the Trash, unless it is the read-only one of a disk image or a temporary copy of macOS.
+    static func movesOriginalToTrash(_ path: String) -> Bool {
+        !(path.hasPrefix("/Volumes/") || path.contains("/AppTranslocation/"))
+    }
+
     static func offer() {
-        guard shouldOffer else { return }
+        guard shouldOffer, !askedThisRun else { return }
+        askedThisRun = true
         let alert = NSAlert()
         alert.messageText = "Переместить Nimb в «Программы»?"
         alert.informativeText = "Оттуда приложение сможет обновляться само, и его проще найти. Если в «Программах» уже есть Nimb, он будет заменён."
+            + (movesOriginalToTrash(Bundle.main.bundleURL.path) ? " Эта копия переедет в Корзину." : "")
         alert.addButton(withTitle: "Переместить")
         alert.addButton(withTitle: "Не сейчас")
         alert.showsSuppressionButton = true

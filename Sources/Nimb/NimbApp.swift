@@ -29,6 +29,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Nimb was started by macOS at login, and the person has asked for it to work in the background: its window is not shown, the icon in
+    /// the menu bar is enough. The Dock icon brings the window back.
+    private static var startHidden = false
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        Self.startHidden = LoginLaunch.wasLaunchedAtLogin() && LaunchAtLogin.shared.isOn && BackgroundMode.shared.enabled
+        if Self.startHidden { AppLog.shared.add("app", "запуск при входе в систему: окно не открываю") }
+    }
+
+    /// True once, for the first window of such a launch: the caller closes it.
+    static func takeStartHidden() -> Bool {
+        defer { startHidden = false }
+        return startHidden
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         SessionMarker.end()
     }

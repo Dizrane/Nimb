@@ -672,3 +672,65 @@ import Testing
         if case .failure = results[2] {} else { Issue.record("a job without a line must fail") }
     }
 }
+
+/// The small things of the window: a command that hangs, a button that must stay, a question asked once, a launch at login.
+@Suite struct SmallThingsTests {
+    @Test func aCommandThatHangsIsStopped() {
+        let started = Date()
+        #expect(throws: DNSError.self) { _ = try DNSManager.run("/bin/sleep", ["30"], timeout: 0.3) }
+        #expect(Date().timeIntervalSince(started) < 5, "it must not wait for the end of the command")
+    }
+
+    @Test func theMessageOfAStoppedCommandNamesIt() {
+        do { _ = try DNSManager.run("/bin/sleep", ["30"], timeout: 0.3); Issue.record("must fail") } catch {
+            #expect(error.localizedDescription.contains("sleep"))
+        }
+    }
+
+    @Test func aCommandThatAnswersInTimeIsLeftAlone() throws {
+        #expect(try DNSManager.run("/bin/echo", ["hi"], timeout: 3) == "hi\n")
+    }
+
+    @Test func noTimeoutMeansWaitingForTheEnd() throws {
+        #expect(try DNSManager.run("/bin/sh", ["-c", "sleep 0.5; echo done"], timeout: nil) == "done\n")
+    }
+
+    @Test func aFailingCommandKeepsItsOwnMessage() {
+        do { _ = try DNSManager.run("/bin/sh", ["-c", "echo broken >&2; exit 4"]); Issue.record("must fail") } catch {
+            #expect(error.localizedDescription == "broken")
+        }
+    }
+
+    @MainActor @Test func anOfferedUpdateStaysOnTheScreenWhileTheCheckGoesOn() throws {
+        let release = Release(version: "9.9.9", assetName: "Nimb-9.9.9.zip", zipURL: try #require(URL(string: "https://example.test/a.zip")),
+                              sha256: nil, pageURL: try #require(URL(string: "https://example.test/")))
+        #expect(UpdateViewModel.stateWhileChecking(from: .available(release)) == .available(release))
+        #expect(UpdateViewModel.stateWhileChecking(from: .upToDate) == .checking)
+        #expect(UpdateViewModel.stateWhileChecking(from: .idle) == .checking)
+        #expect(UpdateViewModel.stateWhileChecking(from: .failed("x")) == .checking)
+    }
+
+    @MainActor @Test(arguments: [("/Users/x/Downloads/Nimb.app", true), ("/Users/x/Desktop/Nimb.app", true),
+                                 ("/Volumes/Nimb/Nimb.app", false), ("/private/var/folders/ab/T/AppTranslocation/ABC/d/Nimb.app", false)])
+    func saysWhetherTheCopyGoesToTheTrash(path: String, goes: Bool) {
+        #expect(MoveToApplications.movesOriginalToTrash(path) == goes)
+    }
+
+    private func launchEvent(_ id: Int, property: Int?) -> NSAppleEventDescriptor {
+        let event = NSAppleEventDescriptor(eventClass: AEEventClass(kCoreEventClass), eventID: AEEventID(id), targetDescriptor: nil,
+                                           returnID: AEReturnID(kAutoGenerateReturnID), transactionID: AETransactionID(kAnyTransactionID))
+        if let property { event.setParam(NSAppleEventDescriptor(enumCode: OSType(property)), forKeyword: AEKeyword(keyAEPropData)) }
+        return event
+    }
+
+    @Test func aLaunchFromTheLoginItemsIsRecognised() {
+        #expect(LoginLaunch.wasLaunchedAtLogin(launchEvent(Int(kAEOpenApplication), property: Int(keyAELaunchedAsLogInItem))))
+    }
+
+    @Test func anOrdinaryLaunchIsNotALoginLaunch() {
+        #expect(!LoginLaunch.wasLaunchedAtLogin(launchEvent(Int(kAEOpenApplication), property: nil)))
+        #expect(!LoginLaunch.wasLaunchedAtLogin(launchEvent(Int(kAEOpenApplication), property: Int(keyAEPropData))))
+        #expect(!LoginLaunch.wasLaunchedAtLogin(launchEvent(Int(kAEReopenApplication), property: Int(keyAELaunchedAsLogInItem))))
+        #expect(!LoginLaunch.wasLaunchedAtLogin(nil))
+    }
+}

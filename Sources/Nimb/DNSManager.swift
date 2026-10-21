@@ -300,7 +300,7 @@ enum DNSManager {
     /// Runs a command as root through `sudo -n`: it fails at once, without asking, if a password would be needed.
     @discardableResult
     static func runWithoutPassword(_ arguments: [String]) throws -> String {
-        try run("/usr/bin/sudo", ["-n"] + arguments)
+        try run("/usr/bin/sudo", ["-n"] + arguments, timeout: nil)
     }
 
     /// Removes the sudoers rule again. Asks for the administrator password.
@@ -316,7 +316,7 @@ enum DNSManager {
         let addresses = provider?.addresses ?? ["Empty"]
         var failures: [String] = []
         func sudo(_ args: [String], _ failure: String) {
-            do { _ = try run("/usr/bin/sudo", ["-n"] + args) } catch DNSError.failed(let message) {
+            do { _ = try run("/usr/bin/sudo", ["-n"] + args, timeout: nil) } catch DNSError.failed(let message) {
                 failures.append("\(failure) \(message)")
             } catch {
                 failures.append(failure)
@@ -345,7 +345,7 @@ enum DNSManager {
             .replacingOccurrences(of: "\"", with: "\\\"")
         let appleScript = "do shell script \"\(escaped)\" with administrator privileges"
         do {
-            return try run("/usr/bin/osascript", ["-e", appleScript]).trimmingCharacters(in: .whitespacesAndNewlines)
+            return try run("/usr/bin/osascript", ["-e", appleScript], timeout: nil).trimmingCharacters(in: .whitespacesAndNewlines)
         } catch DNSError.failed(let message) {
             if message.contains("-128") || message.localizedCaseInsensitiveContains("User canceled") {
                 throw DNSError.cancelled
@@ -368,8 +368,14 @@ enum DNSManager {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
+    /// How long a command that only reads may take. A system tool that hangs must not keep the window from opening: the first reading
+    /// is made while the window is built.
+    static let readTimeout: TimeInterval = 3
+
+    /// Runs a command and returns what it printed. `timeout` stops a command that does not answer (nil: wait as long as it takes, for the
+    /// ones that wait for a person or change the system).
     @discardableResult
-    private static func run(_ path: String, _ args: [String]) throws -> String {
+    static func run(_ path: String, _ args: [String], timeout: TimeInterval? = readTimeout) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = args
@@ -381,14 +387,34 @@ enum DNSManager {
         let finished = DispatchSemaphore(value: 0)
         process.terminationHandler = { _ in finished.signal() }
         try process.run()
+        let timedOut = TimedOut()
+        if let timeout {
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+                guard process.isRunning else { return }
+                timedOut.set()
+                process.terminate()
+                // A command that ignores the polite request is not waited for.
+                DispatchQueue.global().asyncAfter(deadline: .now() + 1) { if process.isRunning { kill(process.processIdentifier, SIGKILL) } }
+            }
+        }
         let outData = out.fileHandleForReading.readDataToEndOfFile()
         let errData = err.fileHandleForReading.readDataToEndOfFile()
         finished.wait()
+        if timedOut.value, let timeout {
+            throw DNSError.failed("\(URL(fileURLWithPath: path).lastPathComponent) не ответил за \(Int(timeout)) с.")
+        }
         let stdout = String(decoding: outData, as: UTF8.self)
         guard process.terminationStatus == 0 else {
             let message = String(decoding: errData, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
             throw DNSError.failed(message.isEmpty ? "Команда завершилась с кодом \(process.terminationStatus)." : message)
         }
         return stdout
+    }
+
+    private final class TimedOut: @unchecked Sendable {
+        private let lock = NSLock()
+        private var flag = false
+        func set() { lock.lock(); flag = true; lock.unlock() }
+        var value: Bool { lock.lock(); defer { lock.unlock() }; return flag }
     }
 }

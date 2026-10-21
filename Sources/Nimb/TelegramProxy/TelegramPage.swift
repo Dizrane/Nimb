@@ -58,10 +58,10 @@ struct TelegramPage: View {
         .card()
     }
 
-    /// Without it, closing the window or pressing Command-Q switches the proxy off, and Telegram stops working.
+    /// Without it, quitting (Command-Q) switches the proxy off, and Telegram stops working. Closing the window does not.
     private var backgroundHint: some View {
         HStack(alignment: .top, spacing: 10) {
-            Text("Закроете окно, и прокси остановится. Включите работу в фоне.")
+            Text("Выйдете из Nimb (⌘Q), и прокси остановится. Включите работу в фоне: тогда ⌘Q только закроет окно.")
                 .font(Typo.small)
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
