@@ -30,31 +30,77 @@ export class HomePage {
 
 // ----------------------------------------------------------------------------------------------------------- Neural networks
 
+/** How the AI services answered through a provider (the check of the providers, Sources/Nimb/ContentView.swift on the Mac). */
+const PILL_ICON = {
+  works: '<path d="M2.5 6.5l2.5 2.5 4.5-5"/>',
+  unstable: '<path d="M6 1.8l4.6 8H1.4z"/><path d="M6 5v2.4M6 8.8v.1"/>',
+  down: '<path d="M3 3l6 6M9 3l-6 6"/>',
+  blocked: '<circle cx="6" cy="6" r="4.4"/><path d="M2.9 9.1l6.2-6.2"/>',
+};
+const PILL_WORD = { works: 'работает', unstable: 'нестабильно', down: 'не отвечает', blocked: 'закрыт' };
+const pill = (r) => `<span class="svc ${r.status}" title="${esc(r.name)}: ${PILL_WORD[r.status]}"><svg viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${PILL_ICON[r.status]}</svg>${esc(r.name)}</span>`;
+
+/** Three thin bars that fill up with speed, plus the time to the first byte. */
+function speed(seconds) {
+  const level = seconds == null ? 0 : seconds < 0.6 ? 3 : seconds < 1.2 ? 2 : 1;
+  const color = level === 3 ? 'var(--ok)' : level === 2 ? 'var(--warn)' : 'var(--bad)';
+  const bars = [0, 1, 2].map((i) => `<i style="height:${5 + i * 3.5}px;background:${i < level ? color : 'rgba(255,255,255,.16)'}"></i>`).join('');
+  return `<span class="speed" role="img" aria-label="${seconds == null ? 'Нет ответа' : `Скорость ${seconds.toFixed(1)} секунды`}"><span class="bars">${bars}</span><span class="mono t1">${seconds == null ? '—' : `${seconds.toFixed(1)} с`}</span></span>`;
+}
+
+function details(p, name) {
+  const rows = p.services.map((s) => `<div class="drow"><span>${esc(s.name)}</span><span class="mono">сайт ${s.site} · API ${s.api}</span></div>`).join('');
+  const refusals = p.refusals.map((l) => `<div class="dnote bad">${esc(l)}</div>`).join('');
+  const dead = p.dead.length ? `<div class="dnote warn">Без нормального ответа: ${esc(p.dead.join(', '))}</div>` : '';
+  return `<div class="det"><div class="nm" style="font-size:13px">${esc(name)}</div>${rows}${refusals}${dead}
+    <div class="dfoot">Цифры — сколько адресов пула ответило как положено. Отказ из-за региона, страница ограничений и ответ 403 не считаются. Сервис работает, если ответило не менее 75%. Проверка не гарантирует, что откроются приложения.</div></div>`;
+}
+
+const probeLabel = (pr) => (pr.running ? (pr.phase === 'enabling' ? 'Включаю…' : pr.total > 0 ? `Проверено ${pr.done} из ${pr.total}` : 'Определяю адреса…') : 'Проверить сервисы');
+
 export class AIPage {
-  constructor(actions) { this.actions = actions; }
+  constructor(actions) { this.actions = actions; this.open = null; }
   mount(root) {
     root.innerHTML = shell('Нейросети', '<div class="two"><div class="left" id="slot"></div><div class="right" id="right"></div></div>');
     this.hero = new PlanetHero(() => this.actions.toggle('ai'));
     root.querySelector('#slot').appendChild(this.hero.el);
     this.right = root.querySelector('#right');
   }
+  toggleDetails(id) { this.open = this.open === id ? null : id; this.key = null; }
   update(S) {
-    const a = S.ai, name = (S.providers.find((p) => p.id === a.provider) || {}).name || '';
+    const a = S.ai, pr = S.probe, name = (S.providers.find((p) => p.id === a.provider) || {}).name || '';
     this.hero.update({
-      on: a.on, busy: a.busy, region: PROVIDER_REGION[a.provider] || 'eu', disabled: a.busy || !S.serviceOk,
-      title: a.busy ? 'Применяю DNS' : a.on ? 'Включено' : 'Выключено', providerName: esc(name),
-      subtitle: a.busy ? 'Меняю DNS на всех подключениях' : 'Включите, чтобы открывались ChatGPT, Claude, Gemini и другие нейросети',
+      on: a.on && !pr.running, busy: a.busy || pr.running, region: PROVIDER_REGION[a.provider] || 'eu', disabled: a.busy || pr.running || !S.serviceOk,
+      title: pr.running ? 'Проверяю сервисы' : a.busy ? 'Применяю DNS' : a.on ? 'Включено' : 'Выключено', providerName: esc(name),
+      subtitle: pr.running ? 'Спрашиваю DNS и запрашиваю сайты и API' : a.busy ? 'Меняю DNS на всех подключениях' : 'Включите, чтобы открывались ChatGPT, Claude, Gemini и другие нейросети',
       label: a.on ? 'Выключить Smart DNS' : 'Включить Smart DNS',
     });
-    if (same(this, 'rj', [a, S.providers])) return;
+    if (same(this, 'rj', [a, S.providers, pr, this.open])) return;
+    const view = Object.fromEntries(pr.reports.map((r) => [r.id, r]));
+    const fill = pr.running && pr.total > 0 ? Math.round((100 * pr.done) / pr.total) : 0;
+    const button = `<button class="probe-btn ${pr.running ? 'run' : ''}" data-a="probe" data-f="probe" id="probe" ${pr.running || a.busy ? 'disabled' : ''}>
+      <span class="fill" style="width:${fill}%"></span><span class="lbl"><svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 8h3l2-5 3 10 2-5h4"/></svg>${probeLabel(pr)}</span></button>`;
+    const best = pr.best && view[pr.best] ? view[pr.best] : null;
+    const bestName = best ? (S.providers.find((p) => p.id === best.id) || {}).name : '';
+    const banner = best ? `<div class="best"><div><div class="label" style="color:var(--warn)">Рекомендуем</div>
+        <div class="bn"><span class="nm">${esc(bestName)}</span><span class="sm" style="margin:0">работает ${best.working} из ${best.total}</span></div></div><span class="grow"></span>
+        ${a.provider === best.id ? '<span class="chosen"><svg viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 6.5l2.5 2.5 4.5-5"/></svg>Выбран</span>'
+          : `<button class="btn warnbtn" data-a="prov" data-v="${best.id}" data-f="bestsel" id="bestsel" ${pr.running || a.busy ? 'disabled' : ''}>Выбрать</button>`}</div>` : '';
+    const locked = pr.running || a.busy;
     const cards = S.providers.map((p) => {
-      const sel = p.id === a.provider;
-      return `<button class="prov ${sel ? 'sel' : ''}" role="radio" aria-checked="${sel}" data-a="prov" data-v="${p.id}" data-f="prov-${p.id}" id="prov-${p.id}">
-        <span class="nm">${esc(p.name)}</span>${sel && a.on ? '<span class="on">· активен</span>' : ''}<span class="grow"></span>
+      const sel = p.id === a.provider, r = view[p.id], isBest = best && best.id === p.id;
+      const row = `<button class="prov" role="radio" aria-checked="${sel}" data-a="prov" data-v="${p.id}" data-f="prov-${p.id}" id="prov-${p.id}" ${locked ? 'disabled' : ''}>
+        <span class="nm">${esc(p.name)}</span>${isBest ? '<span class="gem" title="Лучший по итогам проверки">◆</span>' : ''}${sel && a.on ? '<span class="on">· активен</span>' : ''}<span class="grow"></span>
+        ${r ? speed(r.median ?? null) + '<span class="ispace"></span>' : ''}
         <span class="radio" style="border-color:rgba(255,255,255,${sel ? 0.9 : 0.28})">${sel ? '<i></i>' : ''}</span></button>`;
+      const info = r ? `<button class="info" data-a="det" data-v="${p.id}" data-f="det-${p.id}" id="det-${p.id}" aria-label="Подробности проверки" aria-expanded="${this.open === p.id}" title="Подробности проверки">
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><circle cx="8" cy="8" r="6.5"/><path d="M8 7.2v4.2M8 4.6v.1" stroke-linecap="round"/></svg></button>` : '';
+      const pills = r ? `<div class="pills">${r.services.map(pill).join('')}</div>` : '';
+      return `<div class="provc ${sel ? 'sel' : ''} ${locked ? 'dim' : ''}">${row}${info}${pills}${r && this.open === p.id ? details(r, p.name) : ''}</div>`;
     }).join('');
-    setHTML(this.right, `<div class="prov-head"><div class="label">DNS-провайдеры</div></div>
-      <div class="grid" role="radiogroup" aria-label="DNS-провайдеры">${cards}</div>${notice(a.error)}`);
+    const warnings = (a.warnings || []).map((w) => notice(w, 'warn')).join('');
+    setHTML(this.right, `<div class="prov-head"><div class="label">DNS-провайдеры</div>${button}</div>${banner}
+      <div class="grid" role="radiogroup" aria-label="DNS-провайдеры">${cards}</div>${warnings}${notice(a.error)}`);
   }
   destroy() { this.hero.destroy(); }
 }

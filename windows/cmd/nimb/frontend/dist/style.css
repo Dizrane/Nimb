@@ -98,10 +98,38 @@ canvas{display:block}
 /* ---- providers ---- */
 .prov-head{display:flex;align-items:center;justify-content:space-between;padding:0 2px}
 .grid{display:grid;grid-template-columns:1fr;gap:var(--gap)}
-.prov{display:flex;align-items:center;gap:10px;width:100%;padding:12px 14px;border-radius:14px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.16);transition:border-color .2s,background .2s}
-.prov:hover{background:rgba(255,255,255,.07)}
-.prov.sel{border-color:rgba(255,255,255,.55)}
+.provc{position:relative;border-radius:14px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.16);transition:border-color .2s,background .2s,opacity .2s}
+.provc:hover{background:rgba(255,255,255,.07)}
+.provc.sel{border-color:rgba(255,255,255,.55)}
+.provc.dim{opacity:.6}
+.prov{display:flex;align-items:center;gap:10px;width:100%;padding:12px 14px;border-radius:14px}
+.prov:disabled{cursor:default}
 .prov .nm{font-size:15px;font-weight:500}
+.prov .gem{font-size:8px;color:var(--warn)}
+.prov .ispace{width:20px;flex:none}
+.provc .info{position:absolute;right:38px;top:11px;width:20px;height:22px;display:flex;align-items:center;justify-content:center;color:var(--t2)}
+.provc .info:hover{color:#fff}
+.provc .pills{display:flex;flex-wrap:wrap;gap:5px;padding:0 14px 11px;margin-top:-3px}
+.speed{display:inline-flex;align-items:center;gap:6px}
+.speed .bars{display:inline-flex;align-items:flex-end;gap:1.5px;height:12px}.speed .bars i{width:2.5px;border-radius:.5px;display:block}
+.speed .t1{color:var(--t1);opacity:.9;font:500 12px var(--sans);font-variant-numeric:tabular-nums}
+.svc{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:6px;font-size:11px;font-weight:500;color:var(--t1);border:1px solid}
+.svc.works{color:var(--t1);background:rgba(48,209,89,.07);border-color:rgba(48,209,89,.28)}.svc.works svg{color:var(--ok)}
+.svc.unstable{background:rgba(255,199,51,.07);border-color:rgba(255,199,51,.28)}.svc.unstable svg{color:var(--warn)}
+.svc.down,.svc.blocked{background:rgba(255,89,82,.07);border-color:rgba(255,89,82,.28)}.svc.down svg,.svc.blocked svg{color:var(--bad)}
+.det{margin:0 14px 12px;padding:10px 12px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid var(--hair);display:flex;flex-direction:column;gap:6px;user-select:text;-webkit-user-select:text}
+.det .drow{display:flex;justify-content:space-between;gap:16px;font-size:12px;font-weight:500}
+.det .dnote{font-size:11.5px}.det .dnote.bad{color:var(--bad)}.det .dnote.warn{color:var(--warn)}
+.det .dfoot{font-size:11px;color:var(--t2);border-top:1px solid var(--hair);padding-top:8px}
+.probe-btn{position:relative;overflow:hidden;width:184px;height:28px;border-radius:8px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.22);color:var(--t1);font-size:12px;font-weight:500;flex:none;transition:background .15s,transform .12s}
+.probe-btn:hover:not(:disabled){background:rgba(255,255,255,.1)}.probe-btn:active:not(:disabled){transform:scale(.985)}
+.probe-btn:disabled{cursor:default;opacity:.5}.probe-btn.run:disabled{opacity:1}
+.probe-btn .fill{position:absolute;left:0;top:0;bottom:0;background:rgba(255,255,255,.14);transition:width .25s ease-out}
+.probe-btn .lbl{position:relative;display:flex;align-items:center;justify-content:center;gap:7px;padding:0 12px;white-space:nowrap}
+.best{display:flex;align-items:center;gap:10px;padding:8px 14px;border-radius:14px;background:rgba(255,199,51,.04);border:1px solid rgba(255,199,51,.32)}
+.best .bn{display:flex;align-items:baseline;gap:8px}.best .nm{font-size:15px;font-weight:500}
+.best .warnbtn{color:var(--warn);background:none;border-color:rgba(255,199,51,.65);padding:5px 14px}.best .warnbtn:hover{background:rgba(255,199,51,.1)}
+.best .chosen{display:flex;align-items:center;gap:5px;color:var(--ok);font-size:12px;font-weight:500}
 .prov .on{color:var(--ok);font-size:12px;font-weight:400;margin-left:6px}
 .radio{width:16px;height:16px;border-radius:50%;border:1px solid rgba(255,255,255,.4);display:flex;align-items:center;justify-content:center;flex:none}
 .radio i{width:8px;height:8px;border-radius:50%;background:#fff}

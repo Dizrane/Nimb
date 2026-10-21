@@ -41,6 +41,12 @@ type App struct {
 	// for a report about a problem
 	reportID, reportFacts string
 	previousEndedBadly    bool
+
+	probe probeState // the check of the providers
+
+	hintMu sync.Mutex // the line about the DNS of Firefox
+	hint   string
+	hintAt time.Time
 }
 
 // NewApp makes the application object.
@@ -102,10 +108,11 @@ type State struct {
 	ServiceError string `json:"serviceError,omitempty"`
 
 	AI struct {
-		On       bool   `json:"on"`
-		Provider string `json:"provider"` // the one chosen (and in use when On)
-		Busy     bool   `json:"busy"`
-		Error    string `json:"error,omitempty"`
+		On       bool     `json:"on"`
+		Provider string   `json:"provider"` // the one chosen (and in use when On)
+		Busy     bool     `json:"busy"`
+		Error    string   `json:"error,omitempty"`
+		Warnings []string `json:"warnings"` // what may keep Smart DNS from working, while it is on
 	} `json:"ai"`
 	Telegram struct {
 		On    bool          `json:"on"`
@@ -122,6 +129,7 @@ type State struct {
 		HandshakeAgo int    `json:"handshakeAgo"`
 	} `json:"media"`
 	Providers []Provider `json:"providers"`
+	Probe     ProbeView  `json:"probe"`
 }
 
 func providerList() []Provider {
@@ -137,6 +145,8 @@ func (a *App) GetState() State {
 	var st State
 	st.Version = Version
 	st.Providers = providerList()
+	st.Probe = a.probe.view()
+	st.AI.Warnings = []string{}
 	set := a.settings.get()
 	st.AI.Provider = set.Provider
 
@@ -160,6 +170,9 @@ func (a *App) GetState() State {
 		if resp.DNS != nil && resp.DNS.Active {
 			st.AI.On = true
 			st.AI.Provider = resp.DNS.Provider
+			if hint := a.browserHint(); hint != "" {
+				st.AI.Warnings = append(st.AI.Warnings, hint)
+			}
 		}
 		if resp.Tunnel != nil {
 			st.Media.On = resp.Tunnel.Up

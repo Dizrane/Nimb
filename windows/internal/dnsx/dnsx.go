@@ -4,6 +4,7 @@
 package dnsx
 
 import (
+	"net/netip"
 	"strings"
 )
 
@@ -36,13 +37,35 @@ func Find(id string) (Provider, bool) {
 // Servers is the value written to an adapter: the addresses, comma separated.
 func (p Provider) Servers() string { return strings.Join(p.Addresses, ",") }
 
+// Servers6 is what an adapter that has DNS servers of IPv6 gets in their place: the same addresses as IPv4-mapped IPv6 ones. Windows
+// asks the IPv6 servers of an adapter before the IPv4 ones, so the ones the router hands out (they answer with the real addresses)
+// would be asked first and Smart DNS would do nothing. The mapped addresses are not used for queries on the Windows that was tried
+// (checked in a virtual machine: they are skipped and answer comes from the IPv4 servers at once); a Windows that does use them
+// sends the questions over IPv4 to the same provider. Either way the router's servers are not asked.
+func (p Provider) Servers6() string {
+	var out []string
+	for _, a := range p.Addresses {
+		out = append(out, "::ffff:"+a)
+	}
+	return strings.Join(out, ",")
+}
+
 // Adapter is a network adapter as it is now. NameServer is what is set by hand on it; empty means that the adapter takes its
 // DNS from the network (DHCP).
 type Adapter struct {
 	GUID       string `json:"guid"`
 	Name       string `json:"name"`
 	NameServer string `json:"nameServer"`
+	// NameServer6 is what is set by hand for IPv6; V6 says that the adapter has IPv6 DNS servers now (set by hand or handed out
+	// by the network). An adapter with none is left alone in IPv6.
+	NameServer6 string `json:"nameServer6,omitempty"`
+	V6          bool   `json:"v6,omitempty"`
+	// Set6 (only in what Apply, Fresh and Restore return) says that the IPv6 servers are to be written too.
+	Set6 bool `json:"-"`
 }
+
+// needs6 tells whether the IPv6 servers of the adapter are to be taken over by the provider.
+func (a Adapter) needs6(p Provider) bool { return a.V6 && !Same6(a.NameServer6, p.Servers6()) }
 
 // Backup is what the adapters had before Smart DNS, kept on disk while Smart DNS is on.
 type Backup struct {
@@ -58,6 +81,28 @@ func Same(a, b string) bool {
 	}
 	for i := range x {
 		if x[i] != y[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// Same6 is Same for IPv6 servers: Windows may keep an address in another spelling (::ffff:1.2.3.4 and ::ffff:102:304 are one).
+func Same6(a, b string) bool {
+	x, y := fields(a), fields(b)
+	if len(x) != len(y) {
+		return false
+	}
+	for i := range x {
+		p, errP := netip.ParseAddr(x[i])
+		q, errQ := netip.ParseAddr(y[i])
+		if errP != nil || errQ != nil {
+			if x[i] != y[i] {
+				return false
+			}
+			continue
+		}
+		if p.Unmap() != q.Unmap() {
 			return false
 		}
 	}
@@ -85,8 +130,16 @@ func (b *Backup) Apply(provider Provider, now []Adapter) (write []Adapter) {
 	for _, a := range now {
 		if !b.has(a.GUID) {
 			b.Adapters = append(b.Adapters, a)
+		} else if a.needs6(provider) {
+			// IPv6 servers that came after Smart DNS was turned on: what they were is what goes back.
+			for i := range b.Adapters {
+				if b.Adapters[i].GUID == a.GUID && !b.Adapters[i].V6 {
+					b.Adapters[i].V6, b.Adapters[i].NameServer6 = true, a.NameServer6
+				}
+			}
 		}
-		if !Same(a.NameServer, provider.Servers()) {
+		if !Same(a.NameServer, provider.Servers()) || a.needs6(provider) {
+			a.Set6 = a.needs6(provider)
 			write = append(write, a)
 		}
 	}
@@ -101,7 +154,8 @@ func (b *Backup) Fresh(provider Provider, now []Adapter) (write []Adapter) {
 			continue
 		}
 		b.Adapters = append(b.Adapters, a)
-		if !Same(a.NameServer, provider.Servers()) {
+		if !Same(a.NameServer, provider.Servers()) || a.needs6(provider) {
+			a.Set6 = a.needs6(provider)
 			write = append(write, a)
 		}
 	}
@@ -129,7 +183,12 @@ func (b *Backup) Restore(now []Adapter) (write []Adapter, skipped []string) {
 			}
 			continue
 		}
-		write = append(write, Adapter{GUID: saved.GUID, Name: saved.Name, NameServer: saved.NameServer})
+		back := Adapter{GUID: saved.GUID, Name: saved.Name, NameServer: saved.NameServer}
+		// The IPv6 servers go back only if they are still the ones Smart DNS put there; the person's own change stays.
+		if saved.V6 && known && Same6(current.NameServer6, provider.Servers6()) {
+			back.NameServer6, back.Set6 = saved.NameServer6, true
+		}
+		write = append(write, back)
 	}
 	return write, skipped
 }

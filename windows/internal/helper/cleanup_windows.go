@@ -35,6 +35,10 @@ func Cleanup(dir string, logf func(string, ...any)) (problems []string) {
 					if err := dnsx.Write(a); err != nil {
 						problems = append(problems, fmt.Sprintf("DNS не вернулся на «%s»", a.Name))
 					}
+					if dnsx.Same6(a.NameServer6, p.Servers6()) {
+						a.NameServer6 = ""
+						h.write6(a)
+					}
 				}
 			}
 		}

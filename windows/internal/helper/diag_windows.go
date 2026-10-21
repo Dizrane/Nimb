@@ -36,7 +36,15 @@ func (h *Helper) diag() []string {
 			if servers == "" {
 				servers = "автоматический (DHCP)"
 			}
-			lines = append(lines, fmt.Sprintf("DNS на «%s»: %s", a.Name, servers))
+			line := fmt.Sprintf("DNS на «%s»: %s", a.Name, servers)
+			if a.V6 {
+				servers6 := a.NameServer6
+				if servers6 == "" {
+					servers6 = "от сети"
+				}
+				line += "; IPv6: " + servers6
+			}
+			lines = append(lines, line)
 		}
 		if len(adapters) == 0 {
 			lines = append(lines, "Подходящих сетевых подключений (Wi-Fi, Ethernet) нет")

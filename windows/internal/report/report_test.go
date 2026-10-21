@@ -163,3 +163,37 @@ func TestALongReportLosesTheMiddleNotTheEnds(t *testing.T) {
 		t.Fatalf("bad cut: %d runes", len([]rune(s)))
 	}
 }
+
+func TestHidesTheNamesThatSomeoneChoseForAConnection(t *testing.T) {
+	e := env
+	e.Connections = []string{"Wi-Fi", "Ethernet 2", "Home-5G Ivan", "AB", "ТЕЛЕФОН Ани", "vEthernet (Default Switch)", "Nimb"}
+	in := "DNS на «Wi-Fi»: x\nDNS на «Home-5G Ivan»: y\n«ТЕЛЕФОН Ани», «Ethernet 2», AB, «vEthernet (Default Switch)», Nimb; Home-5G Ivans"
+	got := Clean(in, e)
+	want := "DNS на «Wi-Fi»: x\nDNS на «‹подключение 1›»: y\n«‹подключение 2›», «Ethernet 2», AB, «vEthernet (Default Switch)», Nimb; Home-5G Ivans"
+	if got != want {
+		t.Errorf("got  %q\nwant %q", got, want)
+	}
+}
+
+func TestGenericNamesOfWindows(t *testing.T) {
+	for _, name := range []string{"Wi-Fi", "Wi-Fi 2", "Ethernet", "Ethernet 3", "Беспроводная сеть", "Подключение по локальной сети 2", "vEthernet (WSL (Hyper-V firewall))", "Nimb", "Loopback Pseudo-Interface 1"} {
+		if !IsGenericConnection(name) {
+			t.Errorf("%q is a name Windows gives", name)
+		}
+	}
+	for _, name := range []string{"MegaFon-Home", "Ethernet Ivan", "Kvartira 12", "vEthernet (Mine)", "Wi-Fi Ivan"} {
+		if IsGenericConnection(name) {
+			t.Errorf("%q was chosen by someone", name)
+		}
+	}
+}
+
+func TestPublicAddressesStayAsTheyAre(t *testing.T) {
+	e := env
+	e.Public = []string{"192.3.233.253", "107.175.76.134"}
+	got := Clean("ChatGPT · 192.3.233.253: 403; 107.175.76.134; роутер 192.168.1.1; провайдер "+dnsx.Providers[3].Addresses[0], e)
+	want := "ChatGPT · 192.3.233.253: 403; 107.175.76.134; роутер ‹ip›; провайдер ‹GeoHide (US)›"
+	if got != want {
+		t.Errorf("got  %q\nwant %q", got, want)
+	}
+}

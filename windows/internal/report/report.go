@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/Dizrane/Nimb/windows/internal/dnsx"
@@ -43,7 +44,18 @@ type Environment struct {
 	Home         string // the folder of the person, such as C:\Users\Ann
 	UserName     string
 	ComputerName string
+	// Connections are the names of the network connections of this computer: a name that Windows did not give by itself was chosen
+	// by someone (a router, a phone, a company) and does not go into a report (ReportRedactor.swift does the same on the Mac).
+	Connections []string
+	// Public are addresses that name nobody and stay as they are: the pool addresses of the providers that the check found.
+	Public []string
 }
+
+// genericConnections are the names Windows gives to connections itself, in English and in Russian.
+var genericConnections = regexp.MustCompile(`^(Wi-Fi|Ethernet|Local Area Connection|Wireless Network Connection|Bluetooth Network Connection|Беспроводная сеть|Подключение по локальной сети|Сетевое подключение Bluetooth)( \d+)?$|^vEthernet \((Default Switch|WSL.*)\)$|^(Loopback Pseudo-Interface \d+|Teredo Tunneling Pseudo-Interface|Nimb)$|^isatap\.`)
+
+// IsGenericConnection tells a name that Windows gave from one that someone chose.
+func IsGenericConnection(name string) bool { return genericConnections.MatchString(name) }
 
 var (
 	reEmail  = regexp.MustCompile(`[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`)
@@ -58,6 +70,10 @@ var (
 // and long keys. A known address of a Smart DNS provider of Nimb is replaced with its name, so that the report still says which
 // one it was.
 func Clean(text string, env Environment) string {
+	// What stays is put aside under a mark that nothing below can touch, and comes back at the end.
+	for i, a := range env.Public {
+		text = strings.ReplaceAll(text, a, fmt.Sprintf("⟦%d⟧", i))
+	}
 	for _, p := range dnsx.Providers {
 		for _, a := range p.Addresses {
 			text = strings.ReplaceAll(text, a, "‹"+p.Name+"›")
@@ -74,11 +90,48 @@ func Clean(text string, env Environment) string {
 	if utf8.RuneCountInString(env.ComputerName) >= 4 {
 		text = replaceFold(text, env.ComputerName, "‹pc›")
 	}
+	number := 0
+	for _, name := range env.Connections {
+		if utf8.RuneCountInString(name) >= 3 && !IsGenericConnection(name) {
+			number++
+			text = replaceWord(text, name, fmt.Sprintf("‹подключение %d›", number))
+		}
+	}
 	text = reEmail.ReplaceAllString(text, "‹e-mail›")
 	text = reIPv4.ReplaceAllString(text, "‹ip›")
 	text = reIPv6.ReplaceAllString(text, "‹ipv6›")
 	text = reKey.ReplaceAllString(text, "‹ключ›")
+	for i, a := range env.Public {
+		text = strings.ReplaceAll(text, fmt.Sprintf("⟦%d⟧", i), a)
+	}
 	return collapse(text)
+}
+
+// replaceWord replaces name where it stands alone (not inside a longer word or number).
+func replaceWord(text, name, with string) string {
+	var out strings.Builder
+	rest := text
+	for {
+		i := strings.Index(rest, name)
+		if i < 0 {
+			break
+		}
+		before, _ := utf8.DecodeLastRuneInString(rest[:i])
+		after, _ := utf8.DecodeRuneInString(rest[i+len(name):])
+		if i == 0 && out.Len() > 0 {
+			before, _ = utf8.DecodeLastRuneInString(out.String())
+		}
+		inside := func(r rune) bool { return r != utf8.RuneError && (unicode.IsLetter(r) || unicode.IsDigit(r)) }
+		out.WriteString(rest[:i])
+		if inside(before) || inside(after) {
+			out.WriteString(name)
+		} else {
+			out.WriteString(with)
+		}
+		rest = rest[i+len(name):]
+	}
+	out.WriteString(rest)
+	return out.String()
 }
 
 // collapse reads two addresses of one service ("‹A›, ‹A›") as one name; different names stay as they are.

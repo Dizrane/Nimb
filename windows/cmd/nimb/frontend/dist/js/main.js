@@ -61,7 +61,7 @@ function updateShell() {
   for (const id of ['home', ...ORDER, 'settings']) document.getElementById(`row-${id}`).classList.toggle('sel', id === sel);
   for (const k of ORDER) {
     const slot = document.getElementById(`slot-${k}`);
-    const busy = S[k].busy, on = isOn(k), disabled = busy || !(k === 'telegram' || S.serviceOk);
+    const busy = S[k].busy, on = isOn(k), disabled = busy || !(k === 'telegram' || S.serviceOk) || (k === 'ai' && S.probe.running);
     const key = `${busy}|${on}|${disabled}`;
     if (slot.dataset.key !== key) {
       slot.dataset.key = key;
@@ -108,6 +108,20 @@ async function refresh() {
   S = next;
   if (page === 'settings' || onb) readAutostart();
   render();
+}
+
+/** While the providers are being checked the state is read often, so that the progress moves. */
+let watching = false;
+async function watchProbe() {
+  if (watching) return;
+  watching = true;
+  try { do { await new Promise((r) => setTimeout(r, 400)); await refresh(); } while (S && S.probe.running); } finally { watching = false; }
+}
+async function startProbe(enable) {
+  S.probe.running = true; S.probe.done = 0; S.probe.total = 0; S.probe.phase = 'addresses'; if (enable) S.probe.reports = []; render();
+  try { await api()[enable ? 'EnableBest' : 'ProbeStart'](); } catch (e) { /* the state tells */ }
+  await refresh();
+  watchProbe();
 }
 
 const actions = {
@@ -169,6 +183,9 @@ document.addEventListener('click', async (e) => {
     case 'nav': showPage(v); break;
     case 'play': playIcon(v === 'settings' ? 'gear' : SV[v].icon); break;
     case 'sw': await actions.toggle(v); break;
+    case 'probe': await startProbe(false); break;
+    case 'det': if (current.toggleDetails) { current.toggleDetails(v); render(); } break;
+    case 'onbbest': await startProbe(true); break;
     case 'prov': { S.ai.provider = v; render(); await api().SetProvider(v); await refresh(); break; }
     case 'openTg': { const r = await api().OpenTelegram(); if (!r.ok) note(r.error); break; }
     case 'copy': { const r = await api().CopyLink(); note(r.ok ? 'Ссылка скопирована' : r.error); break; }

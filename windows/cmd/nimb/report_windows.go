@@ -22,7 +22,9 @@ import (
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"github.com/Dizrane/Nimb/windows/internal/dnsx"
 	"github.com/Dizrane/Nimb/windows/internal/ipc"
+	"github.com/Dizrane/Nimb/windows/internal/probe"
 	"github.com/Dizrane/Nimb/windows/internal/report"
 )
 
@@ -40,6 +42,11 @@ func reportEnv() report.Environment {
 		env.UserName = os.Getenv("USERNAME")
 	}
 	env.ComputerName, _ = os.Hostname()
+	if facts, err := dnsx.Describe(); err == nil {
+		for _, f := range facts {
+			env.Connections = append(env.Connections, f.Name)
+		}
+	}
 	return env
 }
 
@@ -90,6 +97,24 @@ func (a *App) ReportPrepare() ReportPrep {
 
 	out = append(out, report.Section("Сеть", cloudflareFacts()...))
 
+	// Which names go through which connection and which DNS: what keeps Smart DNS from working shows here (DNS of IPv6, other
+	// connections with a DNS of their own).
+	if facts, err := dnsx.Describe(); err == nil {
+		var lines []string
+		for _, f := range facts {
+			lines = append(lines, f.Line())
+		}
+		out = append(out, report.Section("Подключения и их DNS", lines...))
+	}
+	if hint := a.browserHint(); hint != "" {
+		out = append(out, report.Section("Браузер", "Firefox установлен, «DNS через HTTPS» в нём не выключен"))
+	}
+
+	probed := a.probeForReport()
+	if len(probed) > 0 {
+		out = append(out, report.Section("Проверка DNS", probe.Lines(probed)...))
+	}
+
 	if resp, err := callService(ipc.Request{Cmd: ipc.Diag}); err == nil && len(resp.Lines) > 0 {
 		out = append(out, report.Section("Служба", resp.Lines...))
 	}
@@ -100,7 +125,9 @@ func (a *App) ReportPrepare() ReportPrep {
 	}
 	out = append(out, report.Section("Журнал окна (последние строки)", log...))
 
-	facts := report.Clean(strings.Join(out, "\n\n"), reportEnv())
+	env := reportEnv()
+	env.Public = probe.Addresses(probed)
+	facts := report.Clean(strings.Join(out, "\n\n"), env)
 	a.mu.Lock()
 	a.reportID, a.reportFacts = id, facts
 	a.mu.Unlock()

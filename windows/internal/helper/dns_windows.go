@@ -105,7 +105,7 @@ func (h *Helper) dnsSet(provider dnsx.Provider) error {
 		return fmt.Errorf("не удалось сохранить прежние настройки: %w", err)
 	}
 	h.logf("dns: %s on %d of %d adapters", provider.ID, len(write), len(now))
-	failed := writeAll(write, provider.Servers())
+	failed := h.writeAll(write, provider)
 	dnsx.Flush()
 	h.syncTunnelDNS()
 	if len(failed) > 0 {
@@ -139,6 +139,10 @@ func (h *Helper) dnsRestore() error {
 		if after, ok := dnsx.Current(a.GUID); ok && !dnsx.Same(after.NameServer, a.NameServer) {
 			failed++
 			names = append(names, a.Name)
+			continue
+		}
+		if a.Set6 {
+			h.write6(a)
 		}
 	}
 	dnsx.Flush()
@@ -151,19 +155,35 @@ func (h *Helper) dnsRestore() error {
 	return nil
 }
 
-// writeAll sets the servers on the adapters, reads them back, and returns the names of the adapters where it did not work.
-func writeAll(adapters []dnsx.Adapter, servers string) (failed []string) {
+// writeAll sets the servers on the adapters, reads them back, and returns the names of the adapters where it did not work. The
+// IPv6 servers are a lesser matter: when they do not take, it is written to the log and the adapter still counts as done.
+func (h *Helper) writeAll(adapters []dnsx.Adapter, provider dnsx.Provider) (failed []string) {
 	for _, a := range adapters {
-		a.NameServer = servers
+		a.NameServer, a.NameServer6 = provider.Servers(), provider.Servers6()
 		if err := dnsx.Write(a); err != nil {
 			failed = append(failed, a.Name)
 			continue
 		}
-		if after, ok := dnsx.Current(a.GUID); ok && !dnsx.Same(after.NameServer, servers) {
+		if after, ok := dnsx.Current(a.GUID); ok && !dnsx.Same(after.NameServer, a.NameServer) {
 			failed = append(failed, a.Name)
+			continue
+		}
+		if a.Set6 {
+			h.write6(a)
 		}
 	}
 	return failed
+}
+
+// write6 writes the IPv6 servers of an adapter and checks them; a failure is only logged.
+func (h *Helper) write6(a dnsx.Adapter) {
+	if err := dnsx.Write6(a); err != nil {
+		h.logf("dns: IPv6 servers of %q: %v", a.Name, err)
+		return
+	}
+	if after, ok := dnsx.Current(a.GUID); ok && !dnsx.Same6(after.NameServer6, a.NameServer6) {
+		h.logf("dns: IPv6 servers of %q did not take: %q", a.Name, after.NameServer6)
+	}
 }
 
 // dnsWatcher looks at the adapters while Smart DNS is on: a new one (the person plugs in a cable, a Wi-Fi adapter wakes up) gets
@@ -237,6 +257,6 @@ func (h *Helper) dnsFresh() {
 		return
 	}
 	h.logf("dns: %s on %d new adapters", provider.ID, len(write))
-	writeAll(write, provider.Servers())
+	h.writeAll(write, provider)
 	dnsx.Flush()
 }

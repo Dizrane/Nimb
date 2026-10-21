@@ -8,19 +8,38 @@
 </head><body><div id="app"></div>
 <script>
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-const M = { ai: false, tg: false, media: false, provider: 'geohide-eu', busy: {}, err: {} };
+const M = { probe: { running: false, phase: '', done: 0, total: 0, reports: [], best: '' }, ai: false, tg: false, media: false, provider: 'geohide-eu', busy: {}, err: {} };
 const providers = [['geohide-eu', 'GeoHide (EU)'], ['comss', 'Comss.one'], ['geohide', 'GeoHide (RU)'], ['geohide-us', 'GeoHide (US)']];
+const svc = (name, status, site, api) => ({ name, status, site, api });
+const names = ['ChatGPT', 'Claude', 'Gemini', 'Grok', 'ElevenLabs'];
+const REPORTS = [
+  { id: 'geohide-eu', working: 4, total: 5, median: 0.44, services: names.map((n) => svc(n, n === 'Gemini' ? 'unstable' : 'works', '6/7', '7/7')), refusals: ['Gemini · 37.221.93.141: перенаправление на www.google.com/sorry'], dead: [] },
+  { id: 'comss', working: 3, total: 5, median: 0.47, services: names.map((n) => svc(n, n === 'ChatGPT' || n === 'Claude' || n === 'Grok' ? 'works' : 'unstable', '4/4', '3/4')), refusals: [], dead: ['34.8.184.191'] },
+  { id: 'geohide', working: 0, total: 5, median: 0.51, services: names.map((n) => svc(n, 'unstable', '1/4', '1/4')), refusals: [], dead: ['159.194.200.33', '193.233.112.67'] },
+  { id: 'geohide-us', working: 0, total: 5, median: 1.3, services: names.map((n) => svc(n, 'down', '0/4', '0/4')), refusals: [], dead: ['107.175.76.134', '192.3.233.253'] },
+];
+async function probe(enable) {
+  M.probe = { running: true, phase: 'addresses', done: 0, total: 0, reports: [], best: '' };
+  await wait(1200); M.probe.phase = 'requests'; M.probe.total = 120;
+  for (let i = 0; i < 120; i += 6) { M.probe.done = i; await wait(150); }
+  M.probe.reports = REPORTS; M.probe.best = 'geohide-eu';
+  if (enable) { M.probe.phase = 'enabling'; await wait(800); M.provider = 'geohide-eu'; M.ai = true; }
+  M.probe.running = false;
+}
 const toggle = (k, name, ms) => async (on) => { M.busy[name] = true; await wait(ms); M[k] = on; delete M.busy[name]; return { ok: true }; };
 window.go = { main: { App: {
   GetState: async () => ({
     version: '0.1.0', serviceOk: !location.search.includes('noservice'), serviceError: 'Служба Nimb не запущена. Переустановите Nimb или запустите службу «Nimb: помощник».',
-    ai: { on: M.ai, provider: M.provider, busy: !!M.busy.ai }, telegram: { on: M.tg, busy: !!M.busy.telegram, port: 1443, link: 'tg://proxy?server=127.0.0.1&port=1443&secret=dd00', stats: { Total: 14, Active: 3, BytesUp: 1200000, BytesDown: 8400000 } },
+    ai: { on: M.ai, provider: M.provider, busy: !!M.busy.ai, warnings: [] }, telegram: { on: M.tg, busy: !!M.busy.telegram, port: 1443, link: 'tg://proxy?server=127.0.0.1&port=1443&secret=dd00', stats: { Total: 14, Active: 3, BytesUp: 1200000, BytesDown: 8400000 } },
     media: { on: M.media, busy: !!M.busy.media, handshakeAgo: 3 },
     providers: providers.map(([id, name]) => ({ id, name })),
+    probe: M.probe,
   }),
   SetAI: toggle('ai', 'ai', 600), SetTelegram: toggle('tg', 'telegram', 300), SetMedia: toggle('media', 'media', 1500),
   SetAll: async (on) => { await Promise.all([toggle('ai', 'ai', 600)(on), toggle('tg', 'telegram', 300)(on), toggle('media', 'media', 1500)(on)]); return { ok: true }; },
   SetProvider: async (id) => { M.provider = id; return { ok: true }; },
+  // the check of the providers: progress, then the same numbers as the real check showed once
+  ProbeStart: async () => { probe(false); return { ok: true }; }, EnableBest: async () => { probe(true); return { ok: true }; },
   Onboarded: async () => localStorage.getItem('onb') === '1', FinishOnboarding: async () => localStorage.setItem('onb', '1'),
   RestartOnboarding: async () => localStorage.removeItem('onb'), OpenTerms: () => {},
   GetAutostart: async () => localStorage.getItem('auto') === '1', SetAutostart: async (on) => { localStorage.setItem('auto', on ? '1' : '0'); return { ok: true }; },

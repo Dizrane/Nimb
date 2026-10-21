@@ -162,9 +162,11 @@ export class Onboarding {
         + next('Начать') + `<button class="link center-link" data-a="onbclose" data-f="onbskip" id="onbskip">Настрою потом</button>`;
     }
     if (step === 1) {
-      const s = S.ai;
-      return head('Нейросети', 'Из-за региона ChatGPT, Claude и другие нейросети могут не открываться. Nimb переключит DNS на специальный сервис, и они заработают.')
-        + (s.on ? done(`Включено: ${providerName}`) + next() : s.busy ? busy('Включаю…') : go('ai', 'Включить', !S.serviceOk) + skip())
+      const s = S.ai, p = S.probe;
+      const progress = p.phase === 'enabling' ? 'Включаю…' : p.total > 0 ? `Проверено ${p.done} из ${p.total}` : 'Определяю адреса…';
+      return head('Нейросети', 'Из-за региона ChatGPT, Claude и другие нейросети могут не открываться. Nimb переключит DNS на специальный сервис, и они заработают. Лучший сервис он подберёт сам.')
+        + (p.running ? busy(progress) : s.on ? done(`Включено: ${providerName}`) + next() : s.busy ? busy('Включаю…')
+          : `<button class="btn main wide" data-a="onbbest" data-f="onbgo" id="onbgo" ${S.serviceOk ? '' : 'disabled'}>Подобрать и включить</button>` + skip())
         + banner(s.error || (S.serviceOk ? '' : S.serviceError));
     }
     if (step === 2) {
