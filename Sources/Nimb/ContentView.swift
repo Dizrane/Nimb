@@ -495,7 +495,8 @@ struct ProvidersSection: View {
                         isSelected: model.selected == provider,
                         isActive: model.active == provider,
                         isBest: model.best?.provider == provider && (model.best?.workingCount ?? 0) > 0,
-                        locked: model.isLocked
+                        locked: model.isLocked,
+                        compact: !model.reports.isEmpty
                     ) {
                         model.select(provider)
                     }
@@ -573,13 +574,15 @@ private struct ProbeButton: View {
     }
 }
 
-private struct ProviderCard: View {
+struct ProviderCard: View {
     let provider: DNSProvider
     let report: ProviderReport?
     let isSelected: Bool
     let isActive: Bool
     let isBest: Bool
     let locked: Bool
+    /// The cards stand two by two (after the check): every card has the same two lines at the top, whatever it carries.
+    let compact: Bool
     let onSelect: () -> Void
 
     @StateObject private var hover = Flag()
@@ -587,38 +590,7 @@ private struct ProviderCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 8) {
-                Text(provider.name)
-                    .font(Typo.name)
-                    .foregroundStyle(Theme.textPrimary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-                if isBest {
-                    Image(systemName: "diamond.fill")
-                        .font(.system(size: 7))
-                        .foregroundStyle(Theme.warn)
-                        .help("Лучший по итогам проверки")
-                }
-                if isActive {
-                    Text("· активен")
-                        .font(.system(size: 12.5, weight: .medium))
-                        .foregroundStyle(Theme.ok)
-                        .lineLimit(1)
-                }
-                Spacer(minLength: 4)
-                if let report {
-                    SpeedBadge(seconds: report.medianSeconds)
-                    Button { details.value.toggle() } label: {
-                        Image(systemName: "info.circle")
-                            .font(.system(size: 13, weight: .light))
-                            .foregroundStyle(Theme.textSecondary)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Подробности проверки")
-                    .popover(isPresented: $details.value, arrowEdge: .trailing) { DetailsView(report: report) }
-                }
-                RadioMark(selected: isSelected)
-            }
+            header
 
             if let report {
                 ViewThatFits(in: .horizontal) {
@@ -651,6 +623,82 @@ private struct ProviderCard: View {
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         .accessibilityAction(.default, onSelect)
         .accessibilityAction(named: "Подробности проверки") { if report != nil { details.value.toggle() } }
+    }
+
+    // MARK: Header
+
+    /// The top of the card. Nothing in it is shrunk or cut, and all the cards of a screen look alike: a wide card (one under another) has
+    /// everything in one line; the narrow ones (two by two, after the check) all have two lines, the name and the choice above, «активен»
+    /// and the speed below, so that a card that carries more does not differ from the rest.
+    @ViewBuilder
+    private var header: some View {
+        if compact {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    title
+                    Spacer(minLength: 4)
+                    RadioMark(selected: isSelected)
+                }
+                HStack(spacing: 8) {
+                    activeMark(dot: false)
+                    Spacer(minLength: 4)
+                    tools
+                }
+            }
+        } else {
+            HStack(spacing: 8) {
+                title
+                activeMark(dot: true)
+                Spacer(minLength: 4)
+                tools
+                RadioMark(selected: isSelected)
+            }
+        }
+    }
+
+    private var title: some View {
+        HStack(spacing: 8) {
+            Text(provider.name)
+                .font(Typo.name)
+                .foregroundStyle(Theme.textPrimary)
+                .lineLimit(1)
+                .fixedSize()
+            if isBest {
+                Image(systemName: "diamond.fill")
+                    .font(.system(size: 7))
+                    .foregroundStyle(Theme.warn)
+                    .help("Лучший по итогам проверки")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func activeMark(dot: Bool) -> some View {
+        if isActive {
+            Text(dot ? "· активен" : "активен")
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(Theme.ok)
+                .lineLimit(1)
+                .fixedSize()
+        }
+    }
+
+    /// The speed and the small ⓘ with the details of the check; only once there is a check.
+    @ViewBuilder
+    private var tools: some View {
+        if let report {
+            HStack(spacing: 8) {
+                SpeedBadge(seconds: report.medianSeconds)
+                Button { details.value.toggle() } label: {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 13, weight: .light))
+                        .foregroundStyle(Theme.textSecondary)
+                }
+                .buttonStyle(.plain)
+                .help("Подробности проверки")
+                .popover(isPresented: $details.value, arrowEdge: .trailing) { DetailsView(report: report) }
+            }
+        }
     }
 
     /// What the card says, in words: active, chosen, the best, how many services work and how fast.
@@ -721,6 +769,8 @@ private struct SpeedBadge: View {
             .frame(height: 12)
             Text(seconds.map { "\($0.formatted(.number.precision(.fractionLength(1)))) с" } ?? "—")
                 .font(.system(size: 12, weight: .medium).monospacedDigit())
+                .lineLimit(1)
+                .fixedSize()
                 .foregroundStyle(Theme.textPrimary.opacity(0.9))
         }
         .accessibilityElement(children: .ignore)
