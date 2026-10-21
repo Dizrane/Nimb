@@ -340,18 +340,23 @@ enum DNSManager {
     /// The prompt itself, for one script.
     @discardableResult
     static func runPrivilegedNow(_ script: String) throws -> String {
-        let escaped = script
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-        let appleScript = "do shell script \"\(escaped)\" with administrator privileges"
         do {
-            return try run("/usr/bin/osascript", ["-e", appleScript], timeout: nil).trimmingCharacters(in: .whitespacesAndNewlines)
+            return try run("/usr/bin/osascript", ["-e", appleScript(running: script)], timeout: nil).trimmingCharacters(in: .whitespacesAndNewlines)
         } catch DNSError.failed(let message) {
             if message.contains("-128") || message.localizedCaseInsensitiveContains("User canceled") {
                 throw DNSError.cancelled
             }
             throw DNSError.failed(cleanScriptError(message))
         }
+    }
+
+    /// The line of AppleScript that runs `script` in the shell, with the password prompt or (for a test) without it. AppleScript gives
+    /// back what the script printed with the line ends changed to carriage returns (`\r`), so a reader of the output must not wait for `\n`.
+    static func appleScript(running script: String, privileged: Bool = true) -> String {
+        let escaped = script
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "do shell script \"\(escaped)\"" + (privileged ? " with administrator privileges" : "")
     }
 
     /// osascript reports "0:123: execution error: <stderr> (1)"; keep only the stderr text.

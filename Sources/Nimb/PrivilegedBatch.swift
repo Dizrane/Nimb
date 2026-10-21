@@ -88,7 +88,8 @@ final class PrivilegedBatch: @unchecked Sendable {
     // MARK: One script for several
 
     /// Each script runs in a shell of its own, with its own stdout and stderr. For each one a line says how it went:
-    /// `NIMB-RESULT <number> <exit code> x<base64 of stdout> x<base64 of stderr>` (the `x` keeps an empty field a field). The script
+    /// `NIMB-RESULT <number> <exit code> x<base64 of stdout> x<base64 of stderr>` (the `x` keeps an empty field a field). AppleScript turns the
+    /// line ends of what it brings back into carriage returns, so the lines are told apart by any line end. The script
     /// itself always ends well, so that the lines come back even when a job fails.
     static func combined(_ scripts: [String], in workFolder: String = "/var/run") -> String {
         var lines = ["e=$(/usr/bin/mktemp '\(workFolder)/nimb-batch.XXXXXX')"]
@@ -105,7 +106,7 @@ final class PrivilegedBatch: @unchecked Sendable {
     /// What `combined` printed, as one result per script: what it printed, or the failure with its error text.
     static func results(in output: String, count: Int) -> [Result<String, Error>] {
         var found: [Int: Result<String, Error>] = [:]
-        for line in output.split(separator: "\n") where line.hasPrefix("NIMB-RESULT ") {
+        for line in output.split(whereSeparator: \.isNewline) where line.hasPrefix("NIMB-RESULT ") {
             let fields = line.split(separator: " ", omittingEmptySubsequences: false)
             guard fields.count == 5, let number = Int(fields[1]), let code = Int(fields[2]),
                   fields[3].hasPrefix("x"), fields[4].hasPrefix("x") else { continue }

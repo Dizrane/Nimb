@@ -665,6 +665,29 @@ import Testing
         #expect(root.calls == 2)
     }
 
+    @Test(arguments: ["\n", "\r", "\r\n"])
+    func theLinesAreToldApartByAnyLineEnd(lineEnd: String) throws {
+        let output = ["NIMB-RESULT 0 0 xb25l x", "NIMB-RESULT 1 3 x xYm9vbQ=="].joined(separator: lineEnd) + lineEnd
+        let results = PrivilegedBatch.results(in: output, count: 2)
+        #expect(try results[0].get() == "one")
+        if case .failure(let error) = results[1] { #expect(error.localizedDescription == "boom") } else { Issue.record("the second must fail") }
+    }
+
+    /// The real road of the answer: the combined script goes through AppleScript (without the password prompt), which changes `\n` to `\r`.
+    @Test func twoJobsThroughRealAppleScript() throws {
+        let work = String(NSTemporaryDirectory().dropLast())
+        let jobs = PrivilegedBatch(workFolder: work) { script in
+            try DNSManager.run("/usr/bin/osascript", ["-e", DNSManager.appleScript(running: script, privileged: false)], timeout: 30)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        jobs.expect(2)
+        let results = together(jobs, ["echo one", "echo bad >&2; exit 3"])
+        let texts = results.map { result -> String in
+            switch result { case .success(let text): return "ok:\(text)"; case .failure(let error): return "fail:\(error.localizedDescription)" }
+        }
+        #expect(Set(texts) == ["ok:one", "fail:bad"])
+    }
+
     @Test func theLinesOfAnAnswerAreReadBackWhateverElseIsPrinted() {
         let results = PrivilegedBatch.results(in: "noise\nNIMB-RESULT 1 0 x x\nNIMB-RESULT 0 5 x x\nNIMB-RESULT 9 0 x x\nbroken NIMB-RESULT", count: 3)
         #expect((try? results[1].get()) == "")
