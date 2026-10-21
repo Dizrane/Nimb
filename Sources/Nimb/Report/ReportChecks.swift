@@ -29,6 +29,8 @@ struct SystemSnapshot {
     var routes = 0
     /// What the helper wrote when it took the tunnel down itself, if that was lately.
     var dropped: String?
+    /// The restarts of the tunnel program by the helper in the last day.
+    var restarts: [Date] = []
     /// The last lines of the log of the tunnel daemon (empty: no log).
     var daemonLog: [String] = []
     var proxies: [String] = []
@@ -37,6 +39,13 @@ struct SystemSnapshot {
 }
 
 enum ReportChecks {
+    private static let restartStamp: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "MM-dd HH:mm"
+        return f
+    }()
+
     static func dns(active: DNSProvider?, serviceServers: [[String]], resolver: [String]) -> ServiceCheck {
         let name = "Нейросети (DNS)"
         let total = serviceServers.count
@@ -68,11 +77,14 @@ enum ReportChecks {
                             seen: seen, agrees: listening && stats.wrongSecret == 0 && stats.failures * 5 <= total)
     }
 
-    static func tunnel(on: Bool, routes: Int, interface: String, warp: String?, dropped: String?) -> ServiceCheck {
+    static func tunnel(on: Bool, routes: Int, interface: String, warp: String?, dropped: String?, restarts: [Date] = []) -> ServiceCheck {
         let name = "YouTube и Discord (туннель)"
         let viaTunnel = interface.hasPrefix("utun")
         let cloudflare = warp.map { "warp=\($0)" } ?? "Cloudflare не ответил"
         var seen = "маршрутов туннеля \(routes); трафик в интернет идёт через \(interface); \(cloudflare)"
+        if let last = restarts.last {
+            seen += "; программа туннеля сама останавливалась и запускалась снова за сутки: \(restarts.count) (последний раз в \(restartStamp.string(from: last)))"
+        }
         if on {
             return ServiceCheck(name: name, expected: "маршруты туннеля стоят, трафик идёт через него, Cloudflare видит WARP (warp=on)",
                                 seen: seen, agrees: routes > 0 && viaTunnel && warp == "on")

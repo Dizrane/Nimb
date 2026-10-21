@@ -313,6 +313,27 @@ import Testing
 }
 
 /// One notification for one version, however often the check runs.
+@Suite struct TunnelRestartTests {
+    @Test func theMarkOfARestartIsBelievedForAWhile() {
+        let now = Date()
+        #expect(TunnelRestart.isActive(markedAt: now.addingTimeInterval(-30), now: now))
+        #expect(!TunnelRestart.isActive(markedAt: now.addingTimeInterval(-300), now: now))
+    }
+
+    @Test func readsTheTimesOfTheRestartsAndSkipsWhatIsNotATime() {
+        let text = "1792615802\n\nnot a time\n 1792616000 \n-5\n"
+        #expect(TunnelRestart.parse(text).map(\.timeIntervalSince1970) == [1792615802, 1792616000])
+    }
+
+    @Test func onlyTheRestartsOfTheLastDayAreRecentAndOnlyNewOnesAreUnseen() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let text = "\(1_800_000_000 - 90_000)\n\(1_800_000_000 - 3_000)\n\(1_800_000_000 - 100)\n"
+        #expect(TunnelRestart.recent(text, now: now).count == 2)
+        #expect(TunnelRestart.unseen(text, seen: TimeInterval(1_800_000_000 - 3_000), now: now).count == 1)
+        #expect(TunnelRestart.unseen(text, seen: TimeInterval(1_800_000_000 - 100), now: now).isEmpty)
+    }
+}
+
 @Suite struct NotifierBannerTests {
     @Test func testNotificationShowsEvenInFront() {
         #expect(Notifier.showsBanner(identifier: Notifier.testIdentifier, appIsActive: true))

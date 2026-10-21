@@ -257,6 +257,14 @@ import Testing
         #expect(ReportChecks.hostsMentions(in: hosts, domains: ["chatgpt.com", "api.anthropic.com", "t.me"]) == ["api.anthropic.com"])
     }
 
+    @Test func theTunnelCheckTellsAboutRestartsButStillAgrees() {
+        let now = Date()
+        let check = ReportChecks.tunnel(on: true, routes: 3, interface: "utun5", warp: "on", dropped: nil, restarts: [now.addingTimeInterval(-600), now])
+        #expect(check.agrees)
+        #expect(check.seen.contains("запускалась снова за сутки: 2"))
+        #expect(!ReportChecks.tunnel(on: true, routes: 3, interface: "utun5", warp: "on", dropped: nil).seen.contains("запускалась снова"))
+    }
+
     @Test func theTailOfTheDaemonLogIsTheLastLinesWithoutEmptyOnes() {
         let text = (1...40).map { "line \($0)" }.joined(separator: "\n\n") + "\n"
         let tail = ReportChecks.logTail(text, limit: 3)

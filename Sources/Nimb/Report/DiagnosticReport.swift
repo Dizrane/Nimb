@@ -32,7 +32,7 @@ enum DiagnosticReport {
         out.append(section("Что ждали и что увидели", [
             ReportChecks.dns(active: dns.active, serviceServers: system.serviceServers, resolver: system.resolver),
             ReportChecks.telegram(running: telegram.isRunning, port: telegram.port, listening: telegram.isListening, stats: telegram.stats),
-            ReportChecks.tunnel(on: warp.isOn, routes: system.routes, interface: system.interface, warp: system.warp, dropped: system.dropped),
+            ReportChecks.tunnel(on: warp.isOn, routes: system.routes, interface: system.interface, warp: system.warp, dropped: system.dropped, restarts: system.restarts),
         ].flatMap(\.lines)))
 
         let shown = [dns.errorMessage, telegram.errorMessage, warp.errorMessage].compactMap { $0 }
@@ -175,6 +175,7 @@ enum DiagnosticReport {
             system.dropped = "\(drop.reason) в \(drop.when.formatted(.dateTime.month(.twoDigits).day(.twoDigits).hour().minute()))"
         }
         if let text = try? String(contentsOfFile: WarpPaths.daemonLog, encoding: .utf8) { system.daemonLog = ReportChecks.logTail(text) }
+        if let text = try? String(contentsOfFile: WarpPaths.restartsFile, encoding: .utf8) { system.restarts = TunnelRestart.recent(text, now: Date()) }
         system.proxies = ReportChecks.proxies(from: run("/usr/sbin/scutil", ["--proxy"]))
         system.vpnConnected = ReportChecks.connectedVPNs(from: run("/usr/sbin/scutil", ["--nc", "list"]))
         let domains = ProbeTarget.all.map(\.host) + ["telegram.org", "t.me", "youtube.com", "discord.com"]

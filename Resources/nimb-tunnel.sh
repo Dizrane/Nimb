@@ -1,10 +1,11 @@
 #!/bin/sh
-# nimb-tunnel 7: brings the Nimb WARP tunnel up and down. It runs as root, from /usr/local/libexec/nimb, which only root
+# nimb-tunnel 8: brings the Nimb WARP tunnel up and down. It runs as root, from /usr/local/libexec/nimb, which only root
 # can write to. The settings are read from warp.conf next to it, a file of plain key=value lines that Nimb wrote after
 # checking every value; nothing in it is ever executed.
 #
 #   nimb-tunnel up      start amneziawg-go, configure it, add the routes, wait for the handshake; a small watcher then follows
-#                       the network (the route to the server) and notes it if the daemon ends by itself
+#                       the network (the route to the server) and, if the daemon ends by itself, starts it again (up to three
+#                       times in ten minutes; only when that fails the routes stay out and a note tells Nimb)
 #   nimb-tunnel down    remove the routes and stop it
 #   nimb-tunnel status  print "up <interface> <pid>" or "down"
 #   nimb-tunnel unregister  delete this Mac's anonymous WARP account at Cloudflare (best effort)
@@ -20,6 +21,12 @@ BIN="$DIR/amneziawg-go"
 STATE="$RUN.state"
 LOG="$RUN.log"
 SOCKDIR=/var/run/amneziawg
+case $0 in /*) SELF=$0 ;; *) SELF=$PWD/$0 ;; esac
+TICK=5                      # seconds between two looks of the watcher
+RESTART_WAITS="0 3 15"      # seconds to wait before each try to start the daemon again
+if [ -n "${NIMB_TUNNEL_TEST:-}" ]; then
+    SOCKDIR="${NIMB_TUNNEL_SOCKDIR:-$SOCKDIR}"; TICK="${NIMB_TUNNEL_TICK:-$TICK}"; RESTART_WAITS="${NIMB_TUNNEL_RESTART_WAITS:-$RESTART_WAITS}"
+fi
 
 say() { printf '%s\n' "$*"; }
 fail() { printf '%s\n' "$*" >&2; exit 1; }
@@ -76,22 +83,50 @@ drop_routes() {
 
 watch_network() { # watch_network <daemon pid> <endpoint host>
     while alive "$1"; do
-        sleep 5
+        sleep "$TICK"
         trim_log
         now=$(uplink_now)
         [ -n "$now" ] && [ "$now" != "$(state_get uplink)" ] && retarget "$2" "$now"
     done
-    # The daemon stopped without `down` (killed, crashed): the Mac is not left cut off from the internet, and the note tells Nimb that it
-    # was not the person. Without a state file `down` has already done all this.
-    if [ -f "$STATE" ]; then
-        printf '%s daemon-exited\n' "$(date +%s)" > "$RUN.dropped"
-        chmod 644 "$RUN.dropped"
-        log_mark "daemon-exited"
-    fi
+    # The daemon stopped without `down` (killed, crashed). Without a state file `down` has already done all this.
+    [ -f "$STATE" ] || return 0
+    log_mark "daemon-exited"
     iface=$(state_get interface)
+    watcher=$(state_get watcher)
     drop_routes
     [ -n "$iface" ] && rm -f "$SOCKDIR/$iface.sock"
     rm -f "$STATE" "$RUN.name"
+    restart_daemon "$watcher" && return 0
+    # It could not be started again: the Mac is left with its internet, and the note tells Nimb that it was not the person.
+    printf '%s daemon-exited\n' "$(date +%s)" > "$RUN.dropped"
+    chmod 644 "$RUN.dropped"
+}
+
+# The daemon is started again by the same `up`. The routes are out for those seconds (the Mac has its internet), and `$RUN.restarting`
+# tells Nimb that the tunnel is only being restarted, so that its switch does not blink. A tunnel that keeps dying is left alone after three
+# restarts in ten minutes. Returns 0 when it is up again or when somebody else has taken over (`down`, a new `up`).
+restart_daemon() { # restart_daemon <pid of the watcher>
+    since=$(( $(date +%s) - 600 ))
+    recent=$([ -f "$RUN.restarts" ] && awk -v t="$since" '$1 > t' "$RUN.restarts" | wc -l | tr -d ' ')
+    if [ "${recent:-0}" -ge 3 ]; then log_mark "restart skipped: three in ten minutes"; return 1; fi
+    printf '%s\n' "${1:-0}" > "$RUN.restarting"
+    chmod 644 "$RUN.restarting"
+    for delay in $RESTART_WAITS; do
+        sleep "$delay"
+        if [ -f "$RUN.stopped" ] || [ -f "$STATE" ]; then rm -f "$RUN.restarting"; return 0; fi
+        log_mark "restarting"
+        if NIMB_TUNNEL_RESTART=1 "$SELF" up >/dev/null 2>>"$LOG"; then
+            printf '%s\n' "$(date +%s)" >> "$RUN.restarts"
+            chmod 644 "$RUN.restarts"
+            tail -n 50 "$RUN.restarts" > "$RUN.restarts.tmp" && cat "$RUN.restarts.tmp" > "$RUN.restarts"; rm -f "$RUN.restarts.tmp"
+            log_mark "restarted"
+            rm -f "$RUN.restarting"
+            return 0
+        fi
+    done
+    log_mark "restart failed"
+    rm -f "$RUN.restarting"
+    return 1
 }
 
 cmd_status() {
@@ -99,7 +134,16 @@ cmd_status() {
     if alive "$pid"; then say "up $(state_get interface) $pid"; else say "down"; fi
 }
 
+# `down` by the person: nothing is started again after it, even if the daemon was in the middle of a restart.
 cmd_down() {
+    : > "$RUN.stopped"
+    restarting=$(cat "$RUN.restarting" 2>/dev/null)
+    [ -n "$restarting" ] && [ "$restarting" != 0 ] && kill "$restarting" 2>/dev/null
+    rm -f "$RUN.restarting"
+    take_down
+}
+
+take_down() {
     [ -f "$STATE" ] || return 0
     pid=$(state_get pid)
     # The watcher first: it must not take the end of the daemon for a crash.
@@ -116,11 +160,15 @@ cmd_down() {
     rm -f "$STATE" "$RUN.name"
 }
 
+# A restart that the watcher started must not outlive a `down` of the person that came in the meantime.
+stopped_by_person() { [ -n "${NIMB_TUNNEL_RESTART:-}" ] && [ -f "$RUN.stopped" ]; }
+
 cmd_up() {
     pid=$(state_get pid)
     if alive "$pid"; then say "already up"; return 0; fi
-    cmd_down
+    take_down
     rm -f "$RUN.dropped"
+    [ -n "${NIMB_TUNNEL_RESTART:-}" ] || rm -f "$RUN.stopped"
     [ -x "$BIN" ] || fail "нет $BIN"
     [ -f "$CONF" ] || fail "нет $CONF"
 
@@ -169,6 +217,7 @@ persistent_keepalive_interval=25" ;; esac
     case "$host" in *:*) endpoint="[$host]:$port" ;; *) endpoint="$host:$port" ;; esac
 
     # 2. Start the daemon; it makes a utun interface of its own.
+    stopped_by_person && fail "остановлено"
     rm -f "$RUN.name"
     # A hangup of whatever started this script (its session, its terminal) must not take the daemon and the watcher with it: an ignored
     # signal stays ignored in the processes started from here.
@@ -188,6 +237,7 @@ persistent_keepalive_interval=25" ;; esac
 
     { printf 'pid=%s\ninterface=%s\n' "$pid" "$iface"; } > "$STATE"
     chmod 644 "$STATE"
+    stopped_by_person && { take_down; fail "остановлено"; }
 
     # 3. Configure it.
     payload="set=1
@@ -201,10 +251,11 @@ allowed_ip=$cidr"; done
     reply=$(printf '%s\n\n' "$payload" | uapi "$sock" | tr -d '\r')
     case "$reply" in
         *errno=0*) ;;
-        *) cmd_down; fail "amneziawg-go отклонил настройки: $reply" ;;
+        *) take_down; fail "amneziawg-go отклонил настройки: $reply" ;;
     esac
 
     # 4. Address and routes.
+    stopped_by_person && { take_down; fail "остановлено"; }
     [ -n "$addr4" ] && ifconfig "$iface" inet "$addr4" "$addr4" netmask 255.255.255.255 mtu "$mtu" up
     [ -n "$addr6" ] && ifconfig "$iface" inet6 "$addr6" prefixlen 128 up >/dev/null 2>&1
     ifconfig "$iface" up
@@ -240,7 +291,7 @@ allowed_ip=$cidr"; done
         shake=0
         sleep 1; i=$((i + 1))
     done
-    if [ "$shake" = 0 ]; then cmd_down; fail "сервер не ответил: нет рукопожатия за 16 секунд"; fi
+    if [ "$shake" = 0 ]; then take_down; fail "сервер не ответил: нет рукопожатия за 16 секунд"; fi
     if [ $watching = yes ]; then
         watch_network "$pid" "$host" </dev/null >/dev/null 2>&1 &
         printf 'watcher=%s\n' "$!" >> "$STATE"

@@ -16,6 +16,10 @@ enum WarpPaths {
     /// The note the helper leaves when it takes the tunnel down itself (the server stopped answering).
     static let droppedFile = "/var/run/nimb-tunnel.dropped"
     static let daemonLog = "/var/run/nimb-tunnel.log"
+    /// The helper starts the program of the tunnel again when it ends by itself: each restart is a unix time on a line of `restartsFile`, and
+    /// `restartingFile` is there while one is going on.
+    static let restartsFile = "/var/run/nimb-tunnel.restarts"
+    static let restartingFile = "/var/run/nimb-tunnel.restarting"
     /// The sudoers rule that lets the person start and stop the tunnel without a password (opt-in, like the one for DNS).
     static let sudoersPath = "/etc/sudoers.d/nimb-tunnel"
     static let passwordlessCommands = ["\(helper) up", "\(helper) down"]
@@ -26,7 +30,7 @@ enum WarpPaths {
     }
 
     /// Stops the tunnel and deletes everything that was installed. Used by "remove" and by the uninstall.
-    static let removeScript = "[ ! -x '\(helper)' ] || { '\(helper)' down; '\(helper)' unregister || true; }; /bin/rm -f '\(sudoersPath)'; /bin/rm -rf '\(dir)' /var/run/nimb-tunnel.state /var/run/nimb-tunnel.log /var/run/nimb-tunnel.name /var/run/nimb-tunnel.dropped"
+    static let removeScript = "[ ! -x '\(helper)' ] || { '\(helper)' down; '\(helper)' unregister || true; }; /bin/rm -f '\(sudoersPath)'; /bin/rm -rf '\(dir)' /var/run/nimb-tunnel.state /var/run/nimb-tunnel.log /var/run/nimb-tunnel.name /var/run/nimb-tunnel.dropped /var/run/nimb-tunnel.restarts /var/run/nimb-tunnel.restarting /var/run/nimb-tunnel.stopped"
 }
 
 /// The tunnel ended without the person: the program of the tunnel exited by itself (`daemon-exited`; an older helper also wrote
@@ -55,6 +59,29 @@ enum TunnelDrop {
     }
 }
 
+/// The program of the tunnel ended by itself and the helper started it again (`WarpPaths.restartsFile`). The person is not told: the switch
+/// stays on, the tunnel works; the restarts go to the diary and the report, so that a problem behind them can be seen.
+enum TunnelRestart {
+    /// The mark of a restart in progress is believed for this long: a helper that died in the middle must not keep the switch on for ever.
+    static let markerLife: TimeInterval = 120
+
+    static func isActive(markedAt: Date, now: Date) -> Bool { now.timeIntervalSince(markedAt) < markerLife }
+
+    static func parse(_ text: String) -> [Date] {
+        text.split(whereSeparator: \.isNewline).compactMap { TimeInterval($0.trimmingCharacters(in: .whitespaces)) }.filter { $0 > 0 }.map { Date(timeIntervalSince1970: $0) }
+    }
+
+    /// The restarts of the last `within` seconds, oldest first.
+    static func recent(_ text: String, now: Date, within: TimeInterval = 24 * 3600) -> [Date] {
+        parse(text).filter { now.timeIntervalSince($0) < within }.sorted()
+    }
+
+    /// The restarts that the diary has not got yet; `seen` is the time of the last one that it has, as unix seconds.
+    static func unseen(_ text: String, seen: TimeInterval, now: Date) -> [Date] {
+        recent(text, now: now).filter { $0.timeIntervalSince1970 > seen }
+    }
+}
+
 /// The WARP tunnel: AmneziaWG (WireGuard with extra camouflage) to Cloudflare, so that YouTube and Discord open.
 @MainActor
 final class WarpTunnelModel: ObservableObject {
@@ -76,6 +103,7 @@ final class WarpTunnelModel: ObservableObject {
 
     private var timer: Timer?
     private static let droppedSeenKey = "tunnelDroppedSeen"
+    private static let restartsSeenKey = "tunnelRestartsSeen"
 
     init() {
         refresh()
@@ -122,15 +150,34 @@ final class WarpTunnelModel: ObservableObject {
         if bundledFiles == nil && !WarpPaths.isInstalled { return .unavailable }
         if !WarpPaths.isInstalled { return .notInstalled }
         if let interface = Self.runningInterface() { return .on(interface: interface) }
+        // The helper is starting the program again: the switch stays as it is, it does not blink.
+        if case .on = phase, Self.isRestarting { return phase }
         return .off
+    }
+
+    /// The helper marks a restart in progress with a file; an old mark is no mark.
+    private static var isRestarting: Bool {
+        guard let date = (try? FileManager.default.attributesOfItem(atPath: WarpPaths.restartingFile))?[.modificationDate] as? Date else { return false }
+        return TunnelRestart.isActive(markedAt: date, now: Date())
     }
 
     func refresh() {
         if isWorking { return }
+        noticeRestarts()
         noticeDrop()
         // Only a change is published: this runs every few seconds, and an unchanged value would redraw every page.
         let next = currentPhase()
         if next != phase { phase = next }
+    }
+
+    /// The program of the tunnel ended by itself and was started again: only the diary hears of it.
+    private func noticeRestarts() {
+        guard let text = try? String(contentsOfFile: WarpPaths.restartsFile, encoding: .utf8) else { return }
+        let defaults = UserDefaults.standard
+        let fresh = TunnelRestart.unseen(text, seen: defaults.double(forKey: Self.restartsSeenKey), now: Date())
+        guard let last = fresh.last else { return }
+        defaults.set(last.timeIntervalSince1970, forKey: Self.restartsSeenKey)
+        AppLog.shared.add("tunnel", "программа туннеля остановилась сама, помощник запустил её снова (раз: \(fresh.count))")
     }
 
     /// The tunnel has ended by itself: the person is told once, on the page and in the diary.
