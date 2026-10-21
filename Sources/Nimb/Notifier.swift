@@ -81,36 +81,23 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
         AppLog.shared.add("notifications", "показал уведомление о версии \(version)")
     }
 
-    /// What the button of the test shows for a moment after a press.
-    enum TestResult { case sent, alreadyShown }
-    @Published private(set) var testResult: TestResult?
+    /// The button of the test is idle for a moment after a press, so it cannot be pressed in a rush.
+    @Published private(set) var testJustSent = false
 
-    /// The person asked to see that notifications work (the button in the settings). The same notification is not sent again while the
-    /// first one is still in the Notification Centre: a person who presses the button again and again gets no pile of them.
+    /// The person asked to see that notifications work (the button in the settings). A second test takes the place of the first one in the
+    /// Notification Centre (the same identifier), so a person who missed the banner can ask again and there is never a pile of them.
     func sendTest() {
-        guard let center, isOn else { return }
-        center.getDeliveredNotifications { delivered in
-            let ids = delivered.map { $0.request.identifier }
-            Task { @MainActor in
-                guard Self.testIsDue(delivered: ids) else { return self.showTestResult(.alreadyShown) }
-                let content = UNMutableNotificationContent()
-                content.title = "Проверка уведомлений"
-                content.body = "Если вы это видите, Nimb сможет сообщить о новой версии."
-                center.add(UNNotificationRequest(identifier: Self.testIdentifier, content: content, trigger: nil)) { error in
-                    if let error { AppLog.shared.add("notifications", "проверочное уведомление не показано: \(error.localizedDescription)") }
-                }
-                AppLog.shared.add("notifications", "показал проверочное уведомление")
-                self.showTestResult(.sent)
-            }
+        guard let center, isOn, !testJustSent else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Проверка уведомлений"
+        content.body = "Если вы это видите, Nimb сможет сообщить о новой версии."
+        center.add(UNNotificationRequest(identifier: Self.testIdentifier, content: content, trigger: nil)) { error in
+            if let error { AppLog.shared.add("notifications", "проверочное уведомление не показано: \(error.localizedDescription)") }
         }
+        AppLog.shared.add("notifications", "показал проверочное уведомление")
+        testJustSent = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.testJustSent = false }
     }
-
-    private func showTestResult(_ result: TestResult) {
-        testResult = result
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.testResult = nil }
-    }
-
-    nonisolated static func testIsDue(delivered identifiers: [String]) -> Bool { !identifiers.contains(testIdentifier) }
 
     static let testIdentifier = "nimb-test"
 
@@ -136,14 +123,6 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
 struct NotificationsCard: View {
     @ObservedObject private var notifier = Notifier.shared
 
-    private var testTitle: String {
-        switch notifier.testResult {
-        case .sent: return "Отправлено"
-        case .alreadyShown: return "Уже показано"
-        case nil: return "Отправить тестовое уведомление"
-        }
-    }
-
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             VStack(alignment: .leading, spacing: 3) {
@@ -157,8 +136,8 @@ struct NotificationsCard: View {
                     .foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                 if notifier.isOn {
-                    OutlineButton(title: testTitle, color: Theme.textPrimary) { notifier.sendTest() }
-                        .disabled(notifier.testResult != nil)
+                    OutlineButton(title: notifier.testJustSent ? "Отправлено" : "Отправить тестовое уведомление", color: Theme.textPrimary) { notifier.sendTest() }
+                        .disabled(notifier.testJustSent)
                         .padding(.top, 5)
                         .accessibilityLabel("Отправить тестовое уведомление")
                 }
