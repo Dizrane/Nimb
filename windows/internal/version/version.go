@@ -2,4 +2,4 @@
 package version
 
 // Version is the version of the window and of the service; they are released together.
-const Version = "0.1.0"
+const Version = "0.1.1"
