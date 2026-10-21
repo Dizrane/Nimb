@@ -139,7 +139,7 @@ struct NotificationsCard: View {
     private var testTitle: String {
         switch notifier.testResult {
         case .sent: return "Отправлено"
-        case .alreadyShown: return "Не отправлено: уже показано"
+        case .alreadyShown: return "Уже показано"
         case nil: return "Отправить тестовое уведомление"
         }
     }
