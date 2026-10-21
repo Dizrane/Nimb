@@ -1,0 +1,68 @@
+{
+  "name": "media-screen",
+  "version": 1,
+  "scale": 2,
+  "pointSize": [
+    160,
+    132
+  ],
+  "layers": [
+    {
+      "id": "off",
+      "file": "off.png",
+      "role": "figure",
+      "blend": "normal"
+    },
+    {
+      "id": "on",
+      "file": "on.png",
+      "role": "figure",
+      "blend": "normal"
+    }
+  ],
+  "anchors": {
+    "center": [
+      80,
+      66
+    ],
+    "crown": [
+      80,
+      29.2
+    ],
+    "play": [
+      77.6,
+      58
+    ],
+    "mark": [
+      111.2,
+      90
+    ]
+  },
+  "motion": [
+    {
+      "target": "all",
+      "type": "float",
+      "period": 7.0,
+      "amount": 2.2,
+      "notes": "bob, only while on (as now: sin(0.9 t) * 2.2 pt). The screen does NOT sway (no rotation)."
+    }
+  ],
+  "states": {
+    "off": {
+      "show": "off"
+    },
+    "on": {
+      "show": "on",
+      "notes": "cross-fade off -> on over about 1 s, with the halo coming down"
+    },
+    "busy": {
+      "show": "on"
+    }
+  },
+  "notes": "Black-and-white scene of YouTube and Discord (black screen with a play button, the mark of Discord at the lower right), the same clean finish as the dog; the satellite is gone. The shapes are the ones of the old drawing (ScreenArt.swift), drawn at the same size (the old drawing scaled by 0.8: the screen is 100.8 x 70.4 pt) on a canvas of 160 x 132 pt (320 x 264 px) with room for the soft glow, which is part of the picture. Put the middle of the canvas where the middle of the old figure was. Halo: see 'halo' (haloY -61, scale 0.8, NOT the old -36). The motion on top of the scene is in ../media-motion (reference code and numbers). Files: 47 KB, memory 2 x 0.34 MB.",
+  "halo": {
+    "centerY": -61,
+    "scale": 0.8,
+    "notes": "Position of the halo on this page: its centre is 61 pt ABOVE the middle of the stage (haloY = -61) and the scale is 0.8. The ring hovers above the screen: its lower arc just goes behind the top edge of the screen (the screen is in front of it), and it does not touch the rounded corners. The old value was -36, which made the ring graze the corners. The halo stack, drop-in and breathing stay as on the other pages."
+  }
+}

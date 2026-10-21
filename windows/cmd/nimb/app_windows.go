@@ -7,10 +7,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	"golang.org/x/sys/windows"
 
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -374,6 +377,26 @@ func (a *App) SetAutostart(on bool) Result {
 	if err := setAutostart(on); err != nil {
 		logLine("autostart: " + err.Error())
 		return Result{Error: "Не удалось изменить автозапуск."}
+	}
+	return Result{OK: true}
+}
+
+// Uninstall starts the uninstaller of Nimb (Windows asks for the administrator rights itself). It takes the DNS back and removes the
+// service, the account at Cloudflare, the driver and the files.
+func (a *App) Uninstall() Result {
+	exe, err := os.Executable()
+	if err != nil {
+		return Result{Error: "Не удалось найти программу удаления."}
+	}
+	path := filepath.Join(filepath.Dir(exe), "Uninstall.exe")
+	if _, err := os.Stat(path); err != nil {
+		return Result{Error: "Программы удаления нет рядом с Nimb. Удалите Nimb в «Параметры → Приложения»."}
+	}
+	verb, _ := syscall.UTF16PtrFromString("runas")
+	file, _ := syscall.UTF16PtrFromString(path)
+	if err := windows.ShellExecute(0, verb, file, nil, nil, windows.SW_SHOWNORMAL); err != nil {
+		logLine("uninstall: " + err.Error())
+		return Result{Error: "Не удалось запустить удаление."}
 	}
 	return Result{OK: true}
 }

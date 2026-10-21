@@ -23,10 +23,10 @@ func main() {
 	app := NewApp()
 	err := wails.Run(&options.App{
 		Title:             "Nimb",
-		Width:             940,
-		Height:            620,
-		MinWidth:          800,
-		MinHeight:         520,
+		Width:             1100,
+		Height:            680,
+		MinWidth:          900,
+		MinHeight:         560,
 		BackgroundColour:  &options.RGBA{R: 0, G: 0, B: 0, A: 255},
 		AssetServer:       &assetserver.Options{Assets: assets},
 		OnStartup:         app.startup,
@@ -40,7 +40,15 @@ func main() {
 			OnSecondInstanceLaunch: app.secondInstance,
 		},
 		Windows: &windows.Options{
-			Theme:                windows.Dark,
+			Theme: windows.Dark,
+			CustomTheme: &windows.ThemeSettings{
+				DarkModeTitleBar:          windows.RGB(0, 0, 0),
+				DarkModeTitleBarInactive:  windows.RGB(0, 0, 0),
+				DarkModeTitleText:         windows.RGB(235, 235, 240),
+				DarkModeTitleTextInactive: windows.RGB(120, 120, 128),
+				DarkModeBorder:            windows.RGB(28, 28, 30),
+				DarkModeBorderInactive:    windows.RGB(28, 28, 30),
+			},
 			WebviewIsTransparent: false,
 			DisableWindowIcon:    false,
 		},

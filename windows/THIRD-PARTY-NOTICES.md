@@ -12,6 +12,7 @@
 | [go-winio](https://github.com/microsoft/go-winio) | закрытый канал службы | MIT |
 | golang.org/x/sys, x/crypto, x/net | системные вызовы Windows | BSD-3-Clause |
 | [TG WS Proxy](https://github.com/Flowseal/tg-ws-proxy) (Flowseal) | образец прокси Telegram, порт на Go | MIT |
+| [Inter](https://rsms.me/inter/) и [Source Serif 4](https://github.com/adobe-fonts/source-serif) | шрифты окна (лежат в `fonts/` рядом с лицензиями) | SIL OFL 1.1 |
 | Microsoft Edge WebView2 Runtime | отображение окна | входит в Windows 11, на Windows 10 ставится отдельно |
 
 Картинки и анимации сделаны для Nimb заново, см. `art-studio/deliver/CREDITS.md`.

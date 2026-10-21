@@ -1,0 +1,118 @@
+{
+  "name": "halo",
+  "version": 2,
+  "scale": 2,
+  "pointSize": [
+    336,
+    194
+  ],
+  "layers": [
+    {
+      "id": "back",
+      "file": "back.png",
+      "role": "behind-figure",
+      "blend": "screen"
+    },
+    {
+      "id": "front",
+      "file": "front.png",
+      "role": "in-front-of-figure",
+      "blend": "screen",
+      "notes": "The near half of the ring without any bright hot spot, flare or vertical line: an even glowing band (decision: the single bright point and its vertical ray drew the eye away, so they are gone everywhere)."
+    }
+  ],
+  "loops": [
+    {
+      "id": "sparkle",
+      "kind": "png-sequence",
+      "pattern": "sparkle-%02d.png",
+      "frames": 24,
+      "fps": 8,
+      "seconds": 3.0,
+      "role": "in-front-of-figure",
+      "blend": "screen",
+      "pointSize": [
+        204,
+        100
+      ],
+      "origin": [
+        66.0,
+        47.0
+      ]
+    }
+  ],
+  "anchors": {
+    "center": [
+      168.0,
+      97.0
+    ],
+    "crown": [
+      168.0,
+      97.0
+    ]
+  },
+  "ring": {
+    "rx": 80.0,
+    "ry": 25.0,
+    "tiltDegrees": -2.5
+  },
+  "motion": [
+    {
+      "target": "all",
+      "type": "breathe",
+      "period": 5.0,
+      "amount": 0.07,
+      "notes": "opacity 0.93..1.0 (sin 1.7 rad/s) and scale +-1.2% as in the current halo; the home page shifts the phase by 0.8 per stacked halo"
+    },
+    {
+      "target": "all",
+      "type": "drop-in",
+      "from": [
+        0,
+        -18
+      ],
+      "seconds": 1.0
+    }
+  ],
+  "states": {
+    "off": {
+      "visible": false
+    },
+    "on": {
+      "visible": true
+    },
+    "busy": {
+      "speed": 2.0,
+      "notes": "play the sparkle loop twice as fast and pulse the opacity 0.75..1.0 at 5 rad/s"
+    }
+  },
+  "notes": "Photographic halo, rendered in linear light and tone mapped, so layers are meant to be composited with the 'screen' blend (on black, normal blend gives the same picture). Ring: rx 80 pt, ry 25 pt, tilted -2.5 degrees, centre in the middle of the canvas; the near (upper) half is in 'front', the far (lower) half in 'back'. 'sparkle' is a seamless 24-frame loop (3 s at 8 fps) of dust and sliding streaks, frames are cropped to 204x100 pt around the ring (origin in 'loops'); cross-fade neighbouring frames for smoothness. First frame without motion (Reduce Motion): back + front + sparkle-00. Stack on the home page: scale 1 - 0.07*i and 24 pt higher each, the same as now. The small halo (onboarding) is the same files at scale about 0.34, only front+back (skip sparkle). Version 1.1: the hot spot with its vertical line was removed from 'front'. Budget: 0.71 MB of files; in memory back+front = 2.1 MB, sparkle 24 x 0.33 MB = 7.8 MB, about 10 MB per page (shared by the stack). Unity check against the live Нейросети page: ring centre on the crown of the figure, scale 0.8 on Telegram and YouTube/Discord (the YouTube/Discord ring floats above the screen, see ../media-scene), about 1.0 on the planet page.",
+  "derived": {
+    "halo-small": {
+      "scale": 0.34,
+      "layers": [
+        "back",
+        "front"
+      ],
+      "note": "no separate files, scale the same PNGs"
+    }
+  },
+  "stack": {
+    "spacing": 28,
+    "scaleStep": 0.07,
+    "baseScale": 0.96,
+    "baseY": 22,
+    "opacity": [
+      0.8,
+      0.92,
+      1.0
+    ],
+    "frontFile": [
+      "front",
+      "front",
+      "front"
+    ],
+    "sparkleOffsetSeconds": 0.37,
+    "notes": "Home page, halos from the lowest (i = 0) to the highest (i = 2): centre y = stage centre + 22 - 28 i, scale 0.96 * (1 - 0.07 i), opacity multiplier [0.80, 0.92, 1.0] times the usual breathing. All halos use the same 'front' and 'back' (there is no bright spot any more, so nothing lines up in a column). Play the sparkle loop of each halo shifted by i * 0.37 s. With nothing switched on, keep the app's current behaviour (one faint resting halo at about 0.22)."
+  }
+}

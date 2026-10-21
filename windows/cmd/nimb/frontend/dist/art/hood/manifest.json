@@ -1,0 +1,66 @@
+{
+  "name": "hood",
+  "version": 1,
+  "scale": 2,
+  "pointSize": [
+    128,
+    154
+  ],
+  "layers": [
+    {
+      "id": "off",
+      "file": "off.png",
+      "role": "figure",
+      "blend": "normal"
+    },
+    {
+      "id": "on",
+      "file": "on.png",
+      "role": "figure",
+      "blend": "normal"
+    }
+  ],
+  "anchors": {
+    "center": [
+      64,
+      77
+    ],
+    "crown": [
+      64,
+      14.0
+    ],
+    "nose": [
+      65.4,
+      110.7
+    ]
+  },
+  "motion": [
+    {
+      "target": "all",
+      "type": "float",
+      "period": 7.0,
+      "amount": 2.2,
+      "notes": "bob, only while on (as now: sin(0.9 t) * 2.2 pt)"
+    },
+    {
+      "target": "all",
+      "type": "sway",
+      "period": 10.5,
+      "amount": 0.9,
+      "notes": "degrees, only while on (as now: sin(0.6 t) * 0.9)"
+    }
+  ],
+  "states": {
+    "off": {
+      "show": "off"
+    },
+    "on": {
+      "show": "on",
+      "notes": "cross-fade off -> on over about 1 s, with the halo coming down"
+    },
+    "busy": {
+      "show": "on"
+    }
+  },
+  "notes": "Black-and-white icon of the hooded dog drawn from the shapes of the user's drawing, with rounded corners. Canvas 128x154 pt (256x308 px), the figure is 100x126 pt in the middle with 14 pt of room for the soft glow around it (it is part of the picture, already in the alpha). Place the centre of the canvas where the figure's centre was; the figure is a little larger than the old one (100x126 pt instead of 94x118). Crown (where the halo sits) and nose (where the beam lands) are in 'anchors', in points from the top left of the canvas. 'off' is the same figure dimmed, 'on' is lit by the halo from above. Files: 55 KB, memory 2 x 0.31 MB."
+}
