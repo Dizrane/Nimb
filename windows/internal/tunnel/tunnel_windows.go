@@ -33,8 +33,9 @@ type Options struct {
 	HandshakeTimeout time.Duration
 	// Logf receives one line per step. It never receives keys.
 	Logf func(format string, args ...any)
-	// Verbose turns on the detailed log of the daemon (to the standard error); for debugging only.
-	Verbose bool
+	// DeviceLogf, when set, receives the detailed log of the daemon (verbose and errors, one line each, without the time: the receiver
+	// adds it). Without it only the errors of the daemon are logged, to the standard output.
+	DeviceLogf func(format string, args ...any)
 }
 
 // ErrNoHandshake means the server did not answer in time. The tunnel is already taken down when it is returned.
@@ -85,11 +86,14 @@ func Up(cfg *awgconf.Config, opt Options) (t *Tunnel, err error) {
 		return nil, errors.New("неожиданный тип адаптера")
 	}
 	bind := conn.NewDefaultBind()
-	level := device.LogLevelError
-	if opt.Verbose {
-		level = device.LogLevelVerbose
+	logger := device.NewLogger(device.LogLevelError, "(nimb) ")
+	if opt.DeviceLogf != nil {
+		logger = &device.Logger{
+			Verbosef: func(format string, args ...any) { opt.DeviceLogf("DEBUG: (nimb) "+format, args...) },
+			Errorf:   func(format string, args ...any) { opt.DeviceLogf("ERROR: (nimb) "+format, args...) },
+		}
 	}
-	dev := device.NewDevice(nativeTun, bind, device.NewLogger(level, "(nimb) "))
+	dev := device.NewDevice(nativeTun, bind, logger)
 	t = &Tunnel{dev: dev, bind: bind, luid: winipcfg.LUID(native.LUID()), logf: logf,
 		rebindCh: make(chan struct{}, 1), done: make(chan struct{})}
 	defer func() {

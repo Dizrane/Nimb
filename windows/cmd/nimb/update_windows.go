@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -25,6 +26,9 @@ type updateState struct {
 	client     *update.Client
 	lastTry    time.Time
 	checking   bool
+	checked    time.Time       // when a check last worked
+	failed     bool            // the last check did not work
+	retrySoon  bool            // ... and the next one comes sooner than usual (not when GitHub refused because of its limit)
 	release    *update.Release // a newer version, when there is one
 	installing string          // what is going on while the installer is being brought ("Загрузка…")
 	err        string          // why the last installation did not happen
@@ -38,12 +42,18 @@ type UpdateView struct {
 	Installing string `json:"installing,omitempty"`
 	Error      string `json:"error,omitempty"`
 	Notify     bool   `json:"notify"` // the notifications about new versions are on
+	Checking   bool   `json:"checking"`
+	Failed     bool   `json:"failed"`            // the last check did not work
+	Checked    int64  `json:"checked,omitempty"` // when a check last worked (unix seconds), for «проверено сегодня»
 }
 
 func (u *updateState) view() UpdateView {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	v := UpdateView{Installing: u.installing, Error: u.err}
+	v := UpdateView{Installing: u.installing, Error: u.err, Checking: u.checking, Failed: u.failed}
+	if !u.checked.IsZero() {
+		v.Checked = u.checked.Unix()
+	}
 	if u.release != nil {
 		v.Available, v.Version = true, u.release.Version
 	}
@@ -67,7 +77,7 @@ func (a *App) updateLoop() {
 	tick := min(30*time.Second, max(time.Second, interval/4))
 	for {
 		a.upd.mu.Lock()
-		due := !a.upd.checking && a.upd.installing == "" && update.IsDue(a.upd.lastTry, time.Now(), interval)
+		due := !a.upd.checking && a.upd.installing == "" && update.IsDue(a.upd.lastTry, time.Now(), update.Wait(interval, a.upd.retrySoon))
 		a.upd.mu.Unlock()
 		if due {
 			a.checkUpdate()
@@ -98,13 +108,22 @@ func (a *App) checkUpdate() {
 
 	a.upd.mu.Lock()
 	a.upd.checking = false
+	if errors.Is(err, update.ErrNoRelease) {
+		// GitHub answered: there is nothing for Windows to offer yet. That is a check that worked, with no newer version.
+		a.upd.failed, a.upd.retrySoon, a.upd.checked, a.upd.release = false, false, time.Now(), nil
+		a.upd.mu.Unlock()
+		a.logCheck("update: " + err.Error())
+		return
+	}
 	if err != nil {
 		// A try that fails is quiet: the offered version, if there is one, stays where it is.
+		a.upd.failed, a.upd.retrySoon = true, !errors.Is(err, update.ErrLimit)
 		a.upd.mu.Unlock()
 		a.logCheck("update: " + err.Error())
 		return
 	}
 	newer := update.IsNewer(rel.Version, Version)
+	a.upd.failed, a.upd.retrySoon, a.upd.checked = false, false, time.Now()
 	a.upd.err = "" // a check that worked: the error of an installation that did not happen is old news
 	if newer {
 		a.upd.release = &rel

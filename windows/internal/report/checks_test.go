@@ -246,3 +246,40 @@ func TestChronologyWithNothingSaysSo(t *testing.T) {
 		t.Fatalf("%v", got)
 	}
 }
+
+func TestTunnelRestartsAreToldAndDoNotChangeTheVerdict(t *testing.T) {
+	last := time.Date(2026, 10, 23, 4, 7, 0, 0, time.Local)
+	restarts := []time.Time{last.Add(-10 * time.Minute), last}
+	c := Tunnel(TunnelFacts{On: true, Routes: 2, Via: "Nimb", ViaTunnel: true, Warp: "on", Restarts: restarts})
+	if !c.Agrees {
+		t.Errorf("restarts change the verdict: %+v", c)
+	}
+	want := "; программа туннеля сама останавливалась и запускалась снова за сутки: 2 (последний раз в 10-23 04:07)"
+	if !strings.HasSuffix(c.Seen, want) {
+		t.Errorf("seen: %q", c.Seen)
+	}
+	// Told for a tunnel that is off too, and not told when there were none.
+	if off := Tunnel(TunnelFacts{Via: "Wi-Fi", Warp: "off", Restarts: restarts}); !off.Agrees || !strings.Contains(off.Seen, "запускалась снова за сутки: 2") {
+		t.Errorf("%+v", off)
+	}
+	if strings.Contains(Tunnel(TunnelFacts{On: true, Routes: 2, Via: "Nimb", ViaTunnel: true, Warp: "on"}).Seen, "запускалась") {
+		t.Error("no restarts, no line")
+	}
+}
+
+func TestLogTailTakesTheLastLinesOrSaysNothingWasWritten(t *testing.T) {
+	if got := LogTail(nil, 25); len(got) != 1 || got[0] != "пусто" {
+		t.Errorf("empty: %v", got)
+	}
+	if got := LogTail([]string{"", "  ", "\t"}, 25); len(got) != 1 || got[0] != "пусто" {
+		t.Errorf("blank: %v", got)
+	}
+	var lines []string
+	for i := 0; i < 40; i++ {
+		lines = append(lines, "  line "+string(rune('A'+i%26))+" ", "")
+	}
+	got := LogTail(lines, 25)
+	if len(got) != 25 || got[24] != "line N" || got[0] != "line "+string(rune('A'+(40-25)%26)) {
+		t.Errorf("tail: %v", got)
+	}
+}

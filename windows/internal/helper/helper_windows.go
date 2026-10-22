@@ -23,9 +23,13 @@ import (
 	"github.com/Dizrane/Nimb/windows/internal/ipc"
 	"github.com/Dizrane/Nimb/windows/internal/tunnel"
 	"github.com/Dizrane/Nimb/windows/internal/tunneldrop"
+	"github.com/Dizrane/Nimb/windows/internal/tunnelrestart"
 	"github.com/Dizrane/Nimb/windows/internal/version"
 	"github.com/Dizrane/Nimb/windows/internal/warp"
 )
+
+// tunnelLogReport is how many of the last lines of the log of the tunnel go into a report.
+const tunnelLogReport = 25
 
 // DataDir is where the service keeps its files.
 func DataDir() string {
@@ -57,6 +61,13 @@ type Helper struct {
 	// package tunneldrop). drop is the note of the last time the tunnel stopped by itself.
 	stopWatch chan struct{}
 	drop      *tunneldrop.Note
+
+	// While the program of the tunnel is being started again after it ended by itself: when that began (the window is told that the tunnel
+	// is on for as long as the mark is fresh) and the channel that is closed to take the restart back (the person switched the tunnel off or on).
+	restarting    time.Time
+	restartCancel chan struct{}
+	// tlog is the log of the program of the tunnel.
+	tlog *tunnelLog
 }
 
 // New prepares the folder (closed to everybody but the system and the administrators) and returns a helper.
@@ -67,7 +78,7 @@ func New(dir string, logf func(string, ...any)) (*Helper, error) {
 	if err := secureDir(dir); err != nil {
 		return nil, fmt.Errorf("папка службы: %w", err)
 	}
-	h := &Helper{dir: dir, logf: logf, started: time.Now()}
+	h := &Helper{dir: dir, logf: logf, started: time.Now(), tlog: newTunnelLog(filepath.Join(dir, "tunnel.log"))}
 	h.backup = h.loadBackup()
 	h.drop = h.loadDrop()
 	h.startWatching()
@@ -93,7 +104,7 @@ func (h *Helper) Handle(ctx context.Context, req ipc.Request) ipc.Response {
 	case ipc.Status:
 		return ipc.Response{OK: true, Tunnel: h.status(), DNS: h.dnsStatus()}
 	case ipc.Diag:
-		return ipc.Response{OK: true, Lines: h.diag(), Version: version.Version}
+		return ipc.Response{OK: true, Lines: h.diag(), Version: version.Version, TunnelLog: h.tlog.Tail(tunnelLogReport)}
 	case ipc.DNSSet:
 		provider, ok := dnsx.Find(req.Provider)
 		if !ok {
@@ -111,6 +122,7 @@ func (h *Helper) Handle(ctx context.Context, req ipc.Request) ipc.Response {
 		}
 		return ipc.Response{OK: true, DNS: h.dnsStatus()}
 	case ipc.TunnelUp:
+		h.cancelRestart() // the person decides now: nothing that was started before them goes on
 		if err := h.up(ctx); err != nil {
 			h.logf("tunnel.up: %v", err)
 			return ipc.Response{Error: err.Error(), Tunnel: h.status()}
@@ -136,8 +148,14 @@ func (h *Helper) status() *ipc.TunnelStatus {
 		}
 		st.Received, st.Sent = h.tun.Counters()
 	}
+	if h.tun == nil && h.restartCancel != nil && tunnelrestart.IsActive(h.restarting, time.Now()) {
+		st.Up, st.Restarting = true, true
+	}
 	if h.drop != nil {
 		st.DroppedAt, st.DropReason = h.drop.When.Unix(), h.drop.Reason
+	}
+	for _, r := range tunnelrestart.Recent(h.readRestarts(), time.Now(), 24*time.Hour) {
+		st.Restarts = append(st.Restarts, r.Unix())
 	}
 	return st
 }
@@ -155,7 +173,7 @@ func (h *Helper) up(ctx context.Context) error {
 		return fmt.Errorf("настройки туннеля не прошли проверку: %w", err)
 	}
 	h.logf("bringing the tunnel up")
-	t, err := tunnel.Up(cfg, tunnel.Options{Name: "Nimb", DNS: h.tunnelDNS(), Logf: h.logf})
+	t, err := tunnel.Up(cfg, tunnel.Options{Name: "Nimb", DNS: h.tunnelDNS(), Logf: h.logf, DeviceLogf: h.tlog.Logf})
 	if err != nil {
 		if errors.Is(err, tunnel.ErrNoHandshake) {
 			return errors.New("сервер не ответил за 16 секунд, интернет остался прежним")
@@ -165,10 +183,17 @@ func (h *Helper) up(ctx context.Context) error {
 	h.tun = t
 	h.clearDrop()
 	h.watchTunnel(t)
+	h.tlog.Mark("up")
 	return nil
 }
 
+// down takes the tunnel down for good: a restart that is going on is taken back too, nothing is started after the person's switching off.
 func (h *Helper) down() {
+	h.cancelRestart()
+	h.closeTunnel()
+}
+
+func (h *Helper) closeTunnel() {
 	if h.stopWatch != nil {
 		close(h.stopWatch)
 		h.stopWatch = nil
@@ -209,8 +234,10 @@ func (h *Helper) watchTunnel(t *tunnel.Tunnel) {
 	}()
 }
 
-// tunnelEnded: the program of the tunnel ended by itself. The note goes first (the window tells the person what happened), then the
-// routes (the internet goes on working), then the rest: DNS of the adapter, the adapter. Nothing else ever takes the tunnel down.
+// tunnelEnded: the program of the tunnel ended by itself. First the routes go (the internet goes on working while it is started again), then
+// the rest of the tunnel (DNS of the adapter, the adapter). Then the program is started again, up to three times in ten minutes; the person
+// is not told, the switch of the window stays on. Only when that does not work does the note of the stop come, and the window tells the
+// person. Nothing else ever takes the tunnel down.
 func (h *Helper) tunnelEnded(t *tunnel.Tunnel, stop chan struct{}) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -218,13 +245,86 @@ func (h *Helper) tunnelEnded(t *tunnel.Tunnel, stop chan struct{}) {
 		return // taken down by hand in the meantime
 	}
 	h.logf("the program of the tunnel ended by itself: taking the tunnel down")
+	h.tlog.Mark("daemon-exited")
+	t.DropRoutes()
+	h.closeTunnel()
+	if !tunnelrestart.Allowed(tunnelrestart.Recent(h.readRestarts(), time.Now(), tunnelrestart.Window), time.Now()) {
+		h.tlog.Mark("restart skipped: three in ten minutes")
+		h.giveUp()
+		return
+	}
+	cancel := make(chan struct{})
+	h.restartCancel, h.restarting = cancel, time.Now()
+	go h.restart(cancel)
+}
+
+// restart starts the program of the tunnel again, with a pause before each try. A switching off or on by the person closes cancel and
+// ends it.
+func (h *Helper) restart(cancel chan struct{}) {
+	for _, wait := range tunnelrestart.Waits {
+		select {
+		case <-cancel:
+			return
+		case <-time.After(wait):
+		}
+		h.mu.Lock()
+		if h.restartCancel != cancel {
+			h.mu.Unlock()
+			return
+		}
+		h.tlog.Mark("restarting")
+		ctx, stop := context.WithTimeout(context.Background(), time.Minute)
+		err := h.up(ctx)
+		stop()
+		if err == nil {
+			h.saveRestart(time.Now())
+			h.tlog.Mark("restarted")
+			h.restartCancel, h.restarting = nil, time.Time{}
+			h.mu.Unlock()
+			return
+		}
+		h.logf("restart of the tunnel: %v", err)
+		h.mu.Unlock()
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.restartCancel != cancel {
+		return
+	}
+	h.tlog.Mark("restart failed")
+	h.restartCancel, h.restarting = nil, time.Time{}
+	h.giveUp()
+}
+
+// cancelRestart takes back a restart that is going on.
+func (h *Helper) cancelRestart() {
+	if h.restartCancel != nil {
+		close(h.restartCancel)
+		h.restartCancel, h.restarting = nil, time.Time{}
+	}
+}
+
+// giveUp leaves the note that the tunnel stopped by itself: the window tells the person.
+func (h *Helper) giveUp() {
 	note := tunneldrop.Note{When: time.Now(), Reason: tunneldrop.DaemonExited}
 	h.drop = &note
 	if err := os.WriteFile(h.dropPath(), []byte(note.Format()), 0o600); err != nil {
 		h.logf("the note of the stop: %v", err)
 	}
-	t.DropRoutes()
-	h.down()
+}
+
+func (h *Helper) restartsPath() string { return filepath.Join(h.dir, "tunnel.restarts") }
+
+func (h *Helper) readRestarts() string {
+	raw, _ := os.ReadFile(h.restartsPath())
+	return string(raw)
+}
+
+// saveRestart remembers a restart that worked (the last fifty), for the limit and for the report.
+func (h *Helper) saveRestart(when time.Time) {
+	if err := os.WriteFile(h.restartsPath(), []byte(tunnelrestart.Add(h.readRestarts(), when)), 0o600); err != nil {
+		h.logf("the record of the restart: %v", err)
+	}
 }
 
 // account returns the account of this installation, making one on the first use.

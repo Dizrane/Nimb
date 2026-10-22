@@ -125,7 +125,7 @@ func (a *App) ReportPrepare() ReportPrep {
 		report.DNS(report.DNSFacts{Active: active, Adapters: adapters, Host: host, SystemAnswer: system, SystemFailed: system == nil && st.AI.On, ProviderAnswer: provider}).Lines(),
 		report.Telegram(report.TelegramFacts{Running: st.Telegram.On, Port: st.Telegram.Port, Listening: st.Telegram.On, Total: tg.Total, Failures: tg.Failures,
 			WrongSecret: tg.WrongSecret, WebSocket: tg.WebSocket, Direct: tg.DirectTCP}).Lines(),
-		report.Tunnel(report.TunnelFacts{On: st.Media.On, Routes: routes, Via: via, ViaTunnel: viaTunnel, Warp: trace["warp"], Dropped: dropped}).Lines(),
+		report.Tunnel(report.TunnelFacts{On: st.Media.On, Routes: routes, Via: via, ViaTunnel: viaTunnel, Warp: trace["warp"], Dropped: dropped, Restarts: unixTimes(st.Media.Restarts)}).Lines(),
 	)...))
 
 	var shown []string
@@ -186,6 +186,9 @@ func (a *App) ReportPrepare() ReportPrep {
 		if len(serviceHead) > 0 {
 			out = append(out, report.Section("Служба", serviceHead...))
 		}
+	}
+	if diag != nil {
+		out = append(out, report.Section("Процесс туннеля (последние строки его журнала)", report.LogTail(diag.TunnelLog, 25)...))
 	}
 	windowLog := tailLog(filepath.Join(dataDir(), "window.log"), 500)
 	events := append(report.ParseLog("окно", windowLog, time.Local), report.ParseLog("служба", serviceLog, time.Local)...)

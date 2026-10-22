@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -219,6 +220,22 @@ func TestTheLimitIsToldWhenThePagesDoNotHelp(t *testing.T) {
 	}
 }
 
+func TestNoWindowsReleaseIsAnAnswerNotAFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/releases") {
+			w.Write([]byte(`[{"tag_name":"v0.9.12","assets":[]}]`)) // only a release of the Mac
+			return
+		}
+		w.WriteHeader(404)
+	}))
+	defer srv.Close()
+	c := NewClient("amd64")
+	c.base = srv.URL
+	if _, err := c.Latest(context.Background()); !errors.Is(err, ErrNoRelease) {
+		t.Errorf("err = %v", err)
+	}
+}
+
 func TestDownloadChecksTheHash(t *testing.T) {
 	f := newFake(t, []byte("the installer"), 200)
 	c := f.client()
@@ -281,5 +298,25 @@ func TestDownloadNeedsAHashAndAnAddressOfGitHub(t *testing.T) {
 	weird.AssetName = `..\evil.exe`
 	if _, err := c.Download(context.Background(), weird, t.TempDir(), func(string) {}); err == nil {
 		t.Error("a name with a path")
+	}
+}
+
+func TestWaitAfterFailureIsShorter(t *testing.T) {
+	if got := Wait(Interval, false); got != 10*time.Minute {
+		t.Errorf("after a good check: %v", got)
+	}
+	if got := Wait(Interval, true); got != 2*time.Minute {
+		t.Errorf("after a failure: %v", got)
+	}
+	// A test interval that is already shorter than two minutes is not made longer.
+	if got := Wait(30*time.Second, true); got != 30*time.Second {
+		t.Errorf("short interval: %v", got)
+	}
+	last := time.Now()
+	if IsDue(last, last.Add(90*time.Second), Wait(Interval, true)) {
+		t.Error("90 seconds after a failure is too early")
+	}
+	if !IsDue(last, last.Add(116*time.Second), Wait(Interval, true)) {
+		t.Error("two minutes after a failure (with the slack) is due")
 	}
 }

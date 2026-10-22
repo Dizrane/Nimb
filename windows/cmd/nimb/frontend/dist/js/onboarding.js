@@ -4,6 +4,7 @@ import { img, preload } from './art.js';
 import { drawHalo, drawSparkle } from './halo.js';
 import { KINDS, SCAN, player, playIcon } from './icons.js';
 import { esc, setHTML } from './common.js';
+import { notifyCard } from './pages.js';
 
 const LAST = 4;
 
@@ -185,9 +186,10 @@ export class Onboarding {
              <button class="link center-link" data-a="terms" data-f="terms" id="terms" style="color:#6ea8ff">Условия Cloudflare WARP</button>` + skip())
         + banner(s.error || (S.serviceOk ? '' : S.serviceError));
     }
-    return head('Чтобы работало само', 'Рекомендуем включить: Nimb запустится вместе с Windows и будет работать у часов при закрытом окне.')
+    return head('Чтобы работало само', 'Рекомендуем включить: Nimb запустится вместе с Windows, будет работать у часов при закрытом окне и скажет о новой версии.')
       + `<div class="card row" style="width:100%;text-align:left"><div class="grow"><div class="nm">Запускать вместе с Windows</div><div class="sm">Тихо, значком у часов.</div></div>
          <button class="pill ${extra.autostart ? 'on' : ''}" role="switch" aria-checked="${extra.autostart}" aria-label="Запускать вместе с Windows" data-a="autostart" data-f="autostart" id="autostart"></button></div>`
+      + `<div style="width:100%;text-align:left">${notifyCard(S, extra)}</div>`
       + `<button class="btn main wide" data-a="onbfinish" data-f="onbfinish" id="onbfinish">Готово</button>
          <div class="sm" style="text-align:center;font-size:12px;color:var(--t2)">Пройти настройку заново можно в «Настройках» (внизу слева).</div>`;
   }

@@ -14,6 +14,27 @@ import (
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
 )
 
+// HasUplink tells whether the computer has a connected network with a default route: the tunnel needs one to reach its server.
+func HasUplink() bool {
+	for _, family := range []winipcfg.AddressFamily{windows.AF_INET, windows.AF_INET6} {
+		rows, err := winipcfg.GetIPForwardTable2(family)
+		if err != nil {
+			continue
+		}
+		for i := range rows {
+			if rows[i].DestinationPrefix.PrefixLength != 0 {
+				continue
+			}
+			if ipif, err := rows[i].InterfaceLUID.IPInterface(family); err == nil && ipif.Connected {
+				if row, err := rows[i].InterfaceLUID.Interface(); err == nil && row.Alias() != "Nimb" {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 // Routes tells how many routes of the tunnel (the adapter named tunnel) the table of the system has, and which connection the traffic to
 // the internet leaves by (the route to 1.1.1.1 that is the most specific, then the cheapest).
 func Routes(tunnel string) (routes int, via string, viaTunnel bool) {

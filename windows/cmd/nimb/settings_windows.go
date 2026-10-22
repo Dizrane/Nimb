@@ -26,10 +26,17 @@ type Settings struct {
 	// TunnelDropSeen is the time (unix) of the last note of a tunnel that the service took down by itself and that the person was told
 	// about, so that the same drop is told once.
 	TunnelDropSeen int64 `json:"tunnelDropSeen,omitempty"`
+	// TunnelWanted: the tunnel was on when the person last used it, so that it comes back after the computer was restarted. Switching it off
+	// by hand, and removing Nimb, clear it.
+	TunnelWanted bool `json:"tunnelWanted,omitempty"`
+	// TunnelRestartsSeen is the time (unix) of the last restart of the program of the tunnel that went to the log of the window.
+	TunnelRestartsSeen int64 `json:"tunnelRestartsSeen,omitempty"`
 	// UpdateTold is the last version of Nimb that the person was told about with a notification (one for one version).
 	UpdateTold string `json:"updateTold,omitempty"`
 	// UpdateNotifyOff: the person turned the notifications about new versions off (they are on until then).
 	UpdateNotifyOff bool `json:"updateNotifyOff,omitempty"`
+	// WindowSized: the window has been given its size (client area 1100 by 660) once; after that the size the person left is kept.
+	WindowSized bool `json:"windowSized,omitempty"`
 }
 
 type settingsStore struct {

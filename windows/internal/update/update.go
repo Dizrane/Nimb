@@ -155,6 +155,19 @@ func NewestTagInFeed(feed string) (tag string, ok bool) {
 // GitHub answers with a stale page for a moment. A newer version is told about again. told is the last version that was told.
 func ShouldTell(version, told string) bool { return told == "" || IsNewer(version, told) }
 
+// RetryAfterFailure: after a check that failed (GitHub did not answer) the next one comes sooner, so that «не удалось проверить» does
+// not stay at the bottom of the window for ten minutes. The requests that GitHub never answered are not counted by its limit.
+const RetryAfterFailure = 2 * time.Minute
+
+// Wait is how long to wait before the next check. A check that GitHub refused because of its limit is not tried again sooner: that
+// would only use the limit up.
+func Wait(interval time.Duration, afterFailure bool) time.Duration {
+	if afterFailure {
+		return min(RetryAfterFailure, interval)
+	}
+	return interval
+}
+
 // IsDue tells whether a check is due: the timer is not exact, so a few seconds of slack.
 func IsDue(lastTry, now time.Time, interval time.Duration) bool {
 	return now.Sub(lastTry) >= interval-min(5*time.Second, interval/10)
@@ -223,6 +236,10 @@ func (c *Client) get(ctx context.Context, address, accept string) ([]byte, int, 
 // ErrLimit means that GitHub refused because of the number of requests.
 var ErrLimit = errors.New("GitHub ограничил число запросов с вашего адреса. Попробуйте через несколько минут.")
 
+// ErrNoRelease means that GitHub answered and there is no release of Nimb for Windows with the installer for this computer (yet). It is an
+// answer, not a failure of the check.
+var ErrNoRelease = errors.New("На GitHub нет релиза Nimb для Windows")
+
 // Latest is the newest release for this computer: from the API of GitHub, or from the pages of the release when the API refuses
 // (the pages have no such limit).
 func (c *Client) Latest(ctx context.Context) (Release, error) {
@@ -253,7 +270,7 @@ func (c *Client) latestFromAPI(ctx context.Context) (Release, error) {
 	}
 	rel, ok := newest(list, c.Arch)
 	if !ok {
-		return Release{}, fmt.Errorf("На GitHub нет релиза Nimb для Windows с файлом Nimb-Setup-*-%s.exe.", c.Arch)
+		return Release{}, fmt.Errorf("%w с файлом Nimb-Setup-*-%s.exe.", ErrNoRelease, c.Arch)
 	}
 	return rel, nil
 }

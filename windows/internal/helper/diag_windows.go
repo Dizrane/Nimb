@@ -21,7 +21,9 @@ func (h *Helper) diag() []string {
 	lines := []string{fmt.Sprintf("Служба Nimb %s, работает с %s", version.Version, h.started.Format("2006-01-02 15:04:05"))}
 
 	st := h.status()
-	if st.Up {
+	if st.Restarting {
+		lines = append(lines, "Туннель: программа остановилась сама, служба запускает её снова")
+	} else if st.Up {
 		lines = append(lines, fmt.Sprintf("Туннель: включён, последнее рукопожатие %d с назад, принято %d, отправлено %d байт", st.HandshakeAgo, st.Received, st.Sent))
 	} else {
 		lines = append(lines, fmt.Sprintf("Туннель: выключен; аккаунт WARP есть: %s", yesNo(st.HasAccount)))

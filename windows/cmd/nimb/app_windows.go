@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -20,8 +21,10 @@ import (
 
 	"github.com/Dizrane/Nimb/windows/internal/dnsx"
 	"github.com/Dizrane/Nimb/windows/internal/ipc"
+	"github.com/Dizrane/Nimb/windows/internal/netfacts"
 	"github.com/Dizrane/Nimb/windows/internal/tgproxy"
 	"github.com/Dizrane/Nimb/windows/internal/tunneldrop"
+	"github.com/Dizrane/Nimb/windows/internal/tunnelrestart"
 	"github.com/Dizrane/Nimb/windows/internal/version"
 )
 
@@ -43,8 +46,12 @@ type App struct {
 	reportID, reportFacts string
 	previousEndedBadly    bool
 
+	// restoring: the tunnel that was on before the computer was restarted is being switched on again (restoreTunnel).
+	restoring atomic.Bool
+
 	probe probeState  // the check of the providers
 	upd   updateState // the look for a new version
+	sites siteState   // the check of YouTube and Discord
 
 	hintMu sync.Mutex // the line about the DNS of Firefox
 	hint   string
@@ -58,6 +65,7 @@ func NewApp() *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	a.sizeWindow()
 	a.previousEndedBadly = beginSession()
 	logLine("start " + Version)
 	engine, err := tgproxy.New(a.settings.get().TelegramSecret, tgproxy.DefaultConfig())
@@ -69,6 +77,7 @@ func (a *App) startup(ctx context.Context) {
 	}
 	go a.watchTelegram()
 	go a.updateLoop()
+	go a.restoreTunnel()
 	startTray(a)
 }
 
@@ -126,16 +135,18 @@ type State struct {
 		Stats tgproxy.Stats `json:"stats"`
 	} `json:"telegram"`
 	Media struct {
-		On           bool   `json:"on"`
-		Busy         bool   `json:"busy"`
-		Error        string `json:"error,omitempty"`
-		HandshakeAgo int    `json:"handshakeAgo"`
-		DroppedAt    int64  `json:"droppedAt,omitempty"`
-		DropReason   string `json:"dropReason,omitempty"`
+		On           bool    `json:"on"`
+		Busy         bool    `json:"busy"`
+		Error        string  `json:"error,omitempty"`
+		HandshakeAgo int     `json:"handshakeAgo"`
+		DroppedAt    int64   `json:"droppedAt,omitempty"`
+		DropReason   string  `json:"dropReason,omitempty"`
+		Restarts     []int64 `json:"restarts,omitempty"` // when the program of the tunnel was started again (unix), the last day
 	} `json:"media"`
 	Providers []Provider `json:"providers"`
 	Probe     ProbeView  `json:"probe"`
 	Update    UpdateView `json:"update"`
+	Sites     SiteView   `json:"sites"`
 }
 
 func providerList() []Provider {
@@ -153,6 +164,7 @@ func (a *App) GetState() State {
 	st.Providers = providerList()
 	st.Probe = a.probe.view()
 	st.Update = a.upd.view()
+	st.Sites = a.sites.view()
 	st.Update.Notify = !a.settings.get().UpdateNotifyOff
 	st.AI.Warnings = []string{}
 	set := a.settings.get()
@@ -186,6 +198,12 @@ func (a *App) GetState() State {
 			st.Media.On = resp.Tunnel.Up
 			st.Media.HandshakeAgo = resp.Tunnel.HandshakeAgo
 			st.Media.DroppedAt, st.Media.DropReason = resp.Tunnel.DroppedAt, resp.Tunnel.DropReason
+			st.Media.Restarts = resp.Tunnel.Restarts
+			a.noticeRestarts(resp.Tunnel)
+			// What the person has on is what comes back after a restart of the computer (the restore itself is in restoreTunnel).
+			if resp.Tunnel.Up && !a.restoring.Load() && !a.settings.get().TunnelWanted {
+				a.settings.update(func(s *Settings) { s.TunnelWanted = true })
+			}
 			if a.noticeDrop(resp.Tunnel) {
 				st.Media.Error = tunneldrop.MessageFor(resp.Tunnel.DropReason)
 			}
@@ -198,6 +216,80 @@ func (a *App) GetState() State {
 		st.Telegram.Stats = a.tg.Stats()
 	}
 	return st
+}
+
+// noticeRestarts: the program of the tunnel ended by itself and the service started it again. Only the log hears of it: the switch
+// stays on and the tunnel works; the restarts go to the log and to the report, so that a problem behind them can be seen.
+func (a *App) noticeRestarts(t *ipc.TunnelStatus) {
+	fresh := tunnelrestart.Unseen(unixTimes(t.Restarts), a.settings.get().TunnelRestartsSeen)
+	if len(fresh) == 0 {
+		return
+	}
+	a.settings.update(func(s *Settings) { s.TunnelRestartsSeen = fresh[len(fresh)-1].Unix() })
+	logLine(fmt.Sprintf("tunnel: программа туннеля остановилась сама, помощник запустил её снова (раз: %d)", len(fresh)))
+}
+
+func unixTimes(secs []int64) []time.Time {
+	out := make([]time.Time, len(secs))
+	for i, s := range secs {
+		out[i] = time.Unix(s, 0)
+	}
+	return out
+}
+
+// restoreTunnel: after the computer was restarted the tunnel that was on is switched on again, as soon as there is a network. It runs at
+// every start of the program, with the window hidden (the autostart) too.
+func (a *App) restoreTunnel() {
+	var ts *ipc.TunnelStatus
+	for i := 0; i < 30 && ts == nil; i++ { // the service may still be starting
+		time.Sleep(time.Second)
+		if resp, err := callService(ipc.Request{Cmd: ipc.Status}); err == nil {
+			ts = resp.Tunnel
+		}
+	}
+	if ts == nil || !tunnelrestart.ShouldRestore(a.settings.get().TunnelWanted, ts.HasAccount, !ts.Up) || !a.restoring.CompareAndSwap(false, true) {
+		return
+	}
+	defer a.restoring.Store(false)
+	logLine("tunnel: туннель был включён до выключения компьютера: включаю снова")
+	for attempt := 0; attempt < tunnelrestart.Attempts; attempt++ {
+		if !waitForNetwork(tunnelrestart.NetworkWait) {
+			logLine("tunnel: сети нет: туннель не включён")
+			return
+		}
+		// The person may have decided in the meantime (switched it on or off, removed Nimb).
+		resp, err := callService(ipc.Request{Cmd: ipc.Status})
+		if !a.settings.get().TunnelWanted || (err == nil && resp.Tunnel != nil && resp.Tunnel.Up) {
+			return
+		}
+		a.begin("media")
+		_, err = callService(ipc.Request{Cmd: ipc.TunnelUp})
+		if a.end("media", err).OK {
+			return
+		}
+		if !tunnelrestart.TriesAgain(true, attempt) {
+			break
+		}
+		a.mu.Lock()
+		delete(a.errs, "media")
+		a.mu.Unlock()
+		time.Sleep(tunnelrestart.Pause)
+	}
+	logLine("tunnel: туннель не включился сам: включите вручную")
+}
+
+// waitForNetwork waits until the computer has a network with a way out, at most timeout.
+func waitForNetwork(timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		if netfacts.HasUplink() {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(2 * time.Second)
+	}
 }
 
 // noticeDrop: the tunnel stopped by itself (its program ended). The person is told once, on the page and in the
@@ -273,6 +365,8 @@ func (a *App) SetMedia(on bool) Result {
 		cmd = ipc.TunnelUp
 	}
 	_, err := callService(ipc.Request{Cmd: cmd})
+	// What the person did last is what comes back after a restart of the computer.
+	a.settings.update(func(s *Settings) { s.TunnelWanted = on && err == nil })
 	return a.end("media", err)
 }
 
@@ -433,6 +527,7 @@ func (a *App) Uninstall() Result {
 	}
 	verb, _ := syscall.UTF16PtrFromString("runas")
 	file, _ := syscall.UTF16PtrFromString(path)
+	a.settings.update(func(s *Settings) { s.TunnelWanted = false })
 	if err := windows.ShellExecute(0, verb, file, nil, nil, windows.SW_SHOWNORMAL); err != nil {
 		logLine("uninstall: " + err.Error())
 		return Result{Error: "Не удалось запустить удаление."}

@@ -28,7 +28,10 @@ function buildShell() {
       <div class="face"><button class="icon" data-a="play" data-v="${k}" tabindex="-1" aria-hidden="true"></button>
       <button class="rl" data-a="nav" data-v="${k}" data-f="nav-${k}" id="nav-${k}" aria-label="${SV[k].title}">${SV[k].title}</button></div>
       <span id="slot-${k}"></span></div>`).join('');
+  // As on the Mac (ContentView.swift): the sidebar and the page stand side by side, and the bar with the version is under both of them,
+  // across the whole window, 42 high.
   document.getElementById('app').innerHTML = `
+    <div class="shell">
     <nav class="side" aria-label="Разделы">
       <div class="row-item" id="row-home"><div class="face"><div class="icon" id="home-icon" style="width:26px"></div>
         <button class="rl" data-a="nav" data-v="home" data-f="nav-home" id="nav-home">Главная</button></div></div>
@@ -36,8 +39,11 @@ function buildShell() {
       <div class="row-item" id="row-settings"><div class="face"><button class="icon" data-a="play" data-v="settings" tabindex="-1" aria-hidden="true"></button>
         <button class="rl" data-a="nav" data-v="settings" data-f="nav-settings" id="nav-settings">Настройки</button></div></div>
     </nav>
-    <main class="main"><div id="banner"></div><div id="content" style="flex:1;min-height:0;display:flex;flex-direction:column"></div>
-      <div class="foot"><span id="version"></span><span id="upd"></span><button data-a="channel" data-f="channel" id="channel">Канал в Telegram ↗</button></div></main>`;
+    <main class="main"><div id="banner"></div><div id="content" style="flex:1;min-height:0;display:flex;flex-direction:column"></div></main>
+    </div>
+    <div class="foot"><div class="bar"><span class="verline"><span id="version"></span><span id="upd"></span></span>
+      <button data-a="channel" data-f="channel" id="channel" title="Новости и релизы Nimb в Telegram: @NimbProject" aria-label="Канал Nimb в Telegram"><span>Канал в Telegram</span>${ARROW_UP_RIGHT}</button></div>
+      <div id="uperr"></div></div>`;
 
   for (const k of ORDER) {
     icons[k] = new IconView(SV[k].icon, 32, () => !S || !S[k].on);
@@ -53,18 +59,38 @@ function buildShell() {
   rings = new Animator(() => { begin(ctx, dpr, 28, 22); drawRingStack(ctx, 14, 11, S ? effective() : 0, page === 'home'); }, { fps: 10, wants: () => false });
 }
 
+// The signs of the bar below (FooterBar of the Mac): the arrow of the channel, and the arrow in a circle of the button of an update.
+const ARROW_UP_RIGHT = '<svg viewBox="0 0 10 10" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 7.5l5-5M3 2.5h4.5V7"/></svg>';
+const ARROW_DOWN_CIRCLE = '<svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="6.5" fill="currentColor"/><path d="M7 3.6v5.6M4.7 7.1L7 9.4l2.3-2.3" fill="none" stroke="#ebebeb" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+// «Версия 0.1.1 · проверено сегодня», as on the Mac. With a newer version at hand the line is only the version (and the button),
+// and while it is installed the line is only what goes on.
+function versionLine() {
+  const u = S.update, version = `Версия ${S.version}`;
+  if (u.installing) return '';
+  if (u.available) return version;
+  if (u.checking) return `${version} · проверяю…`;
+  if (u.failed) return `${version} · не удалось проверить`;
+  if (!u.checked) return version;
+  const at = new Date(u.checked * 1000), now = new Date();
+  return version + (at.toDateString() === now.toDateString() ? ' · проверено сегодня' : ` · проверено ${at.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}`);
+}
+
 function updateShell() {
-  document.getElementById('version').textContent = `Версия ${S.version}`;
+  document.getElementById('version').textContent = versionLine();
   const banner = document.getElementById('banner');
-  const text = S.serviceOk ? (S.update.error || '') : S.serviceError;
+  const text = S.serviceOk ? '' : S.serviceError;
   if (banner.dataset.text !== text) { banner.dataset.text = text; banner.innerHTML = text ? `<div class="banner" role="alert">${esc(text)}</div>` : ''; }
+  // An installation that did not work: its words stand under the bar, in red, as on the Mac.
+  const uperr = document.getElementById('uperr'), failed = S.update.error || '';
+  if (uperr.dataset.text !== failed) { uperr.dataset.text = failed; uperr.textContent = failed; uperr.hidden = !failed; }
   // A newer version: the button at the bottom of the window, as on the Mac. While it is being installed it says what goes on.
   const u = S.update, upd = document.getElementById('upd');
   const key = u.installing ? `i|${u.installing}` : u.available ? `a|${u.version}` : '';
   if (upd.dataset.key !== key) {
     upd.dataset.key = key;
     upd.innerHTML = u.installing ? `<span class="upd busy"><span class="spin"></span>${esc(u.installing)}</span>`
-      : u.available ? `<button class="upd" data-a="update" data-f="update" id="update">Обновить до ${esc(u.version)}</button>` : '';
+      : u.available ? `<button class="upd" data-a="update" data-f="update" id="update">${ARROW_DOWN_CIRCLE}<span>Обновить до ${esc(u.version)}</span></button>` : '';
   }
   const sel = page === 'report' ? 'settings' : page;
   for (const id of ['home', ...ORDER, 'settings']) document.getElementById(`row-${id}`).classList.toggle('sel', id === sel);
@@ -100,7 +126,7 @@ function render() {
   if (!S) return;
   updateShell();
   current.update(S, { autostart, testSent });
-  if (onb) onb.update(S, { autostart });
+  if (onb) onb.update(S, { autostart, testSent });
 }
 
 async function readAutostart() {
@@ -124,7 +150,7 @@ let watching = false;
 async function watchProbe() {
   if (watching) return;
   watching = true;
-  try { do { await new Promise((r) => setTimeout(r, 400)); await refresh(); } while (S && S.probe.running); } finally { watching = false; }
+  try { do { await new Promise((r) => setTimeout(r, 400)); await refresh(); } while (S && (S.probe.running || S.sites.running)); } finally { watching = false; }
 }
 async function startProbe(enable) {
   S.probe.running = true; S.probe.done = 0; S.probe.total = 0; S.probe.phase = 'addresses'; if (enable) S.probe.reports = []; render();
@@ -190,9 +216,11 @@ document.addEventListener('click', async (e) => {
   const v = t.dataset.v;
   switch (t.dataset.a) {
     case 'nav': showPage(v); break;
-    case 'play': playIcon(v === 'settings' ? 'gear' : SV[v].icon); break;
+    // A press on the icon of a service plays it only while the service is on (a service that is off does nothing); the gear always.
+    case 'play': if (v === 'settings') playIcon('gear'); else if (S[v].on) playIcon(SV[v].icon); break;
     case 'sw': await actions.toggle(v); break;
     case 'probe': await startProbe(false); break;
+    case 'sitecheck': { S.sites.running = true; render(); try { await api().CheckSites(); } catch (e) { /* the state tells */ } await refresh(); watchProbe(); break; }
     case 'det': if (current.toggleDetails) { current.toggleDetails(v); render(); } break;
     case 'onbbest': await startProbe(true); break;
     case 'prov': { S.ai.provider = v; render(); await api().SetProvider(v); await refresh(); break; }
@@ -253,6 +281,7 @@ window.addEventListener('load', async () => {
     }
   } catch (e) { /* no first setup */ }
   buildShell();
+  logPage(`window ${innerWidth}x${innerHeight} dpr ${devicePixelRatio}`);
   showPage(first);
   if (firstSetup) { onb = new Onboarding(actions); render(); }
   preloadIcons();

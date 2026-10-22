@@ -152,6 +152,8 @@ type TunnelFacts struct {
 	Warp string
 	// Dropped is what the service wrote when the tunnel stopped by itself, lately; empty otherwise.
 	Dropped string
+	// Restarts are the times in the last day when the program of the tunnel ended by itself and the service started it again.
+	Restarts []time.Time
 }
 
 // Tunnel: with the tunnel on there are routes, the traffic goes through it and Cloudflare sees WARP; with it off none of that.
@@ -162,6 +164,10 @@ func Tunnel(f TunnelFacts) ServiceCheck {
 		cloudflare = "warp=" + f.Warp
 	}
 	seen := fmt.Sprintf("маршрутов туннеля %d; трафик в интернет идёт через %s; %s", f.Routes, f.Via, cloudflare)
+	// A tunnel that was started again several times a day works, but something is wrong behind it; it does not change the verdict.
+	if n := len(f.Restarts); n > 0 {
+		seen += fmt.Sprintf("; программа туннеля сама останавливалась и запускалась снова за сутки: %d (последний раз в %s)", n, f.Restarts[n-1].Format("01-02 15:04"))
+	}
 	if f.On {
 		return ServiceCheck{Name: name, Expected: "маршруты туннеля стоят, трафик идёт через него, Cloudflare видит WARP (warp=on)", Seen: seen,
 			Agrees: f.Routes > 0 && f.ViaTunnel && f.Warp == "on"}
@@ -339,6 +345,23 @@ func Events(lines []Line, now time.Time, within time.Duration, limit int) []stri
 	}
 	if len(out) == 0 {
 		return []string{"за последние сутки событий нет"}
+	}
+	return out
+}
+
+// LogTail is the last `limit` lines of the log of the program of the tunnel; where it wrote nothing there is a word about it.
+func LogTail(lines []string, limit int) []string {
+	var out []string
+	for _, l := range lines {
+		if l = strings.TrimSpace(l); l != "" {
+			out = append(out, l)
+		}
+	}
+	if len(out) == 0 {
+		return []string{"пусто"}
+	}
+	if len(out) > limit {
+		out = out[len(out)-limit:]
 	}
 	return out
 }

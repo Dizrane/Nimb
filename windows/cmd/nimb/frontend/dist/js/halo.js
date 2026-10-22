@@ -32,10 +32,12 @@ export function drawSparkle(ctx, center, scale, opacity, time) {
 
 /** The small rings of the home row of the sidebar: three one above another, lit from the bottom up. */
 export function drawRingStack(ctx, cx, cy, count, selected) {
+  // A ring that is out is as dim as the icons of the services that are off (0.47 of a lit one), as on the Mac.
+  const lit = selected ? 1 : 0.82;
   for (let i = 0; i < 3; i++) {
     const scale = 0.105 - 0.004 * i;
     const y = cy - 10 + 4.4 + 5.4 * i;
-    const alpha = 2 - i < count ? (selected ? 1 : 0.82) : 0.14;
+    const alpha = 2 - i < count ? lit : lit * 0.47;
     for (const part of ['ring-back', 'ring-front']) {
       const im = img(`header/${part}.png`);
       if (!im) continue;

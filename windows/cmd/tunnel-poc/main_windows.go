@@ -43,9 +43,13 @@ func main() {
 		dns = append(dns, a)
 	}
 	start := time.Now()
-	t, err := tunnel.Up(cfg, tunnel.Options{DNS: dns, Verbose: *verbose, Logf: func(f string, a ...any) {
+	opt := tunnel.Options{DNS: dns, Logf: func(f string, a ...any) {
 		fmt.Printf("%6.2fs  %s\n", time.Since(start).Seconds(), fmt.Sprintf(f, a...))
-	}})
+	}}
+	if *verbose {
+		opt.DeviceLogf = func(f string, a ...any) { fmt.Printf(f+"\n", a...) }
+	}
+	t, err := tunnel.Up(cfg, opt)
 	if err != nil {
 		fatal(err)
 	}

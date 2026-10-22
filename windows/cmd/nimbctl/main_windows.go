@@ -56,7 +56,7 @@ func main() {
 		os.Exit(1)
 	}
 	if t := resp.Tunnel; t != nil {
-		fmt.Printf("tunnel: up=%v handshakeAgo=%ds received=%d sent=%d account=%v droppedAt=%d %s\n", t.Up, t.HandshakeAgo, t.Received, t.Sent, t.HasAccount, t.DroppedAt, t.DropReason)
+		fmt.Printf("tunnel: up=%v handshakeAgo=%ds received=%d sent=%d account=%v droppedAt=%d %s restarting=%v restarts=%v\n", t.Up, t.HandshakeAgo, t.Received, t.Sent, t.HasAccount, t.DroppedAt, t.DropReason, t.Restarting, t.Restarts)
 	}
 	if d := resp.DNS; d != nil {
 		fmt.Printf("dns: active=%v provider=%s\n", d.Active, d.Provider)

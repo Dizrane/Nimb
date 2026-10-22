@@ -53,6 +53,8 @@ type Response struct {
 	// Lines answer the command diag; Version is the version of the service.
 	Lines   []string `json:"lines,omitempty"`
 	Version string   `json:"version,omitempty"`
+	// TunnelLog answers the command diag: the last lines of the log of the program of the tunnel (no keys, the window cleans the addresses).
+	TunnelLog []string `json:"tunnelLog,omitempty"`
 }
 
 // DNSStatus is the state of Smart DNS.
@@ -73,6 +75,10 @@ type TunnelStatus struct {
 	// window tells the person once. It stays until the tunnel is brought up again.
 	DroppedAt  int64  `json:"droppedAt,omitempty"`
 	DropReason string `json:"dropReason,omitempty"`
+	// Restarting says that the program of the tunnel ended by itself and the service is starting it again; Up is true then, so that the
+	// switch of the window does not blink. Restarts are the unix times of the restarts of the last day.
+	Restarting bool    `json:"restarting,omitempty"`
+	Restarts   []int64 `json:"restarts,omitempty"`
 }
 
 // Handler does what a command asks.
