@@ -38,7 +38,7 @@ struct SettingsView: View {
                                 Text("Сообщить о проблеме")
                                     .font(Typo.name)
                                     .foregroundStyle(Theme.textPrimary)
-                                Text("Отчёт придёт разработчику. Паролей и адресов в нём нет.")
+                                Text("Отчёт придёт разработчику. Паролей и личных данных в нём нет.")
                                     .font(Typo.small)
                                     .foregroundStyle(Theme.textSecondary)
                                     .fixedSize(horizontal: false, vertical: true)

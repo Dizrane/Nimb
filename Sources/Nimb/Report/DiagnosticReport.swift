@@ -45,9 +45,15 @@ enum DiagnosticReport {
             }))
         }
         if !dns.reports.isEmpty {
-            out.append(section("Проверка DNS", dns.reports.map { report in
+            // The addresses of the pools that refused or did not answer stay in the report (they are the providers', not the person's):
+            // they show which address of a provider is bad.
+            out.append(section("Проверка DNS", dns.reports.flatMap { report -> [String] in
                 let services = report.services.map { "\($0.name) \($0.answered)/\($0.total)" }.joined(separator: ", ")
-                return "\(report.provider.name): работает \(report.workingCount) из \(report.services.count) (\(services))"
+                var lines = ["\(report.provider.name): работает \(report.workingCount) из \(report.services.count) (\(services))" + (report.medianSeconds.map { ", медиана \(String(format: "%.1f", $0)) с" } ?? "")]
+                lines += report.refusals.map { "  отказ: \($0)" }
+                let dead = report.deadAddresses
+                if !dead.isEmpty { lines.append("  без нормального ответа: \(dead.joined(separator: ", "))") }
+                return lines
             }))
         }
 
@@ -62,7 +68,8 @@ enum DiagnosticReport {
         out.append(section("Журнал (последние строки)", tail.isEmpty ? ["пусто"] : tail))
 
         let services = await Task.detached(priority: .utility) { DNSManager.physicalServices() }.value
-        return ReportRedactor.clean(out.joined(separator: "\n\n"), services: services)
+        let keep = Set(dns.reports.flatMap { $0.samples.compactMap(\.address) })
+        return ReportRedactor.clean(out.joined(separator: "\n\n"), services: services, keep: keep)
     }
 
     /// The head of the report: the number, what the person wrote, how to answer.

@@ -257,6 +257,15 @@ import Testing
         #expect(ReportChecks.hostsMentions(in: hosts, domains: ["chatgpt.com", "api.anthropic.com", "t.me"]) == ["api.anthropic.com"])
     }
 
+    @Test func keepsTheAddressesOfThePoolsThatHelpAndReplacesTheRest() {
+        let text = "отказ: Gemini · 5.175.161.40: перенаправление; DNS 192.168.1.1; чужой 8.8.4.4; свой пул 10.0.0.7"
+        let clean = ReportRedactor.clean(text, keep: ["5.175.161.40", "10.0.0.7"])
+        #expect(clean.contains("5.175.161.40"), "an address of a pool that refused stays: it shows which address is bad")
+        #expect(!clean.contains("192.168.1.1") && !clean.contains("8.8.4.4"))
+        #expect(!clean.contains("10.0.0.7"), "a private address never stays, even when it is asked to")
+        #expect(ReportRedactor.isPrivateAddress("172.20.1.1") && !ReportRedactor.isPrivateAddress("172.32.1.1"))
+    }
+
     @Test func theTunnelCheckTellsAboutRestartsButStillAgrees() {
         let now = Date()
         let check = ReportChecks.tunnel(on: true, routes: 3, interface: "utun5", warp: "on", dropped: nil, restarts: [now.addingTimeInterval(-600), now])
