@@ -289,6 +289,17 @@ import Testing
     }
 }
 
+@Suite struct UpdateRetryTests {
+    @Test func aFailedCheckIsTriedAgainSoonerThanACheckThatWorked() {
+        #expect(UpdateSchedule.wait(afterFailure: false) == UpdateSchedule.interval)
+        #expect(UpdateSchedule.wait(afterFailure: true) == 120)
+        let t0 = Date()
+        let wait = UpdateSchedule.wait(afterFailure: true)
+        #expect(!UpdateSchedule.isDue(lastTry: t0, now: t0.addingTimeInterval(60), interval: wait))
+        #expect(UpdateSchedule.isDue(lastTry: t0, now: t0.addingTimeInterval(125), interval: wait))
+    }
+}
+
 @Suite struct UpdateScheduleTests {
     private let t0 = Date(timeIntervalSinceReferenceDate: 9000)
 

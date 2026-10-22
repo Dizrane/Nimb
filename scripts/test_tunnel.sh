@@ -71,6 +71,8 @@ wait_new_pid() { i=0; while [ $i -lt 15 ]; do p=$(state_pid); [ -n "$p" ] && [ "
 helper_r up >/dev/null 2>&1
 pid1=$(state_pid)
 check "the stand-in tunnel is up" '[ -n "$pid1" ] && kill -0 "$pid1" 2>/dev/null'
+wpid1=$(sed -n 's/^watcher=//p' "$WORK/run/r.state" | head -1)
+check "the daemon and the watcher have a process group each, of their own" '[ "$(ps -o pgid= -p "$pid1" | tr -d " ")" = "$pid1" ] && [ -n "$wpid1" ] && [ "$(ps -o pgid= -p "$wpid1" | tr -d " ")" = "$wpid1" ]'
 kill "$pid1"; wait_new_pid "$pid1"; pid2=$(state_pid)
 check "the daemon that ended by itself is started again" '[ -n "$pid2" ] && [ "$pid2" != "$pid1" ] && kill -0 "$pid2" 2>/dev/null'
 check "a restart leaves no note and no mark of a restart in progress" '[ ! -f "$WORK/run/r.dropped" ] && [ ! -f "$WORK/run/r.restarting" ]'
@@ -89,6 +91,21 @@ helper_r down
 sleep 4
 check "down is final: no daemon, no state, nothing started again" '! kill -0 "$pid5" 2>/dev/null && [ ! -f "$WORK/run/r.state" ] && [ -f "$WORK/run/r.stopped" ] && [ ! -s "$WORK/run/r.restarts" ]'
 check "up after down clears the sign of it" 'helper_r up >/dev/null 2>&1; [ ! -f "$WORK/run/r.stopped" ] && [ -n "$(state_pid)" ]'
+helper_r down
+sleep 1
+
+# The system ends `authtrampoline` (the process that runs the helper after the password prompt) by itself after a while, and launchd then
+# kills what is left in its process group. Here the process that starts the helper is the leader of a group, and the whole group is killed.
+: > "$WORK/run/r.restarts"
+NIMB_TUNNEL_TEST=1 NIMB_TUNNEL_DIR="$WORK" NIMB_TUNNEL_RUN="$WORK/run/r" NIMB_TUNNEL_PATH="$WORK/bin" NIMB_TUNNEL_SOCKDIR="$WORK/sock" \
+    NIMB_NC_REPLY="$WORK/run/r.reply" NIMB_TUNNEL_TICK=1 NIMB_TUNNEL_RESTART_WAITS=0 \
+    perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' /bin/sh -c '"$0" up >/dev/null 2>&1; sleep 300' "$HELPER" &
+leader=$!
+sleep 4
+pid6=$(state_pid)
+kill -9 -- "-$leader" 2>/dev/null
+sleep 3
+check "the group of the process that started the helper is killed: the daemon stays, as the same process" '[ -n "$pid6" ] && kill -0 "$pid6" 2>/dev/null && [ "$(state_pid)" = "$pid6" ] && [ ! -s "$WORK/run/r.restarts" ]'
 helper_r down
 sleep 1
 

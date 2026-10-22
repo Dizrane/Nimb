@@ -1,5 +1,5 @@
 #!/bin/sh
-# nimb-tunnel 8: brings the Nimb WARP tunnel up and down. It runs as root, from /usr/local/libexec/nimb, which only root
+# nimb-tunnel 9: brings the Nimb WARP tunnel up and down. It runs as root, from /usr/local/libexec/nimb, which only root
 # can write to. The settings are read from warp.conf next to it, a file of plain key=value lines that Nimb wrote after
 # checking every value; nothing in it is ever executed.
 #
@@ -22,7 +22,7 @@ STATE="$RUN.state"
 LOG="$RUN.log"
 SOCKDIR=/var/run/amneziawg
 case $0 in /*) SELF=$0 ;; *) SELF=$PWD/$0 ;; esac
-TICK=5                      # seconds between two looks of the watcher
+TICK=1                      # seconds between two looks of the watcher at the daemon (the route is looked at every fifth one)
 RESTART_WAITS="0 3 15"      # seconds to wait before each try to start the daemon again
 if [ -n "${NIMB_TUNNEL_TEST:-}" ]; then
     SOCKDIR="${NIMB_TUNNEL_SOCKDIR:-$SOCKDIR}"; TICK="${NIMB_TUNNEL_TICK:-$TICK}"; RESTART_WAITS="${NIMB_TUNNEL_RESTART_WAITS:-$RESTART_WAITS}"
@@ -82,8 +82,11 @@ drop_routes() {
 }
 
 watch_network() { # watch_network <daemon pid> <endpoint host>
+    looks=0
     while alive "$1"; do
         sleep "$TICK"
+        looks=$((looks + 1))
+        [ $((looks % 5)) -eq 0 ] || continue
         trim_log
         now=$(uplink_now)
         [ -n "$now" ] && [ "$now" != "$(state_get uplink)" ] && retarget "$2" "$now"
@@ -219,6 +222,11 @@ persistent_keepalive_interval=25" ;; esac
     # 2. Start the daemon; it makes a utun interface of its own.
     stopped_by_person && fail "остановлено"
     rm -f "$RUN.name"
+    # The daemon and the watcher must not share the process group of whatever started this script. The administrator prompt of macOS runs
+    # it under `authtrampoline`, which the system ends by itself after about twelve minutes ("idle-exit" under memory pressure), and then
+    # launchd clears away the rest of its process group, the daemon among it (that is what ended the tunnel by itself). With job control
+    # on, each job started below gets a group of its own and outlives it.
+    set -m
     # A hangup of whatever started this script (its session, its terminal) must not take the daemon and the watcher with it: an ignored
     # signal stays ignored in the processes started from here.
     trap '' HUP

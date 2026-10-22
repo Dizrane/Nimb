@@ -290,7 +290,7 @@ final class UpdateViewModel: ObservableObject {
     }
 
     func checkIfDue() {
-        guard UpdateSchedule.isDue(lastTry: lastTry, now: Date()) else { return }
+        guard UpdateSchedule.isDue(lastTry: lastTry, now: Date(), interval: UpdateSchedule.wait(afterFailure: lastCheckFailed)) else { return }
         check()
     }
 

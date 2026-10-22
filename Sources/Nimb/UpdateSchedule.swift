@@ -18,6 +18,13 @@ enum UpdateSchedule {
         return 10 * 60
     }()
 
+    /// After a check that failed (GitHub did not answer for a minute) the next one comes sooner, so that «не удалось проверить» does not
+    /// stay in the bar for ten minutes. A request that GitHub never answered is not counted by its limit.
+    static let retryAfterFailure: TimeInterval = min(2 * 60, interval)
+
+    /// How long to wait before the next check.
+    static func wait(afterFailure: Bool) -> TimeInterval { afterFailure ? retryAfterFailure : interval }
+
     /// A few seconds of slack: the timer that asks is not exact, and a check that is due at the 10th minute must not wait for the 11th.
     static func isDue(lastTry: Date, now: Date, interval: TimeInterval = UpdateSchedule.interval) -> Bool {
         now.timeIntervalSince(lastTry) >= interval - min(5, interval / 10)
