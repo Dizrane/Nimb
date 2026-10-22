@@ -324,6 +324,22 @@ import Testing
 }
 
 /// One notification for one version, however often the check runs.
+@Suite struct TunnelRestoreTests {
+    @Test func theTunnelThatWasOnComesBackOnlyWhenItIsOffAndInstalled() {
+        #expect(TunnelRestore.shouldRestore(wanted: true, installed: true, isOff: true))
+        #expect(!TunnelRestore.shouldRestore(wanted: false, installed: true, isOff: true), "the person turned it off")
+        #expect(!TunnelRestore.shouldRestore(wanted: true, installed: false, isOff: true))
+        #expect(!TunnelRestore.shouldRestore(wanted: true, installed: true, isOff: false), "it is already on, or being switched")
+    }
+
+    @Test func aFailureWithAMessageIsTriedAgainAndACancelledPromptIsNot() {
+        #expect(TunnelRestore.triesAgain(message: "Cloudflare не ответил", attempt: 0))
+        #expect(TunnelRestore.triesAgain(message: "Cloudflare не ответил", attempt: TunnelRestore.attempts - 2))
+        #expect(!TunnelRestore.triesAgain(message: "Cloudflare не ответил", attempt: TunnelRestore.attempts - 1), "the last try is the last")
+        #expect(!TunnelRestore.triesAgain(message: nil, attempt: 0), "no message: the password prompt was cancelled")
+    }
+}
+
 @Suite struct TunnelRestartTests {
     @Test func theMarkOfARestartIsBelievedForAWhile() {
         let now = Date()

@@ -99,7 +99,7 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.testJustSent = false }
     }
 
-    static let testIdentifier = "nimb-test"
+    nonisolated static let testIdentifier = "nimb-test"
 
     /// In front, the window already shows the button: no banner. The test one is the exception: it is asked for in that very window.
     nonisolated static func showsBanner(identifier: String, appIsActive: Bool) -> Bool {

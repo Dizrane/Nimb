@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import Network
 
 /// The terms a person agrees to by turning WARP on.
 enum WarpTerms {
@@ -82,6 +83,20 @@ enum TunnelRestart {
     }
 }
 
+/// The tunnel does not survive a restart of the Mac (its program ends with it). Like the proxy of Telegram, it remembers that it was on and
+/// is started again after the person has logged in: without a password if they have allowed it, otherwise with the usual prompt (a cancelled
+/// prompt means «не сейчас»: it is not asked again at the next login).
+enum TunnelRestore {
+    static let attempts = 3
+    static let pause: TimeInterval = 20
+
+    static func shouldRestore(wanted: Bool, installed: Bool, isOff: Bool) -> Bool { wanted && installed && isOff }
+
+    /// A start that failed with a message (no answer from Cloudflare, the network was not up yet) is tried again; a start that failed with no
+    /// message was cancelled by the person (the password prompt), and that is the end.
+    static func triesAgain(message: String?, attempt: Int) -> Bool { message != nil && attempt + 1 < attempts }
+}
+
 /// The WARP tunnel: AmneziaWG (WireGuard with extra camouflage) to Cloudflare, so that YouTube and Discord open.
 @MainActor
 final class WarpTunnelModel: ObservableObject {
@@ -104,11 +119,65 @@ final class WarpTunnelModel: ObservableObject {
     private var timer: Timer?
     private static let droppedSeenKey = "tunnelDroppedSeen"
     private static let restartsSeenKey = "tunnelRestartsSeen"
+    private static let wantedKey = "tunnelWanted"
+    /// The person has it on (or it was on when the Mac went down): it comes back after the next login.
+    private static var wanted: Bool {
+        get { UserDefaults.standard.bool(forKey: wantedKey) }
+        set { UserDefaults.standard.set(newValue, forKey: wantedKey) }
+    }
+    private var restoring = false
 
     init() {
         refresh()
         refreshAccess()
         cleanLeftovers()
+        // Not inside the first update of the scenes: changing state then makes SwiftUI abort.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.restoreAfterLogin() }
+    }
+
+    /// After a restart of the Mac the tunnel that was on is switched on again, as soon as there is a network.
+    private func restoreAfterLogin() {
+        guard TunnelRestore.shouldRestore(wanted: Self.wanted, installed: isInstalled, isOff: phase == .off), !restoring else { return }
+        restoring = true
+        AppLog.shared.add("tunnel", "туннель был включён до выключения компьютера: включаю снова")
+        Task { @MainActor in
+            defer { restoring = false }
+            for attempt in 0..<TunnelRestore.attempts {
+                guard await Self.waitForNetwork(timeout: 180) else { AppLog.shared.add("tunnel", "сети нет: туннель не включён"); return }
+                guard phase == .off else { return }
+                connect()
+                while isWorking { try? await Task.sleep(nanoseconds: 500_000_000) }
+                if isOn { return }
+                guard TunnelRestore.triesAgain(message: errorMessage, attempt: attempt) else {
+                    if errorMessage == nil { Self.wanted = false; AppLog.shared.add("tunnel", "пароль не введён: туннель не включаю, пока вы сами не включите") }
+                    return
+                }
+                errorMessage = nil
+                try? await Task.sleep(nanoseconds: UInt64(TunnelRestore.pause * 1_000_000_000))
+            }
+            AppLog.shared.add("tunnel", "туннель не включился сам: включите вручную")
+        }
+    }
+
+    /// Waits until the Mac has a network (at most `timeout` seconds).
+    nonisolated private static func waitForNetwork(timeout: TimeInterval) async -> Bool {
+        let monitor = NWPathMonitor()
+        let queue = DispatchQueue(label: "nimb.tunnel.network")
+        return await withCheckedContinuation { continuation in
+            final class Once: @unchecked Sendable { var done = false }
+            let once = Once()
+            let finish: @Sendable (Bool) -> Void = { value in
+                queue.async {
+                    guard !once.done else { return }
+                    once.done = true
+                    monitor.cancel()
+                    continuation.resume(returning: value)
+                }
+            }
+            monitor.pathUpdateHandler = { path in if path.status == .satisfied { finish(true) } }
+            monitor.start(queue: queue)
+            queue.asyncAfter(deadline: .now() + timeout) { finish(false) }
+        }
     }
 
     /// A state file with no daemon behind it: the tunnel died without `down` (a crash of the daemon, a kill, an older helper). Its routes
@@ -168,6 +237,7 @@ final class WarpTunnelModel: ObservableObject {
         // Only a change is published: this runs every few seconds, and an unchanged value would redraw every page.
         let next = currentPhase()
         if next != phase { phase = next }
+        if case .on = next, !Self.wanted { Self.wanted = true }
     }
 
     /// The program of the tunnel ended by itself and was started again: only the diary hears of it.
@@ -194,6 +264,8 @@ final class WarpTunnelModel: ObservableObject {
     private func finish() {
         let next = currentPhase()
         if next != phase { phase = next }
+        // What the person did last is what comes back after a restart (the restore itself decides for itself, see `restoreAfterLogin`).
+        if !restoring { Self.wanted = isOn }
     }
 
     /// The interface of a running tunnel, read from the state file the helper keeps (readable by everyone).
