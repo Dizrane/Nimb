@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"golang.org/x/sys/windows/registry"
+
+	"github.com/Dizrane/Nimb/windows/internal/session"
 )
 
 const runKey = `Software\Microsoft\Windows\CurrentVersion\Run`
@@ -47,15 +49,21 @@ func setAutostart(on bool) error {
 	return k.SetStringValue("Nimb", autostartCommand())
 }
 
-// A file that exists while Nimb runs: if it is there at the start, the last run did not end by itself (a crash, a power cut).
+// A file that exists while Nimb runs and holds the version that made it: if it is there at the start, the last run did not end by
+// itself (a crash, a power cut). A run that ended because the installer put a newer version in its place (the file names another version)
+// or because Windows was shutting down (the window removes the file, see watchSessionEnd) is not unexpected.
 func sessionMarker() string { return filepath.Join(dataDir(), "session.marker") }
 
-func beginSession() (previousEndedBadly bool) {
-	_, err := os.Stat(sessionMarker())
-	previousEndedBadly = err == nil
+// beginSession reads what the last run left and makes the mark of this one. upgradedFrom is the version that was running when the
+// installer stopped it, or empty.
+func beginSession(version string) (previousEndedBadly bool, upgradedFrom string) {
+	raw, err := os.ReadFile(sessionMarker())
 	os.MkdirAll(dataDir(), 0o700)
-	os.WriteFile(sessionMarker(), []byte("running"), 0o600)
-	return previousEndedBadly
+	os.WriteFile(sessionMarker(), []byte(version), 0o600)
+	if err != nil {
+		return false, ""
+	}
+	return session.Interpret(string(raw), version)
 }
 
 func endSession() { os.Remove(sessionMarker()) }

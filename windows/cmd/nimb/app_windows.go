@@ -49,6 +49,12 @@ type App struct {
 	// restoring: the tunnel that was on before the computer was restarted is being switched on again (restoreTunnel).
 	restoring atomic.Bool
 
+	serviceMu   sync.Mutex
+	serviceDown bool // the service did not answer the last time it was asked (see noteService)
+
+	wrongKeyMu sync.Mutex
+	wrongKey   tgproxy.RecentCount // the connections of Telegram that came with another key
+
 	probe probeState  // the check of the providers
 	upd   updateState // the look for a new version
 	sites siteState   // the check of YouTube and Discord
@@ -66,8 +72,15 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.sizeWindow()
-	a.previousEndedBadly = beginSession()
-	logLine("start " + Version)
+	var upgradedFrom string
+	a.previousEndedBadly, upgradedFrom = beginSession(Version)
+	a.watchSessionEnd()
+	logLine("запуск Nimb " + Version)
+	if a.previousEndedBadly {
+		logLine("прошлый запуск закончился неожиданно (сбой, принудительное закрытие или выключение питания)")
+	} else if upgradedFrom != "" {
+		logLine("Nimb обновлён с версии " + upgradedFrom + ": установщик закрыл прошлый запуск, это не сбой")
+	}
 	engine, err := tgproxy.New(a.settings.get().TelegramSecret, tgproxy.DefaultConfig())
 	if err == nil {
 		a.tg = engine
@@ -133,6 +146,9 @@ type State struct {
 		Port  int           `json:"port"`
 		Link  string        `json:"link"`
 		Stats tgproxy.Stats `json:"stats"`
+		// WrongKeyRecently: Telegram came with another key a moment ago (a proxy of an older install is still saved in it). True only while
+		// that goes on: ten seconds without such a connection and it is false again.
+		WrongKeyRecently bool `json:"wrongKeyRecently"`
 	} `json:"telegram"`
 	Media struct {
 		On           bool    `json:"on"`
@@ -185,8 +201,10 @@ func (a *App) GetState() State {
 
 	if resp, err := callService(ipc.Request{Cmd: ipc.Status}); err != nil {
 		st.ServiceError = err.Error()
+		a.noteService(false, err.Error())
 	} else {
 		st.ServiceOK = true
+		a.noteService(true, "")
 		if resp.DNS != nil && resp.DNS.Active {
 			st.AI.On = true
 			st.AI.Provider = resp.DNS.Provider
@@ -214,8 +232,39 @@ func (a *App) GetState() State {
 		st.Telegram.Port = int(a.tg.Port())
 		st.Telegram.Link = a.telegramLink()
 		st.Telegram.Stats = a.tg.Stats()
+		st.Telegram.WrongKeyRecently = a.watchWrongKey(st.Telegram.Stats.WrongSecret)
+	} else {
+		a.watchWrongKey(0, true)
 	}
 	return st
+}
+
+// watchWrongKey takes the count of the connections with another key and says whether it grew a moment ago; reset forgets it (the
+// proxy is stopped).
+func (a *App) watchWrongKey(count int, reset ...bool) bool {
+	a.wrongKeyMu.Lock()
+	defer a.wrongKeyMu.Unlock()
+	a.wrongKey.Quiet = 10 * time.Second
+	if len(reset) > 0 && reset[0] {
+		a.wrongKey.Reset()
+		return false
+	}
+	return a.wrongKey.Observe(count, time.Now())
+}
+
+// noteService writes to the log, once each, the moment the service stops answering (with the words of the error as they came) and the moment
+// it answers again: what the window did in between is read against these two lines.
+func (a *App) noteService(ok bool, reason string) {
+	a.serviceMu.Lock()
+	defer a.serviceMu.Unlock()
+	switch {
+	case !ok && !a.serviceDown:
+		a.serviceDown = true
+		logLine("служба не отвечает: " + reason)
+	case ok && a.serviceDown:
+		a.serviceDown = false
+		logLine("служба снова отвечает")
+	}
 }
 
 // noticeRestarts: the program of the tunnel ended by itself and the service started it again. Only the log hears of it: the switch
@@ -226,7 +275,7 @@ func (a *App) noticeRestarts(t *ipc.TunnelStatus) {
 		return
 	}
 	a.settings.update(func(s *Settings) { s.TunnelRestartsSeen = fresh[len(fresh)-1].Unix() })
-	logLine(fmt.Sprintf("tunnel: программа туннеля остановилась сама, помощник запустил её снова (раз: %d)", len(fresh)))
+	logLine(fmt.Sprintf("туннель: программа туннеля остановилась сама, помощник запустил её снова (раз: %d)", len(fresh)))
 }
 
 func unixTimes(secs []int64) []time.Time {
@@ -251,10 +300,10 @@ func (a *App) restoreTunnel() {
 		return
 	}
 	defer a.restoring.Store(false)
-	logLine("tunnel: туннель был включён до выключения компьютера: включаю снова")
+	logLine("туннель: туннель был включён до выключения компьютера: включаю снова")
 	for attempt := 0; attempt < tunnelrestart.Attempts; attempt++ {
 		if !waitForNetwork(tunnelrestart.NetworkWait) {
-			logLine("tunnel: сети нет: туннель не включён")
+			logLine("туннель: сети нет: туннель не включён")
 			return
 		}
 		// The person may have decided in the meantime (switched it on or off, removed Nimb).
@@ -275,7 +324,7 @@ func (a *App) restoreTunnel() {
 		a.mu.Unlock()
 		time.Sleep(tunnelrestart.Pause)
 	}
-	logLine("tunnel: туннель не включился сам: включите вручную")
+	logLine("туннель: туннель не включился сам: включите вручную")
 }
 
 // waitForNetwork waits until the computer has a network with a way out, at most timeout.
@@ -299,7 +348,7 @@ func (a *App) noticeDrop(t *ipc.TunnelStatus) bool {
 		return false
 	}
 	a.settings.update(func(s *Settings) { s.TunnelDropSeen = t.DroppedAt })
-	logLine("the tunnel stopped by itself: " + t.DropReason)
+	logLine("туннель остановился сам: " + t.DropReason)
 	a.mu.Lock()
 	a.errs["media"] = tunneldrop.MessageFor(t.DropReason)
 	a.mu.Unlock()
@@ -327,16 +376,34 @@ func (a *App) end(name string, err error) Result {
 	}
 	a.mu.Unlock()
 	if err != nil {
-		logLine(name + ": " + err.Error())
+		logLine(serviceName(name) + ": ОШИБКА: " + err.Error())
 		return Result{Error: err.Error()}
 	}
 	return Result{OK: true}
+}
+
+// serviceName is what a service is called in the log.
+func serviceName(key string) string {
+	switch key {
+	case "ai":
+		return "нейросети"
+	case "telegram":
+		return "Telegram"
+	case "media":
+		return "туннель (YouTube и Discord)"
+	}
+	return key
 }
 
 // SetAI turns Smart DNS on or off.
 func (a *App) SetAI(on bool) Result {
 	a.begin("ai")
 	var err error
+	if on {
+		logLine("нейросети: включаю, провайдер " + providerName(a.settings.get().Provider))
+	} else {
+		logLine("нейросети: выключаю")
+	}
 	if on {
 		_, err = callService(ipc.Request{Cmd: ipc.DNSSet, Provider: a.settings.get().Provider})
 	} else {
@@ -351,6 +418,7 @@ func (a *App) SetProvider(id string) Result {
 		return Result{Error: "неизвестный провайдер"}
 	}
 	a.settings.update(func(s *Settings) { s.Provider = id })
+	logLine("нейросети: выбран провайдер " + providerName(id))
 	if resp, err := callService(ipc.Request{Cmd: ipc.Status}); err == nil && resp.DNS != nil && resp.DNS.Active {
 		return a.SetAI(true)
 	}
@@ -360,6 +428,11 @@ func (a *App) SetProvider(id string) Result {
 // SetMedia turns the tunnel on or off.
 func (a *App) SetMedia(on bool) Result {
 	a.begin("media")
+	if on {
+		logLine("туннель: включаю")
+	} else {
+		logLine("туннель: выключаю")
+	}
 	cmd := ipc.TunnelDown
 	if on {
 		cmd = ipc.TunnelUp
@@ -373,6 +446,11 @@ func (a *App) SetMedia(on bool) Result {
 // SetTelegram turns the proxy on or off.
 func (a *App) SetTelegram(on bool) Result {
 	a.begin("telegram")
+	if on {
+		logLine("Telegram: включаю прокси")
+	} else {
+		logLine("Telegram: останавливаю прокси")
+	}
 	if !on {
 		if a.tg != nil {
 			a.tg.Stop()
@@ -385,7 +463,11 @@ func (a *App) SetTelegram(on bool) Result {
 
 // SetAll turns the three services on or off together.
 func (a *App) SetAll(on bool) Result {
-	logLine(fmt.Sprintf("SetAll(%v)", on))
+	if on {
+		logLine("включаю всё")
+	} else {
+		logLine("выключаю всё")
+	}
 	var wg sync.WaitGroup
 	results := make([]Result, 3)
 	for i, f := range []func(bool) Result{a.SetAI, a.SetTelegram, a.SetMedia} {
@@ -393,7 +475,20 @@ func (a *App) SetAll(on bool) Result {
 		go func() { defer wg.Done(); results[i] = f(on) }()
 	}
 	wg.Wait()
-	logLine(fmt.Sprintf("SetAll(%v) done: %+v", on, results))
+	// The result of each of the three, with the words of the error as they came (what the old line with the three structures said).
+	var parts []string
+	for i, name := range []string{"нейросети", "Telegram", "туннель"} {
+		if results[i].OK {
+			parts = append(parts, name+": готово")
+		} else {
+			parts = append(parts, name+": ОШИБКА ("+results[i].Error+")")
+		}
+	}
+	if on {
+		logLine("включить всё, итог: " + strings.Join(parts, "; "))
+	} else {
+		logLine("выключить всё, итог: " + strings.Join(parts, "; "))
+	}
 	for _, r := range results {
 		if !r.OK {
 			return r
@@ -455,6 +550,7 @@ func (a *App) OpenTelegram() Result {
 	if a.tg == nil || !a.tg.IsListening() {
 		return Result{Error: "прокси выключен"}
 	}
+	logLine("Telegram: открываю окно «Добавить прокси»")
 	cmd := exec.Command("rundll32.exe", "url.dll,FileProtocolHandler", a.telegramLink())
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	if err := cmd.Start(); err != nil {
@@ -471,6 +567,7 @@ func (a *App) CopyLink() Result {
 	if err := runtime.ClipboardSetText(a.ctx, a.telegramLink()); err != nil {
 		return Result{Error: "Не удалось скопировать ссылку."}
 	}
+	logLine("Telegram: ссылка скопирована")
 	return Result{OK: true}
 }
 
@@ -508,8 +605,13 @@ func (a *App) GetAutostart() bool { return autostartOn() }
 // SetAutostart makes Nimb start with Windows (quietly, to the tray) or not.
 func (a *App) SetAutostart(on bool) Result {
 	if err := setAutostart(on); err != nil {
-		logLine("autostart: " + err.Error())
+		logLine("автозапуск: не удалось изменить: " + err.Error())
 		return Result{Error: "Не удалось изменить автозапуск."}
+	}
+	if on {
+		logLine("автозапуск с Windows: включён")
+	} else {
+		logLine("автозапуск с Windows: выключен")
 	}
 	return Result{OK: true}
 }
@@ -529,7 +631,7 @@ func (a *App) Uninstall() Result {
 	file, _ := syscall.UTF16PtrFromString(path)
 	a.settings.update(func(s *Settings) { s.TunnelWanted = false })
 	if err := windows.ShellExecute(0, verb, file, nil, nil, windows.SW_SHOWNORMAL); err != nil {
-		logLine("uninstall: " + err.Error())
+		logLine("удаление: не удалось запустить: " + err.Error())
 		return Result{Error: "Не удалось запустить удаление."}
 	}
 	return Result{OK: true}

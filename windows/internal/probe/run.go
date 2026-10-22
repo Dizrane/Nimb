@@ -78,11 +78,11 @@ func (p *Prober) Run(ctx context.Context, providers []dnsx.Provider, progress fu
 			out = p.request(ctx, j.target, j.address)
 		}
 		samples[i] = Sample{Target: j.target, Address: j.address, Outcome: out}
+		// The count and the call that tells it go together, so that the calls come in the order of the count (the last one is the whole).
 		mu.Lock()
 		done++
-		n := done
+		progress(done, len(jobs))
 		mu.Unlock()
-		progress(n, len(jobs))
 	})
 
 	reports := make([]ProviderReport, len(providers))

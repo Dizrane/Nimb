@@ -75,7 +75,7 @@ func Up(cfg *awgconf.Config, opt Options) (t *Tunnel, err error) {
 		return nil, err
 	}
 
-	logf("creating adapter %q", opt.Name)
+	logf("создаю сетевой адаптер «%s»", opt.Name)
 	nativeTun, err := tun.CreateTUN(opt.Name, cfg.MTU)
 	if err != nil {
 		return nil, fmt.Errorf("не удалось создать сетевой адаптер: %w", err)
@@ -109,7 +109,7 @@ func Up(cfg *awgconf.Config, opt Options) (t *Tunnel, err error) {
 	if err = dev.Up(); err != nil {
 		return t, fmt.Errorf("не удалось запустить туннель: %w", err)
 	}
-	logf("device is up")
+	logf("устройство туннеля запущено")
 
 	// The packets of the tunnel itself must leave through the real network, not into the tunnel: the socket is bound to the
 	// interface of the real default route before any route of the tunnel exists, and follows it when the network changes.
@@ -128,12 +128,12 @@ func Up(cfg *awgconf.Config, opt Options) (t *Tunnel, err error) {
 	if err = t.configureInterface(cfg, opt.DNS); err != nil {
 		return t, err
 	}
-	logf("address, routes and DNS are set")
+	logf("адрес, маршруты и DNS заданы")
 
 	if err = t.waitHandshake(timeout); err != nil {
 		return t, err
 	}
-	logf("handshake done")
+	logf("рукопожатие с сервером есть")
 	return t, nil
 }
 
@@ -158,7 +158,7 @@ func (t *Tunnel) Close() {
 		t.luid.FlushDNS(family)
 	}
 	t.dev.Close() // closes the adapter, which removes it
-	t.logf("tunnel is down")
+	t.logf("туннель закрыт")
 }
 
 // SetDNS changes the DNS servers of the tunnel while it is up (Smart DNS going on or off).
@@ -359,14 +359,14 @@ func (t *Tunnel) rebind() {
 	}
 	if idx, found := uplink(windows.AF_INET, t.luid); found {
 		if err := binder.BindSocketToInterface4(idx, false); err != nil {
-			t.logf("bind v4 to interface %d: %v", idx, err)
+			t.logf("привязать сокет (IPv4) к подключению %d не вышло: %v", idx, err)
 		}
 	} else {
 		binder.BindSocketToInterface4(0, true)
 	}
 	if idx, found := uplink(windows.AF_INET6, t.luid); found {
 		if err := binder.BindSocketToInterface6(idx, false); err != nil {
-			t.logf("bind v6 to interface %d: %v", idx, err)
+			t.logf("привязать сокет (IPv6) к подключению %d не вышло: %v", idx, err)
 		}
 	} else {
 		binder.BindSocketToInterface6(0, true)

@@ -30,6 +30,7 @@ import (
 	"github.com/Dizrane/Nimb/windows/internal/probe"
 	"github.com/Dizrane/Nimb/windows/internal/report"
 	"github.com/Dizrane/Nimb/windows/internal/tunneldrop"
+	"github.com/Dizrane/Nimb/windows/internal/winevents"
 )
 
 // reportEnv says what names the person on this computer, so that a report can take it out.
@@ -72,6 +73,9 @@ func (a *App) ReportPrepare() ReportPrep {
 		"Nimb для Windows "+Version,
 		"Windows "+windowsVersion()+", "+runtime.GOARCH,
 		"Язык системы: "+uiLanguage()+", часовой пояс UTC"+utcOffset(offset),
+		"Отчёт собран: "+time.Now().Format("2006-01-02 15:04:05"),
+		windowFacts(),
+		"Компьютер включён с "+time.Now().Add(-windows.DurationSinceBoot()).Format("2006-01-02 15:04:05")+" (работает "+uptimeText(windows.DurationSinceBoot())+")",
 		"Прошлый запуск закончился неожиданно: "+yesNo(a.previousEndedBadly),
 		"Автозапуск с Windows: "+yesNo(autostartOn()),
 	))
@@ -88,6 +92,7 @@ func (a *App) ReportPrepare() ReportPrep {
 			onOff(st.Telegram.On, fmt.Sprintf("порт %d", st.Telegram.Port)), st.Telegram.Stats.Total, st.Telegram.Stats.Failures,
 			st.Telegram.Stats.WrongSecret, st.Telegram.Stats.WebSocket, st.Telegram.Stats.DirectTCP),
 		"YouTube и Discord (туннель): "+onOff(st.Media.On, fmt.Sprintf("рукопожатие %d с назад", st.Media.HandshakeAgo)),
+		"Обновления: "+updateLine(st.Update),
 	)
 	out = append(out, report.Section("Сервисы", svc...))
 
@@ -144,7 +149,13 @@ func (a *App) ReportPrepare() ReportPrep {
 		out = append(out, report.Section("Проверка DNS", probe.Lines(probed)...))
 	}
 
-	out = append(out, report.Section("Сеть", cloudflareLine(trace)))
+	out = append(out, report.Section("Сеть", append([]string{cloudflareLine(trace)}, netfacts.RouteLines("Nimb")...)...))
+	// Which address belongs to which provider: the addresses stay in the report as they are, and this says whose they are.
+	var servers []string
+	for _, p := range dnsx.Providers {
+		servers = append(servers, p.Name+" ("+p.ID+"): "+strings.Join(p.Addresses, ", "))
+	}
+	out = append(out, report.Section("Серверы DNS провайдеров", servers...))
 	// Which names go through which connection and which DNS: what keeps Smart DNS from working shows here (DNS of IPv6, other
 	// connections with a DNS of their own).
 	vpns := 0
@@ -187,15 +198,27 @@ func (a *App) ReportPrepare() ReportPrep {
 			out = append(out, report.Section("Служба", serviceHead...))
 		}
 	}
+	// What Windows itself wrote about the programs of Nimb: the code of a crash, and what the service manager did with the service.
+	var winEvents []string
+	winEvents = append(winEvents, winevents.Query("Application", "(EventID=1000 or EventID=1001)", 24*time.Hour, []string{"Nimb.exe", "nimb-svc.exe"}, 8)...)
+	winEvents = append(winEvents, winevents.Query("System", "Provider[@Name='Service Control Manager'] and (EventID=7000 or EventID=7009 or EventID=7011 or EventID=7023 or EventID=7024 or EventID=7031 or EventID=7034)", 24*time.Hour, []string{"NimbHelper", "Nimb"}, 8)...)
+	if len(winEvents) == 0 {
+		winEvents = []string{"за последние сутки Windows не записала ни сбоев Nimb, ни аварийных остановок службы"}
+	}
+	out = append(out, report.Section("События Windows о Nimb (последние сутки)", winEvents...))
 	if diag != nil {
+		out = append(out, report.Section("Метки службы в журнале туннеля (с начала файла)", report.LogTail(diag.TunnelMarks, 30)...))
 		out = append(out, report.Section("Процесс туннеля (последние строки его журнала)", report.LogTail(diag.TunnelLog, 25)...))
 	}
 	windowLog := tailLog(filepath.Join(dataDir(), "window.log"), 500)
 	events := append(report.ParseLog("окно", windowLog, time.Local), report.ParseLog("служба", serviceLog, time.Local)...)
-	out = append(out, report.Section("Хронология (последние сутки)", report.Events(events, time.Now(), 24*time.Hour, 40)...))
+	out = append(out, report.Section("Хронология (последние сутки)", report.Events(events, time.Now(), 24*time.Hour, 60)...))
+	if a.previousEndedBadly {
+		out = append(out, report.Section("Перед неожиданным завершением (последние строки журнала прошлого запуска)", beforeThisRun(windowLog, 20)...))
+	}
 	raw := windowLog
-	if len(raw) > 30 {
-		raw = raw[len(raw)-30:]
+	if len(raw) > 60 {
+		raw = raw[len(raw)-60:]
 	}
 	if len(raw) == 0 {
 		raw = []string{"пусто"}
@@ -203,7 +226,12 @@ func (a *App) ReportPrepare() ReportPrep {
 	out = append(out, report.Section("Журнал окна (последние строки)", raw...))
 
 	env := reportEnv()
+	// The addresses of the providers (their DNS servers and the pools that the check found) stay as they are: nothing of the person is in
+	// them, and a bad address is what a report is read for.
 	env.Public = probe.Addresses(probed)
+	for _, p := range dnsx.Providers {
+		env.Public = append(env.Public, p.Addresses...)
+	}
 	facts := report.Clean(strings.Join(out, "\n\n"), env)
 	a.mu.Lock()
 	a.reportID, a.reportFacts = id, facts
@@ -266,14 +294,14 @@ func (a *App) ReportPreview(description, contact string) string {
 // ReportSend sends the report to the developer through the relay.
 func (a *App) ReportSend(description, contact string) Result {
 	id, text := a.reportText(description, contact)
-	logLine("report " + id + ": sending")
+	logLine("отчёт " + id + ": отправляю")
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
 	if err := report.Send(ctx, Version, id, text); err != nil {
-		logLine("report " + id + ": not sent: " + err.Error())
+		logLine("отчёт " + id + ": не отправлен: " + err.Error())
 		return Result{Error: err.Error()}
 	}
-	logLine("report " + id + ": sent")
+	logLine("отчёт " + id + ": отправлен")
 	return Result{OK: true}
 }
 
@@ -297,7 +325,7 @@ func (a *App) ReportWrite(description, contact string) Result {
 	if cmd.Start() != nil {
 		wruntime.BrowserOpenURL(a.ctx, "https://t.me/"+report.DeveloperHandle)
 	}
-	logLine("report " + id + ": copied for the chat with the developer")
+	logLine("отчёт " + id + ": скопирован для чата с разработчиком")
 	return Result{OK: true}
 }
 
@@ -392,4 +420,58 @@ func tailLog(path string, n int) []string {
 		lines = lines[len(lines)-n:]
 	}
 	return lines
+}
+
+// uptimeText: "2 ч 05 мин", "3 сут 4 ч".
+func uptimeText(d time.Duration) string {
+	days := int(d.Hours()) / 24
+	hours := int(d.Hours()) % 24
+	minutes := int(d.Minutes()) % 60
+	if days > 0 {
+		return fmt.Sprintf("%d сут %d ч", days, hours)
+	}
+	return fmt.Sprintf("%d ч %02d мин", hours, minutes)
+}
+
+// updateLine says what the look for a new version found and when: for a report the reasons of a «не удалось проверить» are as useful as
+// the version.
+func updateLine(u UpdateView) string {
+	state := "ещё не проверяли"
+	switch {
+	case u.Installing != "":
+		state = "идёт установка: " + u.Installing
+	case u.Error != "":
+		state = "не удалось установить: " + u.Error
+	case u.Available:
+		state = "есть версия " + u.Version
+	case u.Checking:
+		state = "проверяю"
+	case u.Failed:
+		state = "последняя проверка не удалась"
+	case u.Checked > 0:
+		state = "новее нет"
+	}
+	if u.Checked > 0 {
+		state += ", последняя удачная проверка " + time.Unix(u.Checked, 0).Format("2006-01-02 15:04:05")
+	}
+	return state + "; уведомления о версиях " + map[bool]string{true: "включены", false: "выключены"}[u.Notify]
+}
+
+// beforeThisRun are the last n lines of the log of the window before the line that says this run started: what was going on before the
+// run that ended unexpectedly.
+func beforeThisRun(lines []string, n int) []string {
+	start := -1
+	for i, l := range lines {
+		if strings.Contains(l, "  запуск Nimb ") {
+			start = i
+		}
+	}
+	if start <= 0 {
+		return []string{"пусто"}
+	}
+	before := lines[:start]
+	if len(before) > n {
+		before = before[len(before)-n:]
+	}
+	return before
 }

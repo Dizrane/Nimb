@@ -87,7 +87,7 @@ func (s *service) Execute(_ []string, requests <-chan svc.ChangeRequest, status 
 		case err := <-done:
 			cancel()
 			if err != nil {
-				logf("stopped: %v", err)
+				logf("служба остановилась с ошибкой: %v", err)
 				return false, 1
 			}
 			return false, 0
@@ -106,14 +106,17 @@ func serve(ctx context.Context, logf func(string, ...any)) error {
 	if err != nil {
 		return fmt.Errorf("не удалось открыть канал: %w", err)
 	}
-	logf("service started")
+	logf("служба запущена")
 	err = ipc.Serve(ctx, l, h)
-	logf("service stopping")
+	logf("служба останавливается")
 	return err
 }
 
 // openLog writes to a file in the data folder; the file does not grow past one megabyte (it starts again). It never gets keys.
 func openLog() (func(string, ...any), func()) {
+	// On a first install the folder does not exist yet (the helper makes it, and closes it to the users, a moment later); without this the
+	// log could not be opened and the service would write none until its next start.
+	os.MkdirAll(helper.DataDir(), 0o700)
 	path := filepath.Join(helper.DataDir(), "service.log")
 	if st, err := os.Stat(path); err == nil && st.Size() > 1<<20 {
 		os.Remove(path)

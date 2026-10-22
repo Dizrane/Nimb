@@ -5,6 +5,7 @@ package netfacts
 
 import (
 	"encoding/binary"
+	"fmt"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -69,6 +70,59 @@ func Routes(tunnel string) (routes int, via string, viaTunnel bool) {
 		via = "никуда (маршрута нет)"
 	}
 	return routes, via, via == tunnel
+}
+
+// RouteLines are the routes that decide where the traffic goes, as lines of a report: the routes of the default (0.0.0.0/0 and ::/0) and
+// the halves of them that the tunnel puts in front (/1), with the connection and the metric of each, and how many routes the tunnel has
+// in the IPv4 table and in the IPv6 one. The addresses of the person's network are not here: only prefixes of the default routes.
+func RouteLines(tunnel string) []string {
+	var lines []string
+	for _, family := range []winipcfg.AddressFamily{windows.AF_INET, windows.AF_INET6} {
+		name := "IPv4"
+		if family == windows.AF_INET6 {
+			name = "IPv6"
+		}
+		rows, err := winipcfg.GetIPForwardTable2(family)
+		if err != nil {
+			lines = append(lines, name+": таблица маршрутов не прочитана: "+err.Error())
+			continue
+		}
+		inTunnel := 0
+		for i := range rows {
+			r := &rows[i]
+			prefix := r.DestinationPrefix.Prefix()
+			if !prefix.IsValid() || prefix.Bits() > 1 {
+				continue
+			}
+			alias := "?"
+			if row, err := r.InterfaceLUID.Interface(); err == nil {
+				alias = row.Alias()
+			}
+			metric := r.Metric
+			if ipif, err := r.InterfaceLUID.IPInterface(family); err == nil {
+				metric += ipif.Metric
+			}
+			if alias == tunnel {
+				inTunnel++
+			}
+			lines = append(lines, fmt.Sprintf("%s: маршрут %s через «%s», метрика %d", name, routeWords(prefix), alias, metric))
+		}
+		lines = append(lines, fmt.Sprintf("%s: маршрутов туннеля %d", name, inTunnel))
+	}
+	return lines
+}
+
+// routeWords names a route of the default or one of its halves in words: the addresses 0.0.0.0 and 128.0.0.0 would be taken for addresses of
+// the person and cut out of a report, and there is nothing in them but which half it is.
+func routeWords(p netip.Prefix) string {
+	switch {
+	case p.Bits() == 0:
+		return "по умолчанию (/0, всё)"
+	case p.Addr().IsUnspecified():
+		return "нижняя половина (/1)"
+	default:
+		return "верхняя половина (/1)"
+	}
 }
 
 const internetSettings = `Software\Microsoft\Windows\CurrentVersion\Internet Settings`

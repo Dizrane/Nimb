@@ -89,7 +89,7 @@ func (a *App) runProbe(enable bool) {
 	a.probe.mu.Unlock()
 	for _, r := range reports {
 		m, _ := r.Median()
-		logLine(fmt.Sprintf("probe: %s works %d of %d, median %.2f s", r.Provider.ID, r.WorkingCount(), len(probe.Services()), m))
+		logLine(fmt.Sprintf("проверка DNS: %s (%s) работает %d из %d, медиана %.2f с", r.Provider.Name, r.Provider.ID, r.WorkingCount(), len(probe.Services()), m))
 	}
 	if !enable {
 		return

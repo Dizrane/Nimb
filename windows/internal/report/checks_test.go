@@ -283,3 +283,37 @@ func TestLogTailTakesTheLastLinesOrSaysNothingWasWritten(t *testing.T) {
 		t.Errorf("tail: %v", got)
 	}
 }
+
+func TestBytesAreToldForAPerson(t *testing.T) {
+	for n, want := range map[int64]string{0: "0 байт", 999: "999 байт", 2048: "2 КБ", 33310704: "31,8 МБ", 13776742: "13,1 МБ", 3 << 30: "3,0 ГБ"} {
+		if got := Bytes(n); got != want {
+			t.Errorf("Bytes(%d) = %q, want %q", n, got, want)
+		}
+	}
+}
+
+func TestThePagesThePersonOpenedAreNotTheStory(t *testing.T) {
+	at := time.Date(2026, 10, 23, 4, 40, 0, 0, time.Local)
+	lines := []Line{
+		{at, "окно", "страница «Нейросети»"},
+		{at, "окно", "click nav ai"},
+		{at, "окно", "нейросети: включаю, провайдер GeoHide (EU)"},
+	}
+	got := Events(lines, at.Add(time.Minute), time.Hour, 10)
+	if len(got) != 1 || !strings.Contains(got[0], "нейросети: включаю") {
+		t.Errorf("%v", got)
+	}
+}
+
+func TestChronologyHasTheSecondsAndMarksTheErrors(t *testing.T) {
+	got := Events(window(ago(5, "нейросети: включаю"), ago(4, "туннель: ОШИБКА: сервер не ответил"), ago(3, "прошлый запуск закончился неожиданно")), now, 24*time.Hour, 40)
+	if len(got) != 3 {
+		t.Fatalf("%v", got)
+	}
+	if !strings.Contains(got[0], ":00 [окно] нейросети") || strings.Contains(got[0], "⚠") {
+		t.Errorf("a plain line has the seconds and no mark: %q", got[0])
+	}
+	if !strings.Contains(got[1], "[окно] ⚠ туннель: ОШИБКА: сервер не ответил") || !strings.Contains(got[2], "⚠ прошлый запуск") {
+		t.Errorf("the errors are marked: %v", got)
+	}
+}

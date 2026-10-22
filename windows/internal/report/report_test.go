@@ -197,3 +197,28 @@ func TestPublicAddressesStayAsTheyAre(t *testing.T) {
 		t.Errorf("got  %q\nwant %q", got, want)
 	}
 }
+
+func TestAServerOfAProviderStaysAsItIsWhenPublicAndIsToldByNameOtherwise(t *testing.T) {
+	server := dnsx.Providers[0].Addresses[0]
+	text := "DNS на «Wi-Fi»: " + server + "\nотказ: Gemini · 31.25.239.132: перенаправление"
+	// Public: the address stays, so that the line says which address it was.
+	got := Clean(text, Environment{Public: []string{server, "31.25.239.132"}})
+	if !strings.Contains(got, server) || !strings.Contains(got, "31.25.239.132") {
+		t.Errorf("public addresses were taken out: %s", got)
+	}
+	// Not public: the server of a provider is told by the name, any other address of the person's network goes.
+	got = Clean(text+"\nшлюз 192.168.1.1", Environment{})
+	if strings.Contains(got, server) || !strings.Contains(got, "‹"+dnsx.Providers[0].Name+"›") {
+		t.Errorf("the server is not told by name: %s", got)
+	}
+	if strings.Contains(got, "192.168.1.1") || strings.Contains(got, "31.25.239.132") {
+		t.Errorf("an address that is not public stayed: %s", got)
+	}
+}
+
+func TestMACAddressesGo(t *testing.T) {
+	got := Clean("адаптер 00:1A:2B:3c:4D:5e и 00-1A-2B-3C-4D-5E", Environment{})
+	if strings.Contains(strings.ToLower(got), "1a:2b") || strings.Contains(strings.ToLower(got), "1a-2b") || strings.Count(got, "‹mac›") != 2 {
+		t.Errorf("%s", got)
+	}
+}

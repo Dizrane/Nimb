@@ -152,7 +152,7 @@ export class TelegramPage {
       subtitle: t.on ? 'Прокси работает на этом компьютере. Telegram ходит через него.' : 'Включите, чтобы Telegram открывался и грузил файлы быстрее.',
       label: t.on ? 'Остановить прокси для Telegram' : 'Включить прокси для Telegram',
     });
-    if (same(this, 'rj', [t.on, t.error])) return;
+    if (same(this, 'rj', [t.on, t.error, t.wrongKeyRecently])) return;
     const body = t.on
       ? `<div class="card stack8"><div class="nm">Подключить Telegram</div>
           <div class="sm">Откроется окно «Добавить прокси» в Telegram Desktop: подтвердите его.</div>
@@ -161,7 +161,9 @@ export class TelegramPage {
             <button class="btn" data-a="openTg" data-f="open" id="open">Открыть в Telegram</button></div>
           <div id="note" class="sm" style="text-align:right;min-height:16px"></div></div>`
       : `<div class="card"><div class="nm">Как это работает</div><div class="sm">Включите прокси и подтвердите окно «Добавить прокси» в Telegram.</div></div>`;
-    setHTML(this.right, body + notice(t.error));
+    // As on the Mac: only while it goes on; it goes away by itself ten seconds after the last connection with another key.
+    const wrongKey = t.on && t.wrongKeyRecently ? notice('Telegram подключается с чужим ключом: в нём, похоже, указан другой прокси на этом порту. Нажмите «Открыть в Telegram» и подтвердите, а старый прокси удалите.', 'warn') : '';
+    setHTML(this.right, body + wrongKey + notice(t.error));
   }
   destroy() { this.hero.destroy(); }
 }
@@ -303,7 +305,7 @@ export class ReportPage {
       <input id="rep-contact" data-input="contact" type="text" placeholder="@имя в Telegram или почта" value="${esc(rep.contact)}">
       <button class="link" data-a="repdetails" data-f="repdetails" id="repdetails" style="align-self:flex-start">Посмотреть, что будет отправлено ${rep.details ? '▴' : '▾'}</button>
       ${rep.details ? `<pre class="preview">${esc(rep.loading ? 'Собираю…' : rep.preview)}</pre>` : ''}
-      <div class="sm" style="margin:0">Версия, состояние сервисов и последние строки журнала. Паролей, ключей и IP-адресов в отчёте нет.</div>
+      <div class="sm" style="margin:0">Версия, состояние сервисов и последние строки журнала. Паролей, ключей и ваших личных данных (адрес, имя компьютера и пользователя) в отчёте нет; адреса серверов сервисов и провайдеров есть, они помогают найти ошибку.</div>
       <div id="rep-msg">${msg}</div>
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;flex-wrap:wrap" id="rep-buttons">${this.buttons(sending, can)}</div>`);
   }

@@ -60,3 +60,22 @@ func TestTunnelLogMarksAndTail(t *testing.T) {
 		t.Errorf("%v", got)
 	}
 }
+
+func TestTunnelLogMarksAreFoundFarBackAmongTheLinesOfTheDaemon(t *testing.T) {
+	l := newTunnelLog(filepath.Join(t.TempDir(), "tunnel.log"))
+	l.Mark("up")
+	for i := 0; i < 100; i++ {
+		l.Logf("DEBUG: keepalive %d", i)
+	}
+	l.Mark("daemon-exited")
+	for i := 0; i < 100; i++ {
+		l.Logf("DEBUG: keepalive %d", i)
+	}
+	marks := l.Marks(10)
+	if len(marks) != 2 || !strings.HasSuffix(marks[0], "NIMB: up") || !strings.HasSuffix(marks[1], "NIMB: daemon-exited") {
+		t.Errorf("%v", marks)
+	}
+	if len(l.Marks(1)) != 1 {
+		t.Error("only the last n")
+	}
+}

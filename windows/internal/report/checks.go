@@ -309,7 +309,18 @@ func ParseLog(source string, lines []string, loc *time.Location) []Line {
 // isNews: the clicks of the person on the pages say what they did, not what happened; the rest (states, errors, versions, starts) is
 // the story.
 func isNews(l Line) bool {
-	return l.Message != "" && !strings.HasPrefix(l.Message, "click ")
+	return l.Message != "" && !strings.HasPrefix(l.Message, "click ") && !strings.HasPrefix(l.Message, "страница «")
+}
+
+// isError tells a line of a log that says something went wrong.
+func isError(message string) bool {
+	m := strings.ToLower(message)
+	for _, word := range []string{"ошибка", "ошибки", "не удалось", "не вышло", "не отправлен", "неожиданно", "error"} {
+		if strings.Contains(m, word) {
+			return true
+		}
+	}
+	return false
 }
 
 // Events are the events of the last day made out of the logs: the states of the services, the errors, the new versions. Clicks are
@@ -337,7 +348,12 @@ func Events(lines []Line, now time.Time, within time.Duration, limit int) []stri
 	}
 	var out []string
 	for _, it := range items {
-		s := fmt.Sprintf("%s [%s] %s", it.line.At.Format("01-02 15:04"), it.line.Source, it.line.Message)
+		// With the seconds, so that the order of what the window did and what the service answered can be read; an error has a mark.
+		mark := ""
+		if isError(it.line.Message) {
+			mark = "⚠ "
+		}
+		s := fmt.Sprintf("%s [%s] %s%s", it.line.At.Format("01-02 15:04:05"), it.line.Source, mark, it.line.Message)
 		if it.count > 1 {
 			s += fmt.Sprintf(" (×%d)", it.count)
 		}
@@ -364,4 +380,17 @@ func LogTail(lines []string, limit int) []string {
 		out = out[len(out)-limit:]
 	}
 	return out
+}
+
+// Bytes is an amount of data for a person: "31,8 МБ", "512 КБ", "40 байт".
+func Bytes(n int64) string {
+	switch {
+	case n >= 1<<30:
+		return strings.Replace(fmt.Sprintf("%.1f ГБ", float64(n)/(1<<30)), ".", ",", 1)
+	case n >= 1<<20:
+		return strings.Replace(fmt.Sprintf("%.1f МБ", float64(n)/(1<<20)), ".", ",", 1)
+	case n >= 1<<10:
+		return fmt.Sprintf("%d КБ", n>>10)
+	}
+	return fmt.Sprintf("%d байт", n)
 }

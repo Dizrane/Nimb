@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/Dizrane/Nimb/windows/internal/dnsx"
+	"github.com/Dizrane/Nimb/windows/internal/report"
 	"github.com/Dizrane/Nimb/windows/internal/version"
 )
 
@@ -24,12 +25,20 @@ func (h *Helper) diag() []string {
 	if st.Restarting {
 		lines = append(lines, "Туннель: программа остановилась сама, служба запускает её снова")
 	} else if st.Up {
-		lines = append(lines, fmt.Sprintf("Туннель: включён, последнее рукопожатие %d с назад, принято %d, отправлено %d байт", st.HandshakeAgo, st.Received, st.Sent))
+		lines = append(lines, fmt.Sprintf("Туннель: включён, последнее рукопожатие %d с назад, принято %s, отправлено %s", st.HandshakeAgo, report.Bytes(st.Received), report.Bytes(st.Sent)))
 	} else {
 		lines = append(lines, fmt.Sprintf("Туннель: выключен; аккаунт WARP есть: %s", yesNo(st.HasAccount)))
 	}
+	lines = append(lines, "Аккаунт WARP: "+yesNo(st.HasAccount))
+	if n := len(st.Restarts); n > 0 {
+		lines = append(lines, fmt.Sprintf("Программа туннеля сама останавливалась и запускалась снова за сутки: %d", n))
+	}
 	if h.backup != nil {
-		lines = append(lines, "Smart DNS: включён, провайдер "+h.backup.Provider)
+		name := h.backup.Provider
+		if p, ok := dnsx.Find(h.backup.Provider); ok {
+			name = p.Name
+		}
+		lines = append(lines, "Smart DNS: включён, провайдер "+name)
 	} else {
 		lines = append(lines, "Smart DNS: выключен")
 	}

@@ -200,8 +200,8 @@ document.addEventListener('input', (e) => {
 
 // -------------------------------------------------------------------------------------------------------------------- events
 
-window.addEventListener('error', (e) => logPage(`error: ${e.message} at ${e.lineno}`));
-window.addEventListener('unhandledrejection', (e) => logPage(`rejected: ${e.reason}`));
+window.addEventListener('error', (e) => logPage(`ошибка страницы: ${e.message} (строка ${e.lineno})`));
+window.addEventListener('unhandledrejection', (e) => logPage(`ошибка страницы: отклонено обещание: ${e.reason}`));
 
 async function finishOnboarding() {
   try { await api().FinishOnboarding(); } catch (e) { /* ask again next time */ }
@@ -209,9 +209,12 @@ async function finishOnboarding() {
   showPage('home');
 }
 
+const PAGE_NAMES = { home: 'Главная', ai: 'Нейросети', telegram: 'Telegram', media: 'YouTube и Discord', settings: 'Настройки' };
+
 document.addEventListener('click', async (e) => {
   const t = e.target.closest('[data-a]');
-  logPage(`click ${t ? t.dataset.a + ' ' + (t.dataset.v || '') : e.target.tagName}${t && t.disabled ? ' (disabled)' : ''}`);
+  // Only the pages the person goes to are written down; what they do there is written by the program itself, in words.
+  if (t && !t.disabled && t.dataset.a === 'nav') logPage(`страница «${PAGE_NAMES[t.dataset.v] || t.dataset.v}»`);
   if (!t || t.disabled) return;
   const v = t.dataset.v;
   switch (t.dataset.a) {
@@ -281,7 +284,7 @@ window.addEventListener('load', async () => {
     }
   } catch (e) { /* no first setup */ }
   buildShell();
-  logPage(`window ${innerWidth}x${innerHeight} dpr ${devicePixelRatio}`);
+  logPage(`размер окна: страница видит ${innerWidth}×${innerHeight}, масштаб экрана ${Math.round(devicePixelRatio * 100)}%`);
   showPage(first);
   if (firstSetup) { onb = new Onboarding(actions); render(); }
   preloadIcons();

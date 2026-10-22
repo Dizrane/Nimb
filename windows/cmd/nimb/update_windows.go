@@ -112,14 +112,14 @@ func (a *App) checkUpdate() {
 		// GitHub answered: there is nothing for Windows to offer yet. That is a check that worked, with no newer version.
 		a.upd.failed, a.upd.retrySoon, a.upd.checked, a.upd.release = false, false, time.Now(), nil
 		a.upd.mu.Unlock()
-		a.logCheck("update: " + err.Error())
+		a.logCheck("обновления: для Windows пока нет релизов (" + err.Error() + ")")
 		return
 	}
 	if err != nil {
 		// A try that fails is quiet: the offered version, if there is one, stays where it is.
 		a.upd.failed, a.upd.retrySoon = true, !errors.Is(err, update.ErrLimit)
 		a.upd.mu.Unlock()
-		a.logCheck("update: " + err.Error())
+		a.logCheck("обновления: не удалось проверить: " + err.Error())
 		return
 	}
 	newer := update.IsNewer(rel.Version, Version)
@@ -134,7 +134,7 @@ func (a *App) checkUpdate() {
 	if !newer {
 		return
 	}
-	a.logCheck("update: a newer version " + rel.Version)
+	a.logCheck("обновления: вышла версия " + rel.Version)
 	if set := a.settings.get(); !set.UpdateNotifyOff && update.ShouldTell(rel.Version, set.UpdateTold) && (!windowInFront() || notice.ShowsInFront(notice.UpdateTag)) {
 		a.settings.update(func(s *Settings) { s.UpdateTold = rel.Version })
 		balloon(notice.UpdateTag, 1, "Nimb", "Вышла новая версия "+rel.Version+". Откройте Nimb и нажмите «Обновить».")
@@ -159,7 +159,7 @@ func (a *App) InstallUpdate() Result {
 func (a *App) install(rel update.Release) {
 	set := func(s string) { a.upd.mu.Lock(); a.upd.installing = s; a.upd.mu.Unlock() }
 	fail := func(msg string) {
-		logLine("update: " + msg)
+		logLine("обновления: не удалось: " + msg)
 		a.upd.mu.Lock()
 		a.upd.installing, a.upd.err = "", msg
 		a.upd.mu.Unlock()
@@ -178,7 +178,7 @@ func (a *App) install(rel update.Release) {
 		return
 	}
 	set("Установка…")
-	logLine("update: starting the installer of " + rel.Version)
+	logLine("обновления: запускаю установщик версии " + rel.Version)
 	verb, _ := syscall.UTF16PtrFromString("runas")
 	file, _ := syscall.UTF16PtrFromString(path)
 	args, _ := syscall.UTF16PtrFromString("/S /relaunch")
@@ -234,6 +234,6 @@ func (a *App) SendTestNotification() Result {
 	lastTest.at = time.Now()
 	lastTest.mu.Unlock()
 	balloon(notice.TestTag, 2, notice.TestTitle, notice.TestText)
-	logLine("notifications: showed the test notification")
+	logLine("уведомления: показано тестовое уведомление")
 	return Result{OK: true}
 }

@@ -3,6 +3,7 @@
 package main
 
 import (
+	"fmt"
 	"math"
 	"os"
 	"strconv"
@@ -27,7 +28,15 @@ var (
 	pEnumWindows      = user32.NewProc("EnumWindows")
 	pGetClassName     = user32.NewProc("GetClassNameW")
 	pGetWindowLong    = user32.NewProc("GetWindowLongPtrW")
+	pSetWindowLong    = user32.NewProc("SetWindowLongPtrW")
+	pCallWindowProc   = user32.NewProc("CallWindowProcW")
+	pGetClientRect    = user32.NewProc("GetClientRect")
 )
+
+const wmEndSession = 0x0016
+
+// windowProc is the procedure that the window had before watchSessionEnd put its own in front of it.
+var windowProc uintptr
 
 // ownWindow finds the window of this program that Wails made.
 func ownWindow() uintptr {
@@ -71,7 +80,7 @@ func outerSize(hwnd uintptr) (w, h int) {
 func (a *App) sizeWindow() {
 	hwnd := ownWindow()
 	if hwnd == 0 {
-		logLine("window: not found, the size is the one of the options")
+		logLine("размер окна: окно не найдено, размер остаётся таким, какой задан в программе")
 		return
 	}
 	w, h := outerSize(hwnd)
@@ -80,5 +89,41 @@ func (a *App) sizeWindow() {
 		runtime.WindowSetSize(a.ctx, w, h)
 		a.settings.update(func(s *Settings) { s.WindowSized = true })
 	}
-	logLine("window: outer size for a client of 1100x660 is " + strconv.Itoa(w) + "x" + strconv.Itoa(h))
+	logLine("размер окна: чтобы рабочая область была 1100×660, он вместе с рамкой " + strconv.Itoa(w) + "×" + strconv.Itoa(h))
+}
+
+// watchSessionEnd: when Windows shuts down or the person logs off, the program is ended without being asked to close, and the mark of a
+// running program (see beginSession) would stay and be taken for a crash at the next start. Wails does not hand this message on, so a
+// procedure of ours stands in front of the window's: it removes the mark when the session ends, and passes every message on.
+func (a *App) watchSessionEnd() {
+	hwnd := ownWindow()
+	if hwnd == 0 {
+		return
+	}
+	cb := syscall.NewCallback(func(h, msg, wparam, lparam uintptr) uintptr {
+		if msg == wmEndSession && wparam != 0 {
+			endSession()
+			logLine("Windows завершает сеанс: Nimb закрывается вместе с ним")
+		}
+		r, _, _ := pCallWindowProc.Call(windowProc, h, msg, wparam, lparam)
+		return r
+	})
+	windowProc, _, _ = pSetWindowLong.Call(hwnd, ^uintptr(3), cb) // GWLP_WNDPROC (-4)
+}
+
+// windowFacts says, for a report, how large the page is and how the screen is scaled: a window that is too small or a scale of 150% is
+// the first thing to look at when a page looks wrong.
+func windowFacts() string {
+	hwnd := ownWindow()
+	if hwnd == 0 {
+		return "Окно: не найдено"
+	}
+	dpi, _, _ := pGetDpiForWindow.Call(hwnd)
+	if dpi == 0 {
+		dpi = 96
+	}
+	var rc windows.Rect
+	pGetClientRect.Call(hwnd, uintptr(unsafe.Pointer(&rc)))
+	scale := float64(dpi) / 96
+	return fmt.Sprintf("Окно: рабочая область %d×%d, масштаб экрана %d%%", int(math.Round(float64(rc.Right-rc.Left)/scale)), int(math.Round(float64(rc.Bottom-rc.Top)/scale)), int(dpi)*100/96)
 }

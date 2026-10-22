@@ -47,7 +47,8 @@ type Environment struct {
 	// Connections are the names of the network connections of this computer: a name that Windows did not give by itself was chosen
 	// by someone (a router, a phone, a company) and does not go into a report (ReportRedactor.swift does the same on the Mac).
 	Connections []string
-	// Public are addresses that name nobody and stay as they are: the pool addresses of the providers that the check found.
+	// Public are addresses that name nobody of this computer and stay as they are: the DNS servers of the providers and the addresses of their pools
+	// that the check found. They help to see a bad address; nothing of the person is in them.
 	Public []string
 }
 
@@ -61,6 +62,7 @@ var (
 	reEmail  = regexp.MustCompile(`[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`)
 	reIPv4   = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
 	reIPv6   = regexp.MustCompile(`\b[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){3,7}\b`)
+	reMAC    = regexp.MustCompile(`\b[0-9A-Fa-f]{2}(?:[:-][0-9A-Fa-f]{2}){5}\b`)
 	reKey    = regexp.MustCompile(`[A-Za-z0-9+/=_\-]{32,}`)
 	reUsers  = regexp.MustCompile(`(?i)([A-Za-z]:[\\/]Users[\\/])[^\\/\s"'<>|:*?]+`)
 	reRepeat = regexp.MustCompile(`(‹[^›]+›)(?:, ?‹[^›]+›)+`)
@@ -74,6 +76,7 @@ func Clean(text string, env Environment) string {
 	for i, a := range env.Public {
 		text = strings.ReplaceAll(text, a, fmt.Sprintf("⟦%d⟧", i))
 	}
+	// A DNS server of a provider that is not among the public addresses is told by the name of the provider.
 	for _, p := range dnsx.Providers {
 		for _, a := range p.Addresses {
 			text = strings.ReplaceAll(text, a, "‹"+p.Name+"›")
@@ -98,6 +101,8 @@ func Clean(text string, env Environment) string {
 		}
 	}
 	text = reEmail.ReplaceAllString(text, "‹e-mail›")
+	// A MAC address has the shape of the first six pairs of an IPv6 address, so it goes before them.
+	text = reMAC.ReplaceAllString(text, "‹mac›")
 	text = reIPv4.ReplaceAllString(text, "‹ip›")
 	text = reIPv6.ReplaceAllString(text, "‹ipv6›")
 	text = reKey.ReplaceAllString(text, "‹ключ›")

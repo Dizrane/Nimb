@@ -55,6 +55,8 @@ type Response struct {
 	Version string   `json:"version,omitempty"`
 	// TunnelLog answers the command diag: the last lines of the log of the program of the tunnel (no keys, the window cleans the addresses).
 	TunnelLog []string `json:"tunnelLog,omitempty"`
+	// TunnelMarks are the lines of that log that the service itself wrote (up, daemon-exited, restarting, restarted, ...), from further back.
+	TunnelMarks []string `json:"tunnelMarks,omitempty"`
 }
 
 // DNSStatus is the state of Smart DNS.

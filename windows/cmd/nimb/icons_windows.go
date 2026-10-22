@@ -134,7 +134,7 @@ func setWindowIcon(active bool) {
 		size, _, _ := pMetricsForDpi.Call(kind.metric, dpi)
 		icon := iconOfSize(data, int(size))
 		if icon == 0 {
-			logLine(fmt.Sprintf("window icon: no icon of size %d", size))
+			logLine(fmt.Sprintf("значок окна: нет значка размером %d", size))
 			continue
 		}
 		pSendMessage.Call(hwnd, wmSetIcon, kind.which, icon)

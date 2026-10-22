@@ -27,7 +27,7 @@ func (h *Helper) loadBackup() *dnsx.Backup {
 	}
 	var b dnsx.Backup
 	if err := json.Unmarshal(raw, &b); err != nil {
-		h.logf("dns-backup.json is damaged: %v", err)
+		h.logf("DNS: файл с прежними настройками повреждён: %v", err)
 		return nil
 	}
 	return &b
@@ -78,7 +78,7 @@ func (h *Helper) tunnelDNS() []netip.Addr {
 func (h *Helper) syncTunnelDNS() {
 	if h.tun != nil {
 		if err := h.tun.SetDNS(h.tunnelDNS()); err != nil {
-			h.logf("tunnel DNS: %v", err)
+			h.logf("DNS туннеля: %v", err)
 		}
 	}
 }
@@ -104,7 +104,7 @@ func (h *Helper) dnsSet(provider dnsx.Provider) error {
 		h.dropBackup()
 		return fmt.Errorf("не удалось сохранить прежние настройки: %w", err)
 	}
-	h.logf("dns: %s on %d of %d adapters", provider.ID, len(write), len(now))
+	h.logf("DNS: %s (%s) задан на %d из %d подключений", provider.Name, provider.ID, len(write), len(now))
 	failed := h.writeAll(write, provider)
 	dnsx.Flush()
 	h.syncTunnelDNS()
@@ -125,13 +125,13 @@ func (h *Helper) dnsRestore() error {
 	}
 	write, skipped := h.backup.Restore(now)
 	for _, name := range skipped {
-		h.logf("dns: %q was changed by the person, left as it is", name)
+		h.logf("DNS: на «%s» его уже изменили вручную, оставляю как есть", name)
 	}
 	failed := 0
 	var names []string
 	for _, a := range write {
 		if err := dnsx.Write(a); err != nil {
-			h.logf("dns restore: %v", err)
+			h.logf("DNS: вернуть прежний не вышло: %v", err)
 			failed++
 			names = append(names, a.Name)
 			continue
@@ -152,6 +152,9 @@ func (h *Helper) dnsRestore() error {
 	}
 	h.dropBackup()
 	h.syncTunnelDNS()
+	if len(write) > 0 {
+		h.logf("DNS: прежние настройки возвращены на %d подключениях", len(write))
+	}
 	return nil
 }
 
@@ -178,11 +181,11 @@ func (h *Helper) writeAll(adapters []dnsx.Adapter, provider dnsx.Provider) (fail
 // write6 writes the IPv6 servers of an adapter and checks them; a failure is only logged.
 func (h *Helper) write6(a dnsx.Adapter) {
 	if err := dnsx.Write6(a); err != nil {
-		h.logf("dns: IPv6 servers of %q: %v", a.Name, err)
+		h.logf("DNS: серверы IPv6 на «%s» не заданы: %v", a.Name, err)
 		return
 	}
 	if after, ok := dnsx.Current(a.GUID); ok && !dnsx.Same6(after.NameServer6, a.NameServer6) {
-		h.logf("dns: IPv6 servers of %q did not take: %q", a.Name, after.NameServer6)
+		h.logf("DNS: серверы IPv6 на «%s» не приняты системой: %q", a.Name, after.NameServer6)
 	}
 }
 
@@ -206,7 +209,7 @@ func (h *Helper) startWatching() {
 		}
 	})
 	if err != nil {
-		h.logf("cannot watch the adapters: %v", err)
+		h.logf("следить за новыми подключениями не получается: %v", err)
 		return
 	}
 	w.cb = cb
@@ -253,10 +256,10 @@ func (h *Helper) dnsFresh() {
 		return
 	}
 	if err := h.saveBackup(); err != nil {
-		h.logf("dns: %v", err)
+		h.logf("DNS: %v", err)
 		return
 	}
-	h.logf("dns: %s on %d new adapters", provider.ID, len(write))
+	h.logf("DNS: %s (%s) задан на %d новых подключениях", provider.Name, provider.ID, len(write))
 	h.writeAll(write, provider)
 	dnsx.Flush()
 }

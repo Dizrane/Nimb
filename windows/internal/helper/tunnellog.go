@@ -85,3 +85,18 @@ func (l *tunnelLog) Tail(n int) []string {
 	}
 	return lines
 }
+
+// Marks returns the last n lines that the service wrote itself (NIMB: up, daemon-exited, restarting, restarted, ...), from the whole file:
+// the lines of the daemon around them are many, and they would push the marks out of a short tail.
+func (l *tunnelLog) Marks(n int) []string {
+	var marks []string
+	for _, line := range l.Tail(1 << 20) {
+		if strings.Contains(line, " NIMB: ") {
+			marks = append(marks, line)
+		}
+	}
+	if len(marks) > n {
+		marks = marks[len(marks)-n:]
+	}
+	return marks
+}

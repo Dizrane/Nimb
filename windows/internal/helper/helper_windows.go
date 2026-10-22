@@ -31,6 +31,9 @@ import (
 // tunnelLogReport is how many of the last lines of the log of the tunnel go into a report.
 const tunnelLogReport = 25
 
+// tunnelMarksReport is how many of the marks of the service in that log go into a report, from the whole file.
+const tunnelMarksReport = 30
+
 // DataDir is where the service keeps its files.
 func DataDir() string {
 	base := os.Getenv("ProgramData")
@@ -104,27 +107,27 @@ func (h *Helper) Handle(ctx context.Context, req ipc.Request) ipc.Response {
 	case ipc.Status:
 		return ipc.Response{OK: true, Tunnel: h.status(), DNS: h.dnsStatus()}
 	case ipc.Diag:
-		return ipc.Response{OK: true, Lines: h.diag(), Version: version.Version, TunnelLog: h.tlog.Tail(tunnelLogReport)}
+		return ipc.Response{OK: true, Lines: h.diag(), Version: version.Version, TunnelLog: h.tlog.Tail(tunnelLogReport), TunnelMarks: h.tlog.Marks(tunnelMarksReport)}
 	case ipc.DNSSet:
 		provider, ok := dnsx.Find(req.Provider)
 		if !ok {
 			return ipc.Response{Error: "неизвестный провайдер DNS", DNS: h.dnsStatus()}
 		}
 		if err := h.dnsSet(provider); err != nil {
-			h.logf("dns.set %s: %v", provider.ID, err)
+			h.logf("DNS: включить %s (%s) не вышло: %v", provider.Name, provider.ID, err)
 			return ipc.Response{Error: err.Error(), DNS: h.dnsStatus()}
 		}
 		return ipc.Response{OK: true, DNS: h.dnsStatus()}
 	case ipc.DNSRestore:
 		if err := h.dnsRestore(); err != nil {
-			h.logf("dns.restore: %v", err)
+			h.logf("DNS: вернуть прежние не вышло: %v", err)
 			return ipc.Response{Error: err.Error(), DNS: h.dnsStatus()}
 		}
 		return ipc.Response{OK: true, DNS: h.dnsStatus()}
 	case ipc.TunnelUp:
 		h.cancelRestart() // the person decides now: nothing that was started before them goes on
 		if err := h.up(ctx); err != nil {
-			h.logf("tunnel.up: %v", err)
+			h.logf("туннель: включить не вышло: %v", err)
 			return ipc.Response{Error: err.Error(), Tunnel: h.status()}
 		}
 		return ipc.Response{OK: true, Tunnel: h.status()}
@@ -172,7 +175,7 @@ func (h *Helper) up(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("настройки туннеля не прошли проверку: %w", err)
 	}
-	h.logf("bringing the tunnel up")
+	h.logf("включаю туннель")
 	t, err := tunnel.Up(cfg, tunnel.Options{Name: "Nimb", DNS: h.tunnelDNS(), Logf: h.logf, DeviceLogf: h.tlog.Logf})
 	if err != nil {
 		if errors.Is(err, tunnel.ErrNoHandshake) {
@@ -244,7 +247,7 @@ func (h *Helper) tunnelEnded(t *tunnel.Tunnel, stop chan struct{}) {
 	if h.tun != t || h.stopWatch != stop {
 		return // taken down by hand in the meantime
 	}
-	h.logf("the program of the tunnel ended by itself: taking the tunnel down")
+	h.logf("программа туннеля закончила сама: закрываю туннель")
 	h.tlog.Mark("daemon-exited")
 	t.DropRoutes()
 	h.closeTunnel()
@@ -283,7 +286,7 @@ func (h *Helper) restart(cancel chan struct{}) {
 			h.mu.Unlock()
 			return
 		}
-		h.logf("restart of the tunnel: %v", err)
+		h.logf("перезапуск туннеля не вышел: %v", err)
 		h.mu.Unlock()
 	}
 	h.mu.Lock()
@@ -309,7 +312,7 @@ func (h *Helper) giveUp() {
 	note := tunneldrop.Note{When: time.Now(), Reason: tunneldrop.DaemonExited}
 	h.drop = &note
 	if err := os.WriteFile(h.dropPath(), []byte(note.Format()), 0o600); err != nil {
-		h.logf("the note of the stop: %v", err)
+		h.logf("заметку об остановке записать не вышло: %v", err)
 	}
 }
 
@@ -323,7 +326,7 @@ func (h *Helper) readRestarts() string {
 // saveRestart remembers a restart that worked (the last fifty), for the limit and for the report.
 func (h *Helper) saveRestart(when time.Time) {
 	if err := os.WriteFile(h.restartsPath(), []byte(tunnelrestart.Add(h.readRestarts(), when)), 0o600); err != nil {
-		h.logf("the record of the restart: %v", err)
+		h.logf("запись о перезапуске сохранить не вышло: %v", err)
 	}
 }
 
@@ -332,7 +335,7 @@ func (h *Helper) account(ctx context.Context) (*warp.Account, error) {
 	if acc, err := h.loadAccount(); err == nil {
 		return acc, nil
 	}
-	h.logf("registering an anonymous account")
+	h.logf("создаю анонимный аккаунт WARP")
 	acc, err := warp.Register(ctx)
 	if err != nil {
 		return nil, err
@@ -385,7 +388,7 @@ func (h *Helper) unregister(ctx context.Context) {
 		return
 	}
 	if err := warp.Unregister(ctx, acc.ID, acc.Token); err != nil {
-		h.logf("unregister: %v", err)
+		h.logf("удалить аккаунт WARP не вышло: %v", err)
 	}
 	os.Remove(h.accountPath())
 }
