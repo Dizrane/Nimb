@@ -36,11 +36,9 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     var isShown: Bool { item?.isVisible ?? false }
     var menu: NSMenu? { item?.menu }
 
-    /// What the ring shows: nothing works (a faint dashed ring), part of it works (a ring and a green dot), all of it works
-    /// (a thicker ring and the dot).
+    /// What the ring shows: nothing works (a faint dashed ring), part of it works (a ring), all of it works
+    /// (a thicker ring). There is no coloured dot: a green one in the menu bar looks like the sign of a camera in use.
     enum IconState { case off, partial, all }
-
-    private var dot: NSView?
 
     private func update(visible: Bool, state: IconState) {
         if visible, item == nil {
@@ -52,7 +50,6 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         } else if !visible, let existing = item {
             NSStatusBar.system.removeStatusItem(existing)
             item = nil
-            dot = nil
         }
         guard let button = item?.button else { return }
         button.image = Self.icon(state)
@@ -60,23 +57,6 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         button.setAccessibilityLabel("Nimb")
         button.setAccessibilityHelp("Открыть меню Nimb")
         button.setAccessibilityValue(state == .off ? "ничего не работает" : (state == .partial ? "работает часть сервисов" : "работает всё"))
-        // The dot is a view over the button: the ring is a template image that macOS tints, and a template cannot be green.
-        if dot == nil {
-            let view = NSView()
-            view.wantsLayer = true
-            view.layer?.backgroundColor = NSColor(Theme.ok).cgColor
-            view.layer?.cornerRadius = 2.75
-            view.translatesAutoresizingMaskIntoConstraints = false
-            button.addSubview(view)
-            NSLayoutConstraint.activate([
-                view.widthAnchor.constraint(equalToConstant: 5.5),
-                view.heightAnchor.constraint(equalToConstant: 5.5),
-                view.trailingAnchor.constraint(equalTo: button.trailingAnchor, constant: -3),
-                view.topAnchor.constraint(equalTo: button.topAnchor, constant: 3),
-            ])
-            dot = view
-        }
-        dot?.isHidden = state == .off
     }
 
     /// The halo of Nimb as a ring; a template image, so that macOS tints it for light and dark menu bars.
