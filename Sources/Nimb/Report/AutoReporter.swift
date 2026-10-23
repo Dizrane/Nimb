@@ -105,6 +105,10 @@ enum DailyDigest {
             }
         }
         var out = ["— Сутки в цифрах —", "Записей чёрного ящика: \(lines.count) из \(BlackBoxLine.keepLines)"]
+        // The box keeps the last lines, not the last day: the period says what the numbers are about, and the lines say how long it worked.
+        if let first = lines.first?.prefix(19), let last = lines.last?.prefix(19) {
+            out.append("Период записей: с \(first) по \(last); работы по записям около \(lines.count * Int(BlackBox.interval) / 60) мин")
+        }
         for name in ["dns", "telegram", "туннель"] { out.append("\(name): не совпало в \(disagreements[name] ?? 0) записях") }
         if let top = memory.max(), let now = memory.last { out.append("Память: до \(top) МБ, в последней записи \(now) МБ") }
         out.append("Отчётов по сбоям за сутки: \(sentKeys.count)" + (sentKeys.isEmpty ? "" : " (\(sentKeys.joined(separator: ", ")))"))

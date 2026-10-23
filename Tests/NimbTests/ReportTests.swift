@@ -439,6 +439,7 @@ import Testing
         ]
         let summary = DailyDigest.summary(lines: lines, sentKeys: ["tunnel-restarted"])
         #expect(summary.contains("Записей чёрного ящика: 3 из 288"))
+        #expect(summary.contains("Период записей: с 2026-10-23 10:00:00 по 2026-10-23 10:10:00; работы по записям около 15 мин"))
         #expect(summary.contains("dns: не совпало в 1 записях"))
         #expect(summary.contains("telegram: не совпало в 0 записях"))
         #expect(summary.contains("туннель: не совпало в 1 записях"))
