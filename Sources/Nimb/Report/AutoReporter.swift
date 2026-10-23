@@ -36,6 +36,7 @@ enum AutoTrigger: Equatable {
     case mismatch(AutoService)
     case error(AutoService)
     case updateCheck
+    case dailyDigest
 
     /// The same cause has the same key: the key is what is not repeated.
     var key: String {
@@ -46,6 +47,7 @@ enum AutoTrigger: Equatable {
         case .mismatch(let service): "mismatch-\(service.rawValue)"
         case .error(let service): "error-\(service.rawValue)"
         case .updateCheck: "update-check"
+        case .dailyDigest: "daily"
         }
     }
 
@@ -58,6 +60,7 @@ enum AutoTrigger: Equatable {
         case .mismatch(let service): "«\(service.name)» работает не так, как должен, больше 10 минут"
         case .error(let service): "ошибка при работе с «\(service.name)»"
         case .updateCheck: "проверка обновлений не удаётся несколько раз подряд"
+        case .dailyDigest: "ежедневная сводка"
         }
     }
 }
@@ -82,6 +85,31 @@ enum AutoReportPolicy {
 
     /// Only the last day is kept.
     static func pruned(_ history: [Sent], now: Date) -> [Sent] { history.filter { now.timeIntervalSince($0.at) < 24 * 3600 } }
+}
+
+/// The report of the day: once in 24 hours, with the small things that are not worth a report of their own. It does not count in the limits
+/// above (it is one a day by its own clock), and it carries the numbers of the black box and the causes that were told that day.
+enum DailyDigest {
+    static let every: TimeInterval = 24 * 3600
+
+    static func isDue(now: Date, last: Date) -> Bool { now.timeIntervalSince(last) >= every }
+
+    /// The day in numbers, from the lines of the black box (see `BlackBoxLine.line`) and the keys of the reports sent in the day.
+    static func summary(lines: [String], sentKeys: [String]) -> String {
+        var disagreements = ["dns": 0, "telegram": 0, "туннель": 0]
+        var memory: [Int] = []
+        for line in lines {
+            for part in line.components(separatedBy: " | ") {
+                if part.contains("совпало=НЕТ"), let name = disagreements.keys.first(where: { part.hasPrefix($0 + "=") }) { disagreements[name, default: 0] += 1 }
+                if part.hasPrefix("память="), let value = Int(part.dropFirst("память=".count).dropLast("МБ".count)) { memory.append(value) }
+            }
+        }
+        var out = ["— Сутки в цифрах —", "Записей чёрного ящика: \(lines.count) из \(BlackBoxLine.keepLines)"]
+        for name in ["dns", "telegram", "туннель"] { out.append("\(name): не совпало в \(disagreements[name] ?? 0) записях") }
+        if let top = memory.max(), let now = memory.last { out.append("Память: до \(top) МБ, в последней записи \(now) МБ") }
+        out.append("Отчётов по сбоям за сутки: \(sentKeys.count)" + (sentKeys.isEmpty ? "" : " (\(sentKeys.joined(separator: ", ")))"))
+        return out.joined(separator: "\n")
+    }
 }
 
 /// «Не так» must last: one look that disagrees is a moment of switching, two in a row (ten minutes) is a fault.
@@ -110,6 +138,7 @@ final class AutoReporter: ObservableObject {
     private static let historyKey = "helpTestingHistory"
     private static let countKey = "helpTestingCount"
     private static let lastKey = "helpTestingLast"
+    private static let digestKey = "helpTestingDigest"
 
     @Published private(set) var enabled: Bool
     @Published private(set) var sentCount: Int
@@ -152,9 +181,11 @@ final class AutoReporter: ObservableObject {
         defaults.set(on, forKey: Self.enabledKey)
         if on {
             defaults.set(Self.newInstallID(), forKey: Self.installKey)
-            AppLog.shared.add("тестирование", "включено: отчёты при сбоях отправляются сами")
+            // The first digest comes in a day, not at once.
+            defaults.set(Date().timeIntervalSince1970, forKey: Self.digestKey)
+            AppLog.shared.add("тестирование", "включено: отчёты при сбоях отправляются сами, сводка раз в сутки")
         } else {
-            for key in [Self.installKey, Self.historyKey, Self.countKey, Self.lastKey] { defaults.removeObject(forKey: key) }
+            for key in [Self.installKey, Self.historyKey, Self.countKey, Self.lastKey, Self.digestKey] { defaults.removeObject(forKey: key) }
             sentCount = 0
             lastSent = nil
             AppLog.shared.add("тестирование", "выключено: номер установки стёрт")
@@ -175,23 +206,48 @@ final class AutoReporter: ObservableObject {
         if tracker.observe("dns", agrees: facts.dnsAgrees) { notify(.mismatch(.dns)) }
         if tracker.observe("telegram", agrees: facts.telegramAgrees) { notify(.mismatch(.telegram)) }
         if tracker.observe("tunnel", agrees: facts.tunnelAgrees) { notify(.mismatch(.tunnel)) }
+        sendDigestIfDue()
+    }
+
+    private func history(now: Date) -> [AutoReportPolicy.Sent] {
+        let stored = (try? JSONDecoder().decode([AutoReportPolicy.Sent].self, from: UserDefaults.standard.data(forKey: Self.historyKey) ?? Data())) ?? []
+        return AutoReportPolicy.pruned(stored, now: now)
+    }
+
+    /// The report of the day goes when a day has passed since the last one (or since the switch was turned on). A Mac that was asleep sends it
+    /// at the first look after waking.
+    private func sendDigestIfDue() {
+        let defaults = UserDefaults.standard
+        let now = Date()
+        let stamp = defaults.double(forKey: Self.digestKey)
+        // Turned on by an older version: the day starts now.
+        guard stamp > 0 else { defaults.set(now.timeIntervalSince1970, forKey: Self.digestKey); return }
+        guard DailyDigest.isDue(now: now, last: Date(timeIntervalSince1970: stamp)) else { return }
+        defaults.set(now.timeIntervalSince1970, forKey: Self.digestKey)
+        let summary = DailyDigest.summary(lines: BlackBox.lastLines(BlackBoxLine.keepLines), sentKeys: history(now: now).map(\.key))
+        deliver(.dailyDigest, summary: summary)
     }
 
     func notify(_ trigger: AutoTrigger) {
-        guard enabled, let dns, let telegram, let warp else { return }
+        guard enabled else { return }
         let defaults = UserDefaults.standard
         let now = Date()
-        var history = ((try? JSONDecoder().decode([AutoReportPolicy.Sent].self, from: defaults.data(forKey: Self.historyKey) ?? Data())) ?? [])
-        history = AutoReportPolicy.pruned(history, now: now)
+        var history = history(now: now)
         guard AutoReportPolicy.allows(key: trigger.key, now: now, history: history) else { return }
         // Written down before the sending: a second cause in the same moment does not make a second report, and a failed sending is not repeated.
         history.append(AutoReportPolicy.Sent(key: trigger.key, at: now))
         defaults.set(try? JSONEncoder().encode(history), forKey: Self.historyKey)
+        deliver(trigger, summary: nil)
+    }
+
+    private func deliver(_ trigger: AutoTrigger, summary: String?) {
+        guard let dns, let telegram, let warp else { return }
+        let defaults = UserDefaults.standard
         let install = defaults.string(forKey: Self.installKey) ?? Self.newInstallID()
         Task {
             let facts = await DiagnosticReport.collect(dns: dns, telegram: telegram, warp: warp)
             let id = DiagnosticReport.newID()
-            let text = DiagnosticReport.head(id: id, description: "авто: \(trigger.title) (установка \(install))", contact: "") + "\n\n" + facts
+            let text = DiagnosticReport.head(id: id, description: "авто: \(trigger.title) (установка \(install))", contact: "") + "\n\n" + (summary.map { $0 + "\n\n" } ?? "") + facts
             do {
                 try await ReportSender.send(id: id, text: text, auto: (trigger: trigger.key, install: install))
                 sentCount += 1

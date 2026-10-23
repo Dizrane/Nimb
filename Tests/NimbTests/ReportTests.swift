@@ -428,6 +428,25 @@ import Testing
         #expect(!other, "each service has its own count")
     }
 
+    @Test func theDigestGoesOnceADayAndCountsTheDay() {
+        let last = now.addingTimeInterval(-23 * 3600)
+        #expect(!DailyDigest.isDue(now: now, last: last))
+        #expect(DailyDigest.isDue(now: now.addingTimeInterval(2 * 3600), last: last))
+        let lines = [
+            "2026-10-23 10:00:00 | работает=1ч00м | dns=Comss совпало=да | telegram=вкл:1080 соединений=4 ошибок=0 совпало=да | туннель=вкл:utun4 совпало=да маршрутов=2 | трафик_через=utun4 | память=120МБ",
+            "2026-10-23 10:05:00 | работает=1ч05м | dns=Comss совпало=НЕТ | telegram=выкл совпало=да | туннель=вкл:utun4 совпало=НЕТ маршрутов=0 | трафик_через=en0 | память=180МБ",
+            "2026-10-23 10:10:00 | работает=1ч10м | dns=выкл совпало=да | telegram=выкл совпало=да | туннель=выкл совпало=да маршрутов=0 | трафик_через=en0 | память=150МБ",
+        ]
+        let summary = DailyDigest.summary(lines: lines, sentKeys: ["tunnel-restarted"])
+        #expect(summary.contains("Записей чёрного ящика: 3 из 288"))
+        #expect(summary.contains("dns: не совпало в 1 записях"))
+        #expect(summary.contains("telegram: не совпало в 0 записях"))
+        #expect(summary.contains("туннель: не совпало в 1 записях"))
+        #expect(summary.contains("до 180 МБ, в последней записи 150 МБ"))
+        #expect(summary.contains("Отчётов по сбоям за сутки: 1 (tunnel-restarted)"))
+        #expect(DailyDigest.summary(lines: [], sentKeys: []).contains("Записей чёрного ящика: 0"))
+    }
+
     @Test func theRulesOfAgreement() {
         #expect(AutoReportRules.tunnelAgrees(on: true, routes: 5, viaTunnel: true))
         #expect(!AutoReportRules.tunnelAgrees(on: true, routes: 0, viaTunnel: false))
@@ -442,7 +461,7 @@ import Testing
         #expect(AutoTrigger.mismatch(.telegram).key == "mismatch-telegram")
         #expect(AutoTrigger.error(.tunnel).key == "error-tunnel")
         #expect(AutoTrigger.error(.tunnel).title.contains("YouTube и Discord"))
-        for trigger in [AutoTrigger.previousEndedBadly, .tunnelRestarted, .tunnelDropped, .mismatch(.dns), .error(.dns), .updateCheck] {
+        for trigger in [AutoTrigger.previousEndedBadly, .tunnelRestarted, .tunnelDropped, .mismatch(.dns), .error(.dns), .updateCheck, .dailyDigest] {
             #expect(trigger.key.range(of: "^[A-Za-z0-9:-]{1,40}$", options: .regularExpression) != nil, "the relay takes plain letters in a key")
         }
         #expect(AutoTrigger.previousEndedBadly.key == "crash")
