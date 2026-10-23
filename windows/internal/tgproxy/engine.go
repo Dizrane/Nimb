@@ -71,6 +71,9 @@ func New(secretHex string, cfg Config) (*Engine, error) {
 	return e, nil
 }
 
+// SetLogf sets where the lines about connection events go (after New, before Start).
+func (e *Engine) SetLogf(f func(string)) { e.cfg.Logf = f }
+
 func (e *Engine) logf(format string, args ...any) {
 	if e.cfg.Logf != nil {
 		e.cfg.Logf(fmt.Sprintf(format, args...))

@@ -20,7 +20,6 @@ import (
 
 	"github.com/wailsapp/wails/v2/pkg/logger"
 
-	"github.com/Dizrane/Nimb/windows/internal/tgproxy"
 	"github.com/Dizrane/Nimb/windows/internal/tunnelrestart"
 	"github.com/Dizrane/Nimb/windows/internal/winevents"
 )
@@ -57,7 +56,6 @@ func setupDiagnostics() {
 	if f, err := os.OpenFile(crashPath(), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600); err == nil {
 		debug.SetCrashOutput(f, debug.CrashOptions{}) // the file stays open for as long as the program runs
 	}
-	tgproxy.OnPanic = func(where string, value any, stack []byte) { logPanic(where, value, stack) }
 }
 
 // logPanic writes a recovered panic with its stack to the log of the window (the stack lines have no time: they belong to the line above).

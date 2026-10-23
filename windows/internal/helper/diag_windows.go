@@ -30,6 +30,11 @@ func (h *Helper) diag() []string {
 		lines = append(lines, fmt.Sprintf("Туннель: выключен; аккаунт WARP есть: %s", yesNo(st.HasAccount)))
 	}
 	lines = append(lines, "Аккаунт WARP: "+yesNo(st.HasAccount))
+	if tg := h.telegramStatus(); tg.On {
+		lines = append(lines, fmt.Sprintf("Прокси Telegram (в службе): включён, порт %d, соединений %d (сейчас %d), через WebSocket %d, напрямую %d, ошибок %d, чужой ключ %d", tg.Port, tg.Stats.Total, tg.Stats.Active, tg.Stats.WebSocket, tg.Stats.DirectTCP, tg.Stats.Failures, tg.Stats.WrongSecret))
+	} else {
+		lines = append(lines, "Прокси Telegram (в службе): выключен; должен быть включён после перезапуска: "+yesNo(h.tg.Auto))
+	}
 	if n := len(st.Restarts); n > 0 {
 		lines = append(lines, fmt.Sprintf("Программа туннеля сама останавливалась и запускалась снова за сутки: %d", n))
 	}

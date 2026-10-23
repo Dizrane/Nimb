@@ -2,7 +2,7 @@
 
 // nimbctl talks to the service of Nimb from a console, for testing:
 //
-//	nimbctl ping | status | up | down | unregister
+//	nimbctl ping | status | up | down | unregister | tg-up | tg-down
 //	nimbctl dns <provider id>     Smart DNS on (geohide-eu, comss, geohide, geohide-us)
 //	nimbctl dns-off               Smart DNS off
 package main
@@ -33,6 +33,10 @@ func request(args []string) (ipc.Request, bool) {
 		return ipc.Request{Cmd: ipc.TunnelDown}, true
 	case "unregister":
 		return ipc.Request{Cmd: ipc.TunnelUnregister}, true
+	case "tg-up":
+		return ipc.Request{Cmd: ipc.TelegramUp}, true
+	case "tg-down":
+		return ipc.Request{Cmd: ipc.TelegramDown}, true
 	case "dns-off":
 		return ipc.Request{Cmd: ipc.DNSRestore}, true
 	}
@@ -42,7 +46,7 @@ func request(args []string) (ipc.Request, bool) {
 func main() {
 	req, ok := request(os.Args[1:])
 	if !ok {
-		fmt.Fprintln(os.Stderr, "usage: nimbctl ping | status | up | down | unregister | dns <provider> | dns-off")
+		fmt.Fprintln(os.Stderr, "usage: nimbctl ping | status | up | down | unregister | tg-up | tg-down | dns <provider> | dns-off")
 		os.Exit(2)
 	}
 	conn, err := ipc.Dial(5 * time.Second)
@@ -57,6 +61,13 @@ func main() {
 	}
 	if t := resp.Tunnel; t != nil {
 		fmt.Printf("tunnel: up=%v handshakeAgo=%ds received=%d sent=%d account=%v droppedAt=%d %s restarting=%v restarts=%v\n", t.Up, t.HandshakeAgo, t.Received, t.Sent, t.HasAccount, t.DroppedAt, t.DropReason, t.Restarting, t.Restarts)
+	}
+	if g := resp.Telegram; g != nil {
+		key := g.Secret
+		if len(key) > 4 {
+			key = key[:4] + "…"
+		}
+		fmt.Printf("telegram: on=%v port=%d key=%s total=%d error=%q\n", g.On, g.Port, key, g.Stats.Total, g.Error)
 	}
 	if d := resp.DNS; d != nil {
 		fmt.Printf("dns: active=%v provider=%s\n", d.Active, d.Provider)

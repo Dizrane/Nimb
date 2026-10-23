@@ -21,6 +21,7 @@ import (
 	"github.com/Dizrane/Nimb/windows/internal/awgconf"
 	"github.com/Dizrane/Nimb/windows/internal/dnsx"
 	"github.com/Dizrane/Nimb/windows/internal/ipc"
+	"github.com/Dizrane/Nimb/windows/internal/tgproxy"
 	"github.com/Dizrane/Nimb/windows/internal/tunnel"
 	"github.com/Dizrane/Nimb/windows/internal/tunneldrop"
 	"github.com/Dizrane/Nimb/windows/internal/tunnelrestart"
@@ -65,6 +66,13 @@ type Helper struct {
 	stopWatch chan struct{}
 	drop      *tunneldrop.Note
 
+	// The proxy of Telegram (see telegram_windows.go): its settings, the engine once it was made, a word for the window when it could not be kept
+	// going, and the channel that stops its watcher.
+	tg            tgproxy.Settings
+	engine        *tgproxy.Engine
+	telegramError string
+	tgStop        chan struct{}
+
 	// While the program of the tunnel is being started again after it ended by itself: when that began (the window is told that the tunnel
 	// is on for as long as the mark is fresh) and the channel that is closed to take the restart back (the person switched the tunnel off or on).
 	restarting    time.Time
@@ -84,7 +92,9 @@ func New(dir string, logf func(string, ...any)) (*Helper, error) {
 	h := &Helper{dir: dir, logf: logf, started: time.Now(), tlog: newTunnelLog(filepath.Join(dir, "tunnel.log"))}
 	h.backup = h.loadBackup()
 	h.drop = h.loadDrop()
+	h.loadTelegram()
 	h.startWatching()
+	h.startTelegramWatch()
 	return h, nil
 }
 
@@ -92,8 +102,14 @@ func New(dir string, logf func(string, ...any)) (*Helper, error) {
 // the window (or the uninstaller) gives them back when the person asks.
 func (h *Helper) Close() {
 	h.stopWatching()
+	if h.tgStop != nil {
+		close(h.tgStop)
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.engine != nil {
+		h.engine.Stop() // the settings say it was on: it comes back with the service
+	}
 	h.down()
 }
 
@@ -105,7 +121,7 @@ func (h *Helper) Handle(ctx context.Context, req ipc.Request) ipc.Response {
 	case ipc.Ping:
 		return ipc.Response{OK: true}
 	case ipc.Status:
-		return ipc.Response{OK: true, Tunnel: h.status(), DNS: h.dnsStatus()}
+		return ipc.Response{OK: true, Tunnel: h.status(), DNS: h.dnsStatus(), Telegram: h.telegramStatus()}
 	case ipc.Diag:
 		return ipc.Response{OK: true, Lines: h.diag(), Version: version.Version, TunnelLog: h.tlog.Tail(tunnelLogReport), TunnelMarks: h.tlog.Marks(tunnelMarksReport)}
 	case ipc.DNSSet:
@@ -134,6 +150,15 @@ func (h *Helper) Handle(ctx context.Context, req ipc.Request) ipc.Response {
 	case ipc.TunnelDown:
 		h.down()
 		return ipc.Response{OK: true, Tunnel: h.status()}
+	case ipc.TelegramUp:
+		if err := h.telegramUp(req.Secret, req.Port); err != nil {
+			h.logf("прокси Telegram: включить не вышло: %v", err)
+			return ipc.Response{Error: err.Error(), Telegram: h.telegramStatus()}
+		}
+		return ipc.Response{OK: true, Telegram: h.telegramStatus()}
+	case ipc.TelegramDown:
+		h.telegramDown()
+		return ipc.Response{OK: true, Telegram: h.telegramStatus()}
 	case ipc.TunnelUnregister:
 		h.down()
 		h.unregister(ctx)

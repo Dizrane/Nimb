@@ -35,7 +35,6 @@ var Version = version.Version
 type App struct {
 	ctx      context.Context
 	settings *settingsStore
-	tg       *tgproxy.Engine
 	tgPort   uint16
 
 	mu   sync.Mutex // one switch at a time
@@ -86,14 +85,7 @@ func (a *App) startup(ctx context.Context) {
 	} else if upgradedFrom != "" {
 		logLine("Nimb обновлён с версии " + upgradedFrom + ": установщик закрыл прошлый запуск, это не сбой")
 	}
-	engine, err := tgproxy.New(a.settings.get().TelegramSecret, tgproxy.DefaultConfig())
-	if err == nil {
-		a.tg = engine
-	}
-	if a.settings.get().TelegramAuto {
-		goSafe("запуск прокси Telegram", func() { a.startTelegram() })
-	}
-	goKeep("слежение за прокси Telegram", a.watchTelegram)
+	goSafe("перенос прокси Telegram в службу", a.migrateTelegram)
 	goKeep("проверка обновлений", a.updateLoop)
 	goSafe("возврат туннеля после перезагрузки", a.restoreTunnel)
 	startTray(a)
@@ -113,16 +105,13 @@ func (a *App) ShowWindow() {
 	runtime.WindowShow(a.ctx)
 }
 
-// Quit closes Nimb. The proxy of Telegram stops with it; DNS and the tunnel stay as they are, as on the Mac.
+// Quit closes Nimb. The proxy of Telegram, DNS and the tunnel stay as they are: they live in the service.
 func (a *App) Quit() { a.quitFrom("кнопка «Выйти из Nimb» в окне") }
 
 // quitFrom closes Nimb and writes down who asked for it.
 func (a *App) quitFrom(reason string) {
 	logExit("по команде человека: " + reason)
 	endSession()
-	if a.tg != nil {
-		a.tg.Stop()
-	}
 	stopTray()
 	runtime.Quit(a.ctx)
 }
@@ -208,12 +197,14 @@ func (a *App) GetState() State {
 	st.Telegram.Busy, st.Telegram.Error = busy["telegram"], errs["telegram"]
 	st.Media.Busy, st.Media.Error = busy["media"], errs["media"]
 
+	var tg *ipc.TelegramStatus
 	if resp, err := callService(ipc.Request{Cmd: ipc.Status}); err != nil {
 		st.ServiceError = err.Error()
 		a.noteService(false, err.Error())
 	} else {
 		st.ServiceOK = true
 		a.noteService(true, "")
+		tg = resp.Telegram
 		if resp.DNS != nil && resp.DNS.Active {
 			st.AI.On = true
 			st.AI.Provider = resp.DNS.Provider
@@ -236,14 +227,17 @@ func (a *App) GetState() State {
 			}
 		}
 	}
-	if a.tg != nil && a.tg.IsListening() {
+	if tg != nil && tg.On {
 		st.Telegram.On = true
-		st.Telegram.Port = int(a.tg.Port())
-		st.Telegram.Link = a.telegramLink()
-		st.Telegram.Stats = a.tg.Stats()
-		st.Telegram.WrongKeyRecently = a.watchWrongKey(st.Telegram.Stats.WrongSecret)
+		st.Telegram.Port = tg.Port
+		st.Telegram.Link = telegramLink(tg)
+		st.Telegram.Stats = tg.Stats
+		st.Telegram.WrongKeyRecently = a.watchWrongKey(tg.Stats.WrongSecret)
 	} else {
 		a.watchWrongKey(0, true)
+		if tg != nil && tg.Error != "" && st.Telegram.Error == "" {
+			st.Telegram.Error = tg.Error
+		}
 	}
 	return st
 }
@@ -460,14 +454,14 @@ func (a *App) SetTelegram(on bool) Result {
 	} else {
 		logLine("Telegram: останавливаю прокси")
 	}
-	if !on {
-		if a.tg != nil {
-			a.tg.Stop()
-		}
-		a.settings.update(func(s *Settings) { s.TelegramAuto = false })
-		return a.end("telegram", nil)
+	cmd := ipc.Request{Cmd: ipc.TelegramDown}
+	if on {
+		// The key and the port that this window had are offered to the service: the Telegram of the person may know them from before.
+		set := a.settings.get()
+		cmd = ipc.Request{Cmd: ipc.TelegramUp, Secret: set.TelegramSecret, Port: set.TelegramPort}
 	}
-	return a.end("telegram", a.startTelegram())
+	_, err := callService(cmd)
+	return a.end("telegram", err)
 }
 
 // SetAll turns the three services on or off together.
@@ -509,61 +503,45 @@ func (a *App) SetAll(on bool) Result {
 	return Result{OK: true}
 }
 
-func (a *App) startTelegram() error {
-	if a.tg == nil {
-		return fmt.Errorf("прокси не удалось подготовить")
-	}
-	if a.tg.IsListening() {
+// telegramFromService asks the service for the state of the proxy (nil when it does not answer).
+func (a *App) telegramFromService() *ipc.TelegramStatus {
+	resp, err := callService(ipc.Request{Cmd: ipc.Status})
+	if err != nil {
 		return nil
 	}
-	preferred := uint16(1443)
-	if p := a.settings.get().TelegramPort; p >= 1024 && p <= 65535 {
-		preferred = uint16(p)
-	}
-	port, err := a.tg.Start(preferred)
-	if err != nil {
-		return fmt.Errorf("не удалось запустить прокси: %w", err)
-	}
-	a.settings.update(func(s *Settings) { s.TelegramPort = int(port); s.TelegramAuto = true })
-	return nil
+	return resp.Telegram
 }
 
-// watchTelegram brings the port back when it stops listening (a sleep, another program took it), up to three tries.
-func (a *App) watchTelegram() {
-	for range time.Tick(6 * time.Second) {
-		if a.tg == nil || !a.settings.get().TelegramAuto || a.tg.IsListening() {
-			continue
-		}
-		wanted := a.tg.Port()
-		a.tg.Stop()
-		ok := false
-		for attempt := 1; attempt <= 3 && !ok; attempt++ {
-			time.Sleep(time.Duration(attempt) * time.Second)
-			if port, err := a.tg.Start(max(wanted, 1024)); err == nil {
-				a.settings.update(func(s *Settings) { s.TelegramPort = int(port) })
-				ok = true
-			}
-		}
-		if !ok {
+func telegramLink(tg *ipc.TelegramStatus) string {
+	return fmt.Sprintf("tg://proxy?server=127.0.0.1&port=%d&secret=dd%s", tg.Port, tg.Secret)
+}
+
+// migrateTelegram: in 0.2.0 and before the proxy lived in this window, and «on» was remembered here. If it was on, the service is asked to
+// switch it on, with the key and the port that Telegram already has, and the window forgets it: from now on the service keeps it.
+func (a *App) migrateTelegram() {
+	if !a.settings.get().TelegramAuto {
+		return
+	}
+	for i := 0; i < 30; i++ {
+		set := a.settings.get()
+		if _, err := callService(ipc.Request{Cmd: ipc.TelegramUp, Secret: set.TelegramSecret, Port: set.TelegramPort}); err == nil {
 			a.settings.update(func(s *Settings) { s.TelegramAuto = false })
-			a.mu.Lock()
-			a.errs["telegram"] = "Прокси остановился и не смог запуститься снова: порт, возможно, занят другой программой. Включите его ещё раз."
-			a.mu.Unlock()
+			logLine("Telegram: прокси, который был включён в окне, теперь работает в службе (ключ и порт те же)")
+			return
 		}
+		time.Sleep(2 * time.Second)
 	}
-}
-
-func (a *App) telegramLink() string {
-	return fmt.Sprintf("tg://proxy?server=127.0.0.1&port=%d&secret=dd%s", a.tg.Port(), a.settings.get().TelegramSecret)
+	logLine("Telegram: не удалось передать включённый прокси службе, он останется выключенным, пока его не включат")
 }
 
 // OpenTelegram opens the "add proxy" window of Telegram Desktop.
 func (a *App) OpenTelegram() Result {
-	if a.tg == nil || !a.tg.IsListening() {
+	tg := a.telegramFromService()
+	if tg == nil || !tg.On {
 		return Result{Error: "прокси выключен"}
 	}
 	logLine("Telegram: открываю окно «Добавить прокси»")
-	cmd := exec.Command("rundll32.exe", "url.dll,FileProtocolHandler", a.telegramLink())
+	cmd := exec.Command("rundll32.exe", "url.dll,FileProtocolHandler", telegramLink(tg))
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	if err := cmd.Start(); err != nil {
 		return Result{Error: "Не удалось открыть Telegram. Скопируйте ссылку и отправьте её себе в «Избранное»."}
@@ -573,10 +551,11 @@ func (a *App) OpenTelegram() Result {
 
 // CopyLink puts the link of the proxy on the clipboard.
 func (a *App) CopyLink() Result {
-	if a.tg == nil || !a.tg.IsListening() {
+	tg := a.telegramFromService()
+	if tg == nil || !tg.On {
 		return Result{Error: "прокси выключен"}
 	}
-	if err := runtime.ClipboardSetText(a.ctx, a.telegramLink()); err != nil {
+	if err := runtime.ClipboardSetText(a.ctx, telegramLink(tg)); err != nil {
 		return Result{Error: "Не удалось скопировать ссылку."}
 	}
 	logLine("Telegram: ссылка скопирована")

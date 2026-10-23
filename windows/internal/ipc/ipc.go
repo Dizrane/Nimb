@@ -1,7 +1,8 @@
 // Package ipc is the talk between the window of Nimb and its service. The set of commands is closed, like the lines of the
 // sudoers file on the Mac: a command is a name from the list below, nothing else comes from the window. No path, no file
 // name, no command line, no settings of a tunnel travels this way, so the worst the window (or any program of the same person)
-// can do is switch the tunnel on and off.
+// can do is switch the tunnel and the proxy of Telegram on and off. (The one thing that comes from the window is the key and the port of
+// the proxy of Telegram, once, from an earlier version; the service checks them: 32 hex digits, a port from 1024.)
 //
 // One request is one line of JSON, the answer is one line of JSON, and then the connection is closed.
 package ipc
@@ -16,6 +17,8 @@ import (
 	"net"
 	"sync"
 	"time"
+
+	"github.com/Dizrane/Nimb/windows/internal/tgproxy"
 )
 
 // The commands.
@@ -25,13 +28,15 @@ const (
 	TunnelUp         = "tunnel.up"
 	TunnelDown       = "tunnel.down"
 	TunnelUnregister = "tunnel.unregister"
-	DNSSet           = "dns.set"     // takes the ID of a provider from the list of the service
-	DNSRestore       = "dns.restore" // gives the DNS of the adapters back
-	Diag             = "diag"        // facts of the service for a report about a problem (no keys)
+	DNSSet           = "dns.set"       // takes the ID of a provider from the list of the service
+	DNSRestore       = "dns.restore"   // gives the DNS of the adapters back
+	Diag             = "diag"          // facts of the service for a report about a problem (no keys)
+	TelegramUp       = "telegram.up"   // the proxy of Telegram on (the service keeps it going, whatever the window does)
+	TelegramDown     = "telegram.down" // the proxy of Telegram off
 )
 
 var known = map[string]bool{
-	Ping: true, Status: true, TunnelUp: true, TunnelDown: true, TunnelUnregister: true, DNSSet: true, DNSRestore: true, Diag: true,
+	Ping: true, Status: true, TunnelUp: true, TunnelDown: true, TunnelUnregister: true, DNSSet: true, DNSRestore: true, Diag: true, TelegramUp: true, TelegramDown: true,
 }
 
 // MaxLine is the longest line the service reads.
@@ -42,6 +47,11 @@ type Request struct {
 	Cmd string `json:"cmd"`
 	// Provider is the ID of a Smart DNS provider, only for dns.set. The service has its own list and takes no addresses.
 	Provider string `json:"provider,omitempty"`
+	// Secret and Port are only for telegram.up, and only for the first time: the key of the proxy (32 hex digits) and the port that the person's
+	// Telegram already knows from an earlier version, when the proxy lived in the window. The service takes them if it has none yet, and keeps
+	// its own after that.
+	Secret string `json:"secret,omitempty"`
+	Port   int    `json:"port,omitempty"`
 }
 
 // Response is what the service answers.
@@ -50,6 +60,8 @@ type Response struct {
 	Error  string        `json:"error,omitempty"` // worded for the person
 	Tunnel *TunnelStatus `json:"tunnel,omitempty"`
 	DNS    *DNSStatus    `json:"dns,omitempty"`
+	// Telegram is the state of the proxy of Telegram, which the service runs.
+	Telegram *TelegramStatus `json:"telegram,omitempty"`
 	// Lines answer the command diag; Version is the version of the service.
 	Lines   []string `json:"lines,omitempty"`
 	Version string   `json:"version,omitempty"`
@@ -57,6 +69,17 @@ type Response struct {
 	TunnelLog []string `json:"tunnelLog,omitempty"`
 	// TunnelMarks are the lines of that log that the service itself wrote (up, daemon-exited, restarting, restarted, ...), from further back.
 	TunnelMarks []string `json:"tunnelMarks,omitempty"`
+}
+
+// TelegramStatus is the state of the proxy of Telegram: whether it listens, where, with what key (the window makes the link from them) and
+// the numbers so far.
+type TelegramStatus struct {
+	On     bool          `json:"on"`
+	Port   int           `json:"port"`
+	Secret string        `json:"secret,omitempty"`
+	Stats  tgproxy.Stats `json:"stats"`
+	// Error is a word for the person when the service could not keep the proxy going (it is off then).
+	Error string `json:"error,omitempty"`
 }
 
 // DNSStatus is the state of Smart DNS.

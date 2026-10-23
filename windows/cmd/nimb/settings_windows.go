@@ -17,7 +17,8 @@ type Settings struct {
 	// TelegramSecret is the key of the local proxy (32 hex digits); Telegram Desktop remembers it with the link.
 	TelegramSecret string `json:"telegramSecret"`
 	TelegramPort   int    `json:"telegramPort"`
-	// TelegramAuto: the proxy was on when Nimb was last used, so it comes back by itself.
+	// TelegramAuto is from the time the proxy lived in the window (0.2.0 and before): it was on. The window gives it to the service once and clears
+	// it. TelegramSecret and TelegramPort are the key and the port that the window offers the service when the proxy is switched on.
 	TelegramAuto bool `json:"telegramAuto"`
 	// Provider is the Smart DNS provider chosen last.
 	Provider string `json:"provider"`
