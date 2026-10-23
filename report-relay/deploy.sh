@@ -75,6 +75,31 @@ fi
 echo "   Чат: $CHAT"
 printf '%s' "$CHAT" | npx wrangler secret put CHAT_ID >/dev/null
 
+# Reports that the program sends by itself («Помогать тестированию») are marked 🤖 and tagged. They can go to a channel of their own (private,
+# it can be muted); without one they come to the same chat.
+read -r -p "   Отдельный канал для авто-отчётов? [y/N] " WANT_CHANNEL
+if [ "${WANT_CHANNEL:-n}" = "y" ] || [ "${WANT_CHANNEL:-n}" = "Y" ]; then
+    echo "   Создайте в Telegram приватный канал, добавьте своего бота администратором и напишите в канале любое сообщение."
+    read -r -p "   Когда сделали, нажмите Enter. " _
+    AUTO_CHAT=""
+    for _ in 1 2 3 4 5; do
+        sleep 3
+        AUTO_CHAT=$(curl -s -m 20 "$URL/chat?key=$EXPORT_KEY&kind=channel" | python3 -c 'import json,sys
+try: print(json.load(sys.stdin).get("chat") or "")
+except Exception: print("")' || true)
+        [ -n "$AUTO_CHAT" ] && break
+    done
+    if [ -z "$AUTO_CHAT" ]; then
+        read -r -p "   Канал сам не нашёлся. Введите его числовой id (вида -100…) или Enter, чтобы пропустить: " AUTO_CHAT
+    fi
+    if [ -n "$AUTO_CHAT" ]; then
+        echo "   Канал: $AUTO_CHAT"
+        printf '%s' "$AUTO_CHAT" | npx wrangler secret put AUTO_CHAT_ID >/dev/null
+    else
+        echo "   Без отдельного канала: авто-отчёты придут в основной чат с пометкой 🤖."
+    fi
+fi
+
 echo
 echo "4/4. Проверка"
 sleep 3

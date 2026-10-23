@@ -1,6 +1,7 @@
 // Nimb report relay: takes a report from the app, keeps it for 90 days (KV `REPORTS`) and passes it to the developer's Telegram
-// as a text file. A report that the program sends by itself (`auto: true`, the switch «Помогать тестированию») is only kept: it does not go
-// to Telegram, so that the chat is not filled; it is taken with the export. `GET /export?key=EXPORT_KEY` gives all the kept reports as one text file (`&clear=1` removes them after).
+// as a text file. A report that the program sends by itself (`auto: true`, the switch «Помогать тестированию») is marked 🤖 in the caption
+// (with tags: #авто #причина #платформа #версия #установка, to search by) and goes to the chat AUTO_CHAT_ID when there is one (a channel
+// of its own, that can be muted), otherwise to the same chat; a report written by a person is marked ✍️. `GET /export?key=EXPORT_KEY` gives all the kept reports as one text file (`&clear=1` removes them after).
 // The bot token, the chat and the export key live in the secrets of this Worker; nothing secret is in the app.
 
 const MAX_BODY = 100_000;
@@ -47,17 +48,19 @@ export default {
     }
     // The first lines of what the person wrote go to the caption, so that the message says what it is about.
     const written = (data.text.match(/Что случилось:\n([\s\S]*?)(?:\n\n|$)/) || [, ""])[1].trim().slice(0, 300);
-    const caption = `Nimb ${data.app} · ${data.platform} · № ${data.id}` + (written ? `\n${written}` : "");
+    const caption = auto
+      ? `🤖 авто · Nimb ${data.app} · ${data.platform} · № ${data.id}\n${written}\n${tags(data)}`
+      : `✍️ Nimb ${data.app} · ${data.platform} · № ${data.id}` + (written ? `\n${written}` : "");
+    const chat = auto && env.AUTO_CHAT_ID ? env.AUTO_CHAT_ID : env.CHAT_ID;
 
     // Telegram can be slow from some places (20 seconds from Moscow, measured): when the report is already kept, the person is not made
     // to wait for it, and the sending goes on after the answer.
     const stored = await save(env, { ...data, auto });
-    if (auto) return stored ? reply({ ok: true }) : reply({ ok: false, error: "nowhere to put it" }, env.REPORTS ? 502 : 500);
     if (stored && ctx && ctx.waitUntil) {
-      ctx.waitUntil(forward(env, data, caption));
+      ctx.waitUntil(forward(env, data, caption, chat));
       return reply({ ok: true });
     }
-    const sent = await forward(env, data, caption);
+    const sent = await forward(env, data, caption, chat);
     if (!stored && !sent) return reply({ ok: false, error: "nowhere to put it" }, env.BOT_TOKEN ? 502 : 500);
     return reply({ ok: true });
   },
@@ -75,10 +78,17 @@ async function save(env, data) {
   }
 }
 
-async function forward(env, data, caption) {
-  if (!env.BOT_TOKEN || !env.CHAT_ID) return false;
+// Tags for the search in Telegram: #авто #cause #platform #v0_9_14 #installation (a tag has letters, digits and underscores only).
+function tags(data) {
+  const tag = (text) => "#" + String(text).replace(/[^\p{L}\p{N}]+/gu, "_").replace(/^_+|_+$/g, "");
+  const list = ["авто", data.trigger, data.platform, "v" + data.app, data.install].filter(Boolean).map(tag);
+  return list.join(" ");
+}
+
+async function forward(env, data, caption, chat) {
+  if (!env.BOT_TOKEN || !chat) return false;
   const form = new FormData();
-  form.append("chat_id", env.CHAT_ID);
+  form.append("chat_id", chat);
   form.append("caption", caption.slice(0, 1000));
   form.append("document", new Blob([data.text], { type: "text/plain" }), `nimb-report-${data.id}.txt`);
   const api = env.TELEGRAM_API || "https://api.telegram.org";
@@ -101,7 +111,14 @@ async function findChat(url, env) {
   try {
     const response = await fetch(`${api}/bot${env.BOT_TOKEN}/getUpdates`);
     const updates = (await response.json()).result || [];
-    const chats = updates.map((u) => u.message && u.message.chat && u.message.chat.id).filter((id) => id !== undefined && id !== null);
+    // The channel of the automatic reports (`kind=channel`): where the bot was added as an administrator or a post was made; otherwise the
+    // chat of the person with the bot.
+    const channel = url.searchParams.get("kind") === "channel";
+    const chats = updates
+      .map((u) => (channel ? (u.channel_post || {}).chat || (u.my_chat_member || {}).chat : (u.message || {}).chat))
+      .filter((chat) => chat && (!channel || chat.type === "channel" || chat.type === "supergroup"))
+      .map((chat) => chat.id)
+      .filter((id) => id !== undefined && id !== null);
     return reply({ ok: true, chat: chats.length ? String(chats[chats.length - 1]) : null });
   } catch {
     return reply({ ok: false, chat: null }, 502);

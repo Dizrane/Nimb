@@ -15,13 +15,26 @@ enum AutoReportRules {
     }
 }
 
+/// The three services, with a name for the key (plain letters: the relay and the tags of Telegram take nothing else) and a name for people.
+enum AutoService: String {
+    case dns, telegram, tunnel
+
+    var name: String {
+        switch self {
+        case .dns: "нейросети"
+        case .telegram: "Telegram"
+        case .tunnel: "YouTube и Discord"
+        }
+    }
+}
+
 /// Why a report went by itself.
 enum AutoTrigger: Equatable {
     case previousEndedBadly
     case tunnelRestarted
     case tunnelDropped
-    case mismatch(String)
-    case error(String)
+    case mismatch(AutoService)
+    case error(AutoService)
     case updateCheck
 
     /// The same cause has the same key: the key is what is not repeated.
@@ -30,8 +43,8 @@ enum AutoTrigger: Equatable {
         case .previousEndedBadly: "crash"
         case .tunnelRestarted: "tunnel-restarted"
         case .tunnelDropped: "tunnel-dropped"
-        case .mismatch(let service): "mismatch:\(service)"
-        case .error(let service): "error:\(service)"
+        case .mismatch(let service): "mismatch-\(service.rawValue)"
+        case .error(let service): "error-\(service.rawValue)"
         case .updateCheck: "update-check"
         }
     }
@@ -42,8 +55,8 @@ enum AutoTrigger: Equatable {
         case .previousEndedBadly: "прошлый запуск закончился неожиданно"
         case .tunnelRestarted: "программа туннеля остановилась сама и была запущена снова"
         case .tunnelDropped: "туннель остановился сам и не запустился снова"
-        case .mismatch(let service): "«\(service)» работает не так, как должен, больше 10 минут"
-        case .error(let service): "ошибка при работе с «\(service)»"
+        case .mismatch(let service): "«\(service.name)» работает не так, как должен, больше 10 минут"
+        case .error(let service): "ошибка при работе с «\(service.name)»"
         case .updateCheck: "проверка обновлений не удаётся несколько раз подряд"
         }
     }
@@ -120,10 +133,10 @@ final class AutoReporter: ObservableObject {
         guard self.dns == nil else { return }
         self.dns = dns; self.telegram = telegram; self.warp = warp
         // An error that the person is shown. The words that are the tunnel's own news (it stopped by itself) have their own trigger.
-        dns.$errorMessage.compactMap { $0 }.sink { [weak self] _ in self?.notify(.error("нейросети")) }.store(in: &cancellables)
-        telegram.$errorMessage.compactMap { $0 }.sink { [weak self] _ in self?.notify(.error("Telegram")) }.store(in: &cancellables)
+        dns.$errorMessage.compactMap { $0 }.sink { [weak self] _ in self?.notify(.error(.dns)) }.store(in: &cancellables)
+        telegram.$errorMessage.compactMap { $0 }.sink { [weak self] _ in self?.notify(.error(.telegram)) }.store(in: &cancellables)
         warp.$errorMessage.compactMap { $0 }.filter { !$0.hasPrefix("Туннель остановился") && !$0.hasPrefix("Туннель выключился") }
-            .sink { [weak self] _ in self?.notify(.error("YouTube и Discord")) }.store(in: &cancellables)
+            .sink { [weak self] _ in self?.notify(.error(.tunnel)) }.store(in: &cancellables)
         // The last run ended badly: told a little after the start, when the network is there.
         if SessionMarker.previousEndedBadly {
             DispatchQueue.main.asyncAfter(deadline: .now() + 60) { [weak self] in self?.notify(.previousEndedBadly) }
@@ -159,9 +172,9 @@ final class AutoReporter: ObservableObject {
     /// A look of the black box: a service that disagrees with what it should be, for long enough, is a cause.
     func observe(_ facts: BlackBoxLine.Facts) {
         guard enabled else { return }
-        if tracker.observe("нейросети", agrees: facts.dnsAgrees) { notify(.mismatch("нейросети")) }
-        if tracker.observe("Telegram", agrees: facts.telegramAgrees) { notify(.mismatch("Telegram")) }
-        if tracker.observe("YouTube и Discord", agrees: facts.tunnelAgrees) { notify(.mismatch("YouTube и Discord")) }
+        if tracker.observe("dns", agrees: facts.dnsAgrees) { notify(.mismatch(.dns)) }
+        if tracker.observe("telegram", agrees: facts.telegramAgrees) { notify(.mismatch(.telegram)) }
+        if tracker.observe("tunnel", agrees: facts.tunnelAgrees) { notify(.mismatch(.tunnel)) }
     }
 
     func notify(_ trigger: AutoTrigger) {

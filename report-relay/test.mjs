@@ -85,27 +85,40 @@ assert.equal(kv.size, 3, "export alone does not delete");
 await get("?key=secret-export-key&clear=1");
 assert.equal(kv.size, 0, "clear=1 deletes what was given");
 
-// A report that the program sends by itself is kept with its cause and not passed to Telegram.
+// A report that the program sends by itself is marked, tagged, kept with its cause, and goes to the chat of the automatic reports if there is one.
 {
   const told = [];
-  globalThis.fetch = async (url) => { told.push(String(url)); return new Response("{}", { status: 200 }); };
-  const autoBody = { ...good, id: "AU70AA", text: "Отчёт № AU70AA\n\nЧто случилось:\nавто: туннель остановился сам (установка K7M2X9QP)\n\n— Программа —", auto: true, trigger: "tunnel-dropped", install: "K7M2X9QP" };
+  globalThis.fetch = async (url, init) => { told.push({ url: String(url), form: init && init.body }); return new Response("{}", { status: 200 }); };
+  const autoBody = { ...good, id: "AU70AA", app: "0.9.14", text: "Отчёт № AU70AA\n\nЧто случилось:\nавто: туннель остановился сам (установка K7M2X9QP)\n\n— Программа —", auto: true, trigger: "tunnel-dropped", install: "K7M2X9QP" };
   const kept2 = { ...env, REPORTS, EXPORT_KEY: "secret-export-key" };
   r = await post(autoBody, kept2);
   assert.equal(r.status, 200);
-  assert.equal(told.length, 0, "an automatic report does not go to Telegram");
-  assert.equal(kv.size, 1, "but it is kept");
+  assert.equal(told.length, 1, "an automatic report goes to Telegram as a file, as a manual one does");
+  assert.equal(told[0].form.get("chat_id"), "42", "to the same chat when there is no chat of its own");
+  const caption = told[0].form.get("caption");
+  assert.match(caption, /^🤖 авто · Nimb 0\.9\.14 · macos · № AU70AA\n/);
+  assert.match(caption, /#авто #tunnel_dropped #macos #v0_9_14 #K7M2X9QP$/);
+  assert.equal(told[0].form.get("document").name, "nimb-report-AU70AA.txt");
+  told.length = 0;
+  await post(autoBody, { ...kept2, AUTO_CHAT_ID: "-1001234" });
+  assert.equal(told[0].form.get("chat_id"), "-1001234", "to the chat of the automatic reports when there is one");
+  told.length = 0;
+  await post(good, { ...kept2, AUTO_CHAT_ID: "-1001234" });
+  assert.equal(told[0].form.get("chat_id"), "42", "a report that a person wrote stays in the main chat");
+  assert.match(told[0].form.get("caption"), /^✍️ Nimb 0\.9\.3 · macos · № AB12CD/, "and is marked as written by a person");
   const stored = JSON.parse([...kv.values()][0]);
   assert.equal(stored.auto, true);
   assert.equal(stored.trigger, "tunnel-dropped");
   assert.equal(stored.install, "K7M2X9QP");
+  kv.clear();
   assert.equal((await post({ ...autoBody, id: "AU70BB", trigger: "<script>", install: "x" }, kept2)).status, 200);
-  const odd = JSON.parse([...kv.values()][1]);
+  const odd = JSON.parse([...kv.values()][0]);
   assert.equal(odd.trigger, "", "a cause with odd signs is dropped");
   assert.equal(odd.install, "", "and so is an odd number of installation");
-  assert.equal((await post(autoBody, env)).status, 500, "with nowhere to keep it, an automatic report is refused, not sent to Telegram");
+  kv.clear();
+  r = await post(autoBody, kept2);
   const exported = await (await worker.fetch(new Request("https://relay.test/export?key=secret-export-key"), kept2)).text();
-  assert.match(exported, /№ AU70AA · 0\.9\.3 · macos · .* · авто tunnel-dropped · установка K7M2X9QP · /);
+  assert.match(exported, /№ AU70AA · 0\.9\.14 · macos · .* · авто tunnel-dropped · установка K7M2X9QP · /);
   await worker.fetch(new Request("https://relay.test/export?key=secret-export-key&clear=1"), kept2);
   assert.equal(kv.size, 0);
 }
@@ -117,6 +130,12 @@ assert.equal((await find("")).status, 401);
 assert.equal((await find("?key=wrong")).status, 401);
 assert.equal((await find("?key=secret-export-key", { REPORTS, EXPORT_KEY: "secret-export-key" })).status, 401, "needs the bot token");
 assert.deepEqual(await (await find("?key=secret-export-key")).json(), { ok: true, chat: "4242" });
+// The channel of the automatic reports: where the bot was made an administrator or a post was made.
+globalThis.fetch = async () => new Response(JSON.stringify({ ok: true, result: [{ message: { chat: { id: 4242, type: "private" } } }, { my_chat_member: { chat: { id: -1009, type: "channel" } } }, { channel_post: { chat: { id: -1007, type: "channel" } } }] }), { status: 200 });
+assert.deepEqual(await (await find("?key=secret-export-key&kind=channel")).json(), { ok: true, chat: "-1007" });
+globalThis.fetch = async () => new Response(JSON.stringify({ ok: true, result: [{ message: { chat: { id: 4242, type: "private" } } }] }), { status: 200 });
+assert.deepEqual(await (await find("?key=secret-export-key&kind=channel")).json(), { ok: true, chat: null }, "no channel yet");
+globalThis.fetch = async () => new Response(JSON.stringify({ ok: true, result: [{ message: { chat: { id: 7 } } }, { message: { chat: { id: 4242 } } }] }), { status: 200 });
 globalThis.fetch = async () => new Response(JSON.stringify({ ok: true, result: [] }), { status: 200 });
 assert.deepEqual(await (await find("?key=secret-export-key")).json(), { ok: true, chat: null });
 

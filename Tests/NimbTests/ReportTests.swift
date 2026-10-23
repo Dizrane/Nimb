@@ -439,7 +439,12 @@ import Testing
     }
 
     @Test func causesHaveKeysAndWords() {
-        #expect(AutoTrigger.mismatch("Telegram").key == "mismatch:Telegram")
+        #expect(AutoTrigger.mismatch(.telegram).key == "mismatch-telegram")
+        #expect(AutoTrigger.error(.tunnel).key == "error-tunnel")
+        #expect(AutoTrigger.error(.tunnel).title.contains("YouTube и Discord"))
+        for trigger in [AutoTrigger.previousEndedBadly, .tunnelRestarted, .tunnelDropped, .mismatch(.dns), .error(.dns), .updateCheck] {
+            #expect(trigger.key.range(of: "^[A-Za-z0-9:-]{1,40}$", options: .regularExpression) != nil, "the relay takes plain letters in a key")
+        }
         #expect(AutoTrigger.previousEndedBadly.key == "crash")
         #expect(AutoTrigger.tunnelDropped.title.contains("не запустился снова"))
         #expect(AutoReporter.newInstallID().count == 8)
