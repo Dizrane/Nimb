@@ -12,6 +12,8 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
     private static let enabledKey = "updateNotificationsEnabled"
 
     @Published private(set) var status: UNAuthorizationStatus = .notDetermined
+    /// Whether the system lets Nimb play a sound. A permission that was given before the sound was asked for does not have it.
+    @Published private(set) var soundSetting: UNNotificationSetting = .notSupported
     /// The person's own choice in Nimb (on until they turn it off); the system's permission is a second condition.
     @Published private(set) var enabled: Bool = (UserDefaults.standard.object(forKey: "updateNotificationsEnabled") as? Bool) ?? true
 
@@ -46,6 +48,10 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
             Task { @MainActor in
                 let next = settings.authorizationStatus
                 if next != self.status { self.status = next }
+                if settings.soundSetting != self.soundSetting {
+                    self.soundSetting = settings.soundSetting
+                    AppLog.shared.add("notifications", "звук уведомлений в системе: \(settings.soundSetting == .enabled ? "включён" : settings.soundSetting == .disabled ? "выключен" : "не предусмотрен")")
+                }
             }
         }
     }
@@ -57,7 +63,7 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
             if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") { NSWorkspace.shared.open(url) }
             return
         }
-        center.requestAuthorization(options: [.alert, .sound]) { granted, error in
+        center.requestAuthorization(options: [.alert]) { granted, error in
             Task { @MainActor in
                 self.refresh()
                 AppLog.shared.add("notifications", granted ? "уведомления разрешены" : "уведомления не разрешены" + (error.map { " (\($0.localizedDescription))" } ?? ""))
@@ -74,7 +80,6 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
         let content = UNMutableNotificationContent()
         content.title = "Вышел Nimb \(version)"
         content.body = "Откройте Nimb и нажмите «Обновить до \(version)»."
-        content.sound = .default
         post(content, identifier: "nimb-update", failure: "уведомление не показано")
         AppLog.shared.add("notifications", "показал уведомление о версии \(version)")
     }
@@ -84,9 +89,23 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
     private func post(_ content: UNNotificationContent, identifier: String, failure: String) {
         guard let center else { return }
         center.removeDeliveredNotifications(withIdentifiers: [identifier])
+        if soundSetting != .disabled && Self.showsBanner(identifier: identifier, appIsActive: NSApp.isActive) { playSound() }
         center.add(UNNotificationRequest(identifier: identifier, content: content, trigger: nil)) { error in
             if let error { AppLog.shared.add("notifications", "\(failure): \(error.localizedDescription)") }
         }
+    }
+
+    private var sound: NSSound?
+
+    /// Nimb's own sound, the same for everyone: the system one cannot be had by those who gave the permission before it was asked for (the
+    /// settings do not even show the line), and its files must be of a few formats. A sound that the person turned off in the settings stays off.
+    private func playSound() {
+        guard let url = Bundle.main.url(forResource: "notification", withExtension: "mp3"), let next = NSSound(contentsOf: url, byReference: true) else {
+            NSSound.beep()
+            return
+        }
+        sound = next
+        next.play()
     }
 
     /// The button of the test is idle for a moment after a press, so it cannot be pressed in a rush.
@@ -99,7 +118,6 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
         let content = UNMutableNotificationContent()
         content.title = "Проверка уведомлений"
         content.body = "Если вы это видите, Nimb сможет сообщить о новой версии."
-        content.sound = .default
         post(content, identifier: Self.testIdentifier, failure: "проверочное уведомление не показано")
         AppLog.shared.add("notifications", "показал проверочное уведомление")
         testJustSent = true
