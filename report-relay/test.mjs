@@ -85,6 +85,31 @@ assert.equal(kv.size, 3, "export alone does not delete");
 await get("?key=secret-export-key&clear=1");
 assert.equal(kv.size, 0, "clear=1 deletes what was given");
 
+// A report that the program sends by itself is kept with its cause and not passed to Telegram.
+{
+  const told = [];
+  globalThis.fetch = async (url) => { told.push(String(url)); return new Response("{}", { status: 200 }); };
+  const autoBody = { ...good, id: "AU70AA", text: "Отчёт № AU70AA\n\nЧто случилось:\nавто: туннель остановился сам (установка K7M2X9QP)\n\n— Программа —", auto: true, trigger: "tunnel-dropped", install: "K7M2X9QP" };
+  const kept2 = { ...env, REPORTS, EXPORT_KEY: "secret-export-key" };
+  r = await post(autoBody, kept2);
+  assert.equal(r.status, 200);
+  assert.equal(told.length, 0, "an automatic report does not go to Telegram");
+  assert.equal(kv.size, 1, "but it is kept");
+  const stored = JSON.parse([...kv.values()][0]);
+  assert.equal(stored.auto, true);
+  assert.equal(stored.trigger, "tunnel-dropped");
+  assert.equal(stored.install, "K7M2X9QP");
+  assert.equal((await post({ ...autoBody, id: "AU70BB", trigger: "<script>", install: "x" }, kept2)).status, 200);
+  const odd = JSON.parse([...kv.values()][1]);
+  assert.equal(odd.trigger, "", "a cause with odd signs is dropped");
+  assert.equal(odd.install, "", "and so is an odd number of installation");
+  assert.equal((await post(autoBody, env)).status, 500, "with nowhere to keep it, an automatic report is refused, not sent to Telegram");
+  const exported = await (await worker.fetch(new Request("https://relay.test/export?key=secret-export-key"), kept2)).text();
+  assert.match(exported, /№ AU70AA · 0\.9\.3 · macos · .* · авто tunnel-dropped · установка K7M2X9QP · /);
+  await worker.fetch(new Request("https://relay.test/export?key=secret-export-key&clear=1"), kept2);
+  assert.equal(kv.size, 0);
+}
+
 // The chat of the person is found by the Worker, with the export key.
 globalThis.fetch = async () => new Response(JSON.stringify({ ok: true, result: [{ message: { chat: { id: 7 } } }, { message: { chat: { id: 4242 } } }] }), { status: 200 });
 const find = (query, e = kept) => worker.fetch(new Request(`https://relay.test/chat${query}`), e);

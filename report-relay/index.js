@@ -1,5 +1,6 @@
 // Nimb report relay: takes a report from the app, keeps it for 90 days (KV `REPORTS`) and passes it to the developer's Telegram
-// as a text file. `GET /export?key=EXPORT_KEY` gives all the kept reports as one text file (`&clear=1` removes them after).
+// as a text file. A report that the program sends by itself (`auto: true`, the switch «Помогать тестированию») is only kept: it does not go
+// to Telegram, so that the chat is not filled; it is taken with the export. `GET /export?key=EXPORT_KEY` gives all the kept reports as one text file (`&clear=1` removes them after).
 // The bot token, the chat and the export key live in the secrets of this Worker; nothing secret is in the app.
 
 const MAX_BODY = 100_000;
@@ -34,6 +35,10 @@ export default {
       PLATFORMS.includes(data.platform) &&
       typeof data.text === "string" && data.text.length > 0;
     if (!valid) return reply({ ok: false, error: "bad report" }, 400);
+    // What an automatic report says about itself: the cause and the random number of the installation, both in a plain form.
+    const auto = data.auto === true;
+    data.trigger = auto && typeof data.trigger === "string" && /^[A-Za-z0-9:\-]{1,40}$/.test(data.trigger) ? data.trigger : "";
+    data.install = auto && typeof data.install === "string" && /^[A-Z0-9]{4,16}$/.test(data.install) ? data.install : "";
 
     if (env.LIMITER) {
       const key = request.headers.get("CF-Connecting-IP") || "unknown";
@@ -46,7 +51,8 @@ export default {
 
     // Telegram can be slow from some places (20 seconds from Moscow, measured): when the report is already kept, the person is not made
     // to wait for it, and the sending goes on after the answer.
-    const stored = await save(env, data);
+    const stored = await save(env, { ...data, auto });
+    if (auto) return stored ? reply({ ok: true }) : reply({ ok: false, error: "nowhere to put it" }, env.REPORTS ? 502 : 500);
     if (stored && ctx && ctx.waitUntil) {
       ctx.waitUntil(forward(env, data, caption));
       return reply({ ok: true });
@@ -62,7 +68,7 @@ async function save(env, data) {
   if (!env.REPORTS) return false;
   try {
     const key = `r:${String(Date.now()).padStart(13, "0")}:${data.id}`;
-    await env.REPORTS.put(key, JSON.stringify({ id: data.id, app: data.app, platform: data.platform, text: data.text }), { expirationTtl: KEEP_SECONDS });
+    await env.REPORTS.put(key, JSON.stringify({ id: data.id, app: data.app, platform: data.platform, text: data.text, ...(data.auto ? { auto: true, trigger: data.trigger, install: data.install } : {}) }), { expirationTtl: KEEP_SECONDS });
     return true;
   } catch {
     return false;
@@ -126,8 +132,9 @@ async function exportReports(url, env) {
   const when = (name) => new Date(Number(name.split(":")[1])).toISOString().replace("T", " ").slice(0, 16) + " UTC";
   const asked = (text) => (text.match(/Что случилось:\n([\s\S]*?)(?:\n\n|$)/) || [, ""])[1].trim().replace(/\s+/g, " ").slice(0, 100);
   const lines = [`Nimb: отчётов ${items.length}${listed.list_complete ? "" : ` (показаны первые ${EXPORT_LIMIT}, остальные при следующей выгрузке)`}`, ""];
-  for (const item of items) lines.push(`№ ${item.id} · ${item.app} · ${item.platform} · ${when(item.name)} · ${asked(item.text)}`);
-  for (const item of items) lines.push("", "", `==================== № ${item.id} · ${item.app} · ${item.platform} · ${when(item.name)} ====================`, "", item.text);
+  const tag = (item) => (item.auto ? ` · авто ${item.trigger}${item.install ? ` · установка ${item.install}` : ""}` : "");
+  for (const item of items) lines.push(`№ ${item.id} · ${item.app} · ${item.platform} · ${when(item.name)}${tag(item)} · ${asked(item.text)}`);
+  for (const item of items) lines.push("", "", `==================== № ${item.id} · ${item.app} · ${item.platform} · ${when(item.name)}${tag(item)} ====================`, "", item.text);
   if (url.searchParams.get("clear") === "1") await Promise.all(items.map((item) => env.REPORTS.delete(item.name)));
   return new Response(lines.join("\n"), {
     headers: {

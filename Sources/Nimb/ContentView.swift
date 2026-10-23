@@ -260,6 +260,8 @@ final class UpdateViewModel: ObservableObject {
     /// When GitHub last answered, and whether the last try failed (a failed try is not shown as an error: it is quiet).
     @Published private(set) var lastChecked: Date?
     @Published private(set) var lastCheckFailed = false
+    /// Checks that did not work one after another (three of them are a cause for a report that goes by itself).
+    private var failedInARow = 0
 
     /// One for the whole program, not for the window: the checks go on while Nimb lives in the menu bar with its window closed.
     static let shared = UpdateViewModel()
@@ -306,6 +308,7 @@ final class UpdateViewModel: ObservableObject {
                 let release = try await Updater.latestRelease()
                 lastChecked = Date()
                 lastCheckFailed = false
+                failedInARow = 0
                 let newer = Updater.isNewer(release.version, than: Updater.currentVersion)
                 AppLog.shared.add("update", newer ? "есть новая версия \(release.version)" : "версия \(Updater.currentVersion) актуальна")
                 state = newer ? .available(release) : .upToDate
@@ -313,6 +316,8 @@ final class UpdateViewModel: ObservableObject {
             } catch {
                 AppLog.shared.add("update", "проверка обновлений не удалась: \(error.localizedDescription)")
                 lastCheckFailed = true
+                failedInARow += 1
+                if failedInARow == 3 { AutoReporter.shared.notify(.updateCheck) }
                 if case .available = before { state = before } else { state = .idle }
             }
         }
@@ -390,6 +395,8 @@ struct ContentView: View {
         .onAppear {
             telegram.openMainWindow = { openWindow(id: "main") }
             StatusMenuController.shared.configure(dns: model, telegram: telegram, warp: warp)
+            BlackBox.shared.configure(dns: model, telegram: telegram, warp: warp)
+            AutoReporter.shared.configure(dns: model, telegram: telegram, warp: warp)
             AppDelegate.openMainWindow = { openWindow(id: "main") }
             // After the window is up, so that the question has something behind it.
             DispatchQueue.main.async {

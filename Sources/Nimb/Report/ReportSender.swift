@@ -26,11 +26,17 @@ enum ReportSender {
     /// The relay takes at most 100 KB; a longer report loses the middle of the diary, not its head or its end.
     private static let limit = 60_000
 
-    static func send(id: String, text: String) async throws {
+    /// `auto` is for a report that the program sends by itself («Помогать тестированию»): the cause and the random number of the installation.
+    static func send(id: String, text: String, auto: (trigger: String, install: String)? = nil) async throws {
         guard let endpoint = ReportConfig.endpoint else { throw Failure("Отправка из приложения пока не настроена.") }
         var body = text
         if body.count > limit { body = String(body.prefix(limit / 2)) + "\n…\n" + String(body.suffix(limit / 2)) }
-        let payload: [String: Any] = ["v": 1, "id": id, "app": Updater.currentVersion, "platform": "macos", "text": body]
+        var payload: [String: Any] = ["v": 1, "id": id, "app": Updater.currentVersion, "platform": "macos", "text": body]
+        if let auto {
+            payload["auto"] = true
+            payload["trigger"] = auto.trigger
+            payload["install"] = auto.install
+        }
         var request = URLRequest(url: endpoint, timeoutInterval: 20)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")

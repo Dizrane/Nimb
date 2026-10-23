@@ -248,6 +248,7 @@ final class WarpTunnelModel: ObservableObject {
         guard let last = fresh.last else { return }
         defaults.set(last.timeIntervalSince1970, forKey: Self.restartsSeenKey)
         AppLog.shared.add("tunnel", "программа туннеля остановилась сама, помощник запустил её снова (раз: \(fresh.count))")
+        AutoReporter.shared.notify(.tunnelRestarted)
     }
 
     /// The tunnel has ended by itself: the person is told once, on the page and in the diary.
@@ -257,6 +258,7 @@ final class WarpTunnelModel: ObservableObject {
         guard TunnelDrop.isNews(drop.when, seen: defaults.double(forKey: Self.droppedSeenKey), now: Date()) else { return }
         defaults.set(drop.when.timeIntervalSince1970, forKey: Self.droppedSeenKey)
         AppLog.shared.add("tunnel", "туннель остановился сам: \(drop.reason)")
+        AutoReporter.shared.notify(.tunnelDropped)
         errorMessage = TunnelDrop.message(for: drop.reason)
     }
 

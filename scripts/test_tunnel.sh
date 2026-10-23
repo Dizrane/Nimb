@@ -68,17 +68,19 @@ helper_r() {
 state_pid() { sed -n 's/^pid=//p' "$WORK/run/r.state" 2>/dev/null | head -1; }
 # Waits (at most 15 s) until the tunnel runs with a pid other than $1.
 wait_new_pid() { i=0; while [ $i -lt 15 ]; do p=$(state_pid); [ -n "$p" ] && [ "$p" != "$1" ] && kill -0 "$p" 2>/dev/null && return 0; sleep 1; i=$((i + 1)); done; return 1; }
+# The line of a restart is written after the new daemon is up: waits (at most 10 s) until there are $1 of them.
+wait_restarts() { i=0; while [ $i -lt 10 ]; do [ "$(wc -l < "$WORK/run/r.restarts" 2>/dev/null | tr -d " ")" = "$1" ] && return 0; sleep 1; i=$((i + 1)); done; return 1; }
 helper_r up >/dev/null 2>&1
 pid1=$(state_pid)
 check "the stand-in tunnel is up" '[ -n "$pid1" ] && kill -0 "$pid1" 2>/dev/null'
 wpid1=$(sed -n 's/^watcher=//p' "$WORK/run/r.state" | head -1)
 check "the daemon and the watcher have a process group each, of their own" '[ "$(ps -o pgid= -p "$pid1" | tr -d " ")" = "$pid1" ] && [ -n "$wpid1" ] && [ "$(ps -o pgid= -p "$wpid1" | tr -d " ")" = "$wpid1" ]'
-kill "$pid1"; wait_new_pid "$pid1"; pid2=$(state_pid)
+kill "$pid1"; wait_new_pid "$pid1"; wait_restarts 1; pid2=$(state_pid)
 check "the daemon that ended by itself is started again" '[ -n "$pid2" ] && [ "$pid2" != "$pid1" ] && kill -0 "$pid2" 2>/dev/null'
 check "a restart leaves no note and no mark of a restart in progress" '[ ! -f "$WORK/run/r.dropped" ] && [ ! -f "$WORK/run/r.restarting" ]'
 check "a restart is written down, in the list and in the log" '[ "$(wc -l < "$WORK/run/r.restarts" | tr -d " ")" = 1 ] && grep -q "restarted" "$WORK/run/r.log"'
-kill "$pid2"; wait_new_pid "$pid2"; pid3=$(state_pid)
-kill "$pid3"; wait_new_pid "$pid3"; pid4=$(state_pid)
+kill "$pid2"; wait_new_pid "$pid2"; wait_restarts 2; pid3=$(state_pid)
+kill "$pid3"; wait_new_pid "$pid3"; wait_restarts 3; pid4=$(state_pid)
 check "three restarts are made" '[ "$(wc -l < "$WORK/run/r.restarts" | tr -d " ")" = 3 ] && kill -0 "$pid4" 2>/dev/null'
 kill "$pid4"
 sleep 5

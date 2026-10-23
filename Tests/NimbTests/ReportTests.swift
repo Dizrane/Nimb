@@ -257,6 +257,23 @@ import Testing
         #expect(ReportChecks.hostsMentions(in: hosts, domains: ["chatgpt.com", "api.anthropic.com", "t.me"]) == ["api.anthropic.com"])
     }
 
+    @Test func theBlackBoxLineIsReadableByAProgram() {
+        let facts = BlackBoxLine.Facts(dns: "GeoHide (EU)", dnsAgrees: true, telegram: "вкл:1443 соединений=62 ошибок=0", telegramAgrees: true,
+                                       tunnel: "вкл:utun4", tunnelAgrees: false, routes: 5, interface: "utun4")
+        let line = BlackBoxLine.line(now: Date(timeIntervalSince1970: 1_792_600_000), uptime: 4 * 3600 + 12 * 60, facts: facts, memoryMegabytes: 84)
+        #expect(line.contains("работает=4ч12м"))
+        #expect(line.contains("dns=GeoHide (EU) совпало=да"))
+        #expect(line.contains("туннель=вкл:utun4 совпало=НЕТ маршрутов=5"), "a disagreement stands out in capitals")
+        #expect(line.contains("память=84МБ"))
+    }
+
+    @Test func theBlackBoxKeepsADayOfLines() {
+        let many = (1...400).map { "line \($0)" }
+        let kept = BlackBoxLine.trimmed(many)
+        #expect(kept.count == BlackBoxLine.keepLines)
+        #expect(kept.last == "line 400" && kept.first == "line 113")
+    }
+
     @Test func keepsTheAddressesOfThePoolsThatHelpAndReplacesTheRest() {
         let text = "отказ: Gemini · 5.175.161.40: перенаправление; DNS 192.168.1.1; чужой 8.8.4.4; свой пул 10.0.0.7"
         let clean = ReportRedactor.clean(text, keep: ["5.175.161.40", "10.0.0.7"])
@@ -374,5 +391,57 @@ import Testing
 
     @Test func saysWhenThereWasNothing() {
         #expect(ReportChronology.events(from: [], now: now) == ["за последние сутки событий нет"])
+    }
+}
+
+
+@Suite struct AutoReportTests {
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    @Test func theFirstReportGoesAndTheSameCauseWaitsSixHours() {
+        #expect(AutoReportPolicy.allows(key: "crash", now: now, history: []))
+        let sent = [AutoReportPolicy.Sent(key: "crash", at: now.addingTimeInterval(-2 * 3600))]
+        #expect(!AutoReportPolicy.allows(key: "crash", now: now, history: sent), "the same cause is not told again within six hours")
+        #expect(AutoReportPolicy.allows(key: "crash", now: now.addingTimeInterval(5 * 3600), history: sent))
+    }
+
+    @Test func notMoreThanOneAnHourAndFiveADay() {
+        let hourAgo = [AutoReportPolicy.Sent(key: "a", at: now.addingTimeInterval(-30 * 60))]
+        #expect(!AutoReportPolicy.allows(key: "b", now: now, history: hourAgo), "a second cause within the hour waits")
+        let five = (1...5).map { AutoReportPolicy.Sent(key: "k\($0)", at: now.addingTimeInterval(-Double($0) * 3 * 3600)) }
+        #expect(!AutoReportPolicy.allows(key: "new", now: now, history: five), "five in a day is the limit")
+        #expect(AutoReportPolicy.pruned(five + [AutoReportPolicy.Sent(key: "old", at: now.addingTimeInterval(-30 * 3600))], now: now).count == 5)
+    }
+
+    @Test func aDisagreementMustLastTwoLooksAndIsToldOnce() {
+        var tracker = MismatchTracker()
+        let first = tracker.observe("dns", agrees: false)
+        let second = tracker.observe("dns", agrees: false)
+        let third = tracker.observe("dns", agrees: false)
+        #expect(!first, "one look is a moment of switching")
+        #expect(second, "the second in a row is a fault")
+        #expect(!third, "and it is told once")
+        _ = tracker.observe("dns", agrees: true)
+        let again = tracker.observe("dns", agrees: false)
+        #expect(!again, "the count begins again after an agreement")
+        let other = tracker.observe("telegram", agrees: false)
+        #expect(!other, "each service has its own count")
+    }
+
+    @Test func theRulesOfAgreement() {
+        #expect(AutoReportRules.tunnelAgrees(on: true, routes: 5, viaTunnel: true))
+        #expect(!AutoReportRules.tunnelAgrees(on: true, routes: 0, viaTunnel: false))
+        #expect(AutoReportRules.tunnelAgrees(on: false, routes: 0, viaTunnel: false))
+        #expect(!AutoReportRules.tunnelAgrees(on: false, routes: 3, viaTunnel: true), "routes left behind")
+        let stats = TelegramProxyStats()
+        #expect(AutoReportRules.telegramAgrees(running: false, listening: false, stats: stats))
+        #expect(!AutoReportRules.telegramAgrees(running: false, listening: true, stats: stats), "the port is held while it is off")
+    }
+
+    @Test func causesHaveKeysAndWords() {
+        #expect(AutoTrigger.mismatch("Telegram").key == "mismatch:Telegram")
+        #expect(AutoTrigger.previousEndedBadly.key == "crash")
+        #expect(AutoTrigger.tunnelDropped.title.contains("не запустился снова"))
+        #expect(AutoReporter.newInstallID().count == 8)
     }
 }

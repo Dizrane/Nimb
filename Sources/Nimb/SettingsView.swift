@@ -33,19 +33,23 @@ struct SettingsView: View {
                     }
 
                     SettingsSection(title: "Помощь") {
-                        HStack(spacing: Space.m) {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("Сообщить о проблеме")
-                                    .font(Typo.name)
-                                    .foregroundStyle(Theme.textPrimary)
-                                Text("Отчёт придёт разработчику. Паролей и личных данных в нём нет.")
-                                    .font(Typo.small)
-                                    .foregroundStyle(Theme.textSecondary)
-                                    .fixedSize(horizontal: false, vertical: true)
+                        VStack(alignment: .leading, spacing: Space.m) {
+                            HStack(spacing: Space.m) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("Сообщить о проблеме")
+                                        .font(Typo.name)
+                                        .foregroundStyle(Theme.textPrimary)
+                                    Text("Отчёт придёт разработчику. Паролей и личных данных в нём нет.")
+                                        .font(Typo.small)
+                                        .foregroundStyle(Theme.textSecondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                Spacer(minLength: Space.s)
+                                OutlineButton(title: "Отправить…", color: Theme.textPrimary) { ReportCenter.shared.isShown = true }
+                                    .accessibilityLabel("Сообщить о проблеме")
                             }
-                            Spacer(minLength: Space.s)
-                            OutlineButton(title: "Отправить…", color: Theme.textPrimary) { ReportCenter.shared.isShown = true }
-                                .accessibilityLabel("Сообщить о проблеме")
+                            Rectangle().fill(Theme.hairline).frame(height: 1)
+                            HelpTestingRow()
                         }
                         .card()
 

@@ -66,6 +66,9 @@ enum DiagnosticReport {
         out.append(section("Хронология (последние сутки)", ReportChronology.events(from: diary, now: Date())))
         let tail = Array(diary.suffix(30))
         out.append(section("Журнал (последние строки)", tail.isEmpty ? ["пусто"] : tail))
+        // The black box: what was going on before, every five minutes (the key says whether the facts agreed with what was expected).
+        let box = BlackBox.lastLines()
+        if !box.isEmpty { out.append(section("Чёрный ящик (состояние раз в 5 минут)", box)) }
 
         let services = await Task.detached(priority: .utility) { DNSManager.physicalServices() }.value
         let keep = Set(dns.reports.flatMap { $0.samples.compactMap(\.address) })
@@ -85,6 +88,8 @@ enum DiagnosticReport {
     /// The report cut to what one Telegram message takes: the oldest lines of the diary go first, the head and the facts stay.
     static func fitted(_ text: String, limit: Int) -> String {
         guard text.count > limit else { return text }
+        // The black box is the first to go: it is long, and the diary says more of what is wanted at this size.
+        if let box = text.range(of: "\n\n— Чёрный ящик"), text[..<box.lowerBound].count <= limit { return String(text[..<box.lowerBound]) }
         var lines = text.components(separatedBy: "\n")
         guard let log = lines.firstIndex(where: { $0.hasPrefix("— Журнал") }) else { return String(text.prefix(limit)) }
         while lines.joined(separator: "\n").count > limit, lines.count > log + 2 { lines.remove(at: log + 1) }
@@ -130,7 +135,7 @@ enum DiagnosticReport {
     }
 
     /// Facts of the network, asked of the system and of Cloudflare. Never anything that names the person.
-    nonisolated private static func snapshot() -> SystemSnapshot {
+    nonisolated static func snapshot(network: Bool = true) -> SystemSnapshot {
         var system = SystemSnapshot()
         var lines: [String] = []
         let route = run("/sbin/route", ["-n", "get", "1.1.1.1"])
@@ -138,8 +143,11 @@ enum DiagnosticReport {
         system.interface = interface
         lines.append("Трафик в интернет идёт через интерфейс: \(interface)\(interface.hasPrefix("utun") ? " (туннель)" : "")")
 
-        let trace = run("/usr/bin/curl", ["-s", "-m", "6", "--connect-timeout", "4", "https://www.cloudflare.com/cdn-cgi/trace"])
-        if trace.isEmpty {
+        // The black box looks at the system only: it asks Cloudflare nothing.
+        let trace = network ? run("/usr/bin/curl", ["-s", "-m", "6", "--connect-timeout", "4", "https://www.cloudflare.com/cdn-cgi/trace"]) : ""
+        if !network {
+            lines.append("Cloudflare: не спрашивали")
+        } else if trace.isEmpty {
             lines.append("Cloudflare не ответил за 6 секунд (интернета нет или он закрыт)")
         } else {
             let wanted = ["warp", "loc", "colo", "http"]
