@@ -97,6 +97,26 @@ enum TunnelRestore {
     static func triesAgain(message: String?, attempt: Int) -> Bool { message != nil && attempt + 1 < attempts }
 }
 
+/// The keys of the tunnel are made again by the program itself, never by a button: when the tunnel did not start twice running because
+/// Cloudflare did not answer the handshake, the internet is there, and the person has asked for it (not a start after a login). Once in a
+/// day at most: Cloudflare limits the registrations of one address, and a person cannot be left without keys because of a limit.
+enum TunnelKeyReset {
+    static let failuresNeeded = 2
+    static let pause: TimeInterval = 24 * 3600
+
+    /// How many starts in a row have ended with no handshake: it grows with such a failure and starts again from nothing with any other end.
+    static func failures(after message: String?, previous: Int) -> Int {
+        guard let message, message.contains("рукопожатия") else { return 0 }
+        return previous + 1
+    }
+
+    static func shouldReset(failures: Int, internetWorks: Bool, lastReset: Date?, now: Date, userAsked: Bool) -> Bool {
+        guard userAsked, internetWorks, failures >= failuresNeeded else { return false }
+        guard let lastReset else { return true }
+        return now.timeIntervalSince(lastReset) >= pause
+    }
+}
+
 /// The WARP tunnel: AmneziaWG (WireGuard with extra camouflage) to Cloudflare, so that YouTube and Discord open.
 @MainActor
 final class WarpTunnelModel: ObservableObject {
@@ -120,6 +140,8 @@ final class WarpTunnelModel: ObservableObject {
     private static let droppedSeenKey = "tunnelDroppedSeen"
     private static let restartsSeenKey = "tunnelRestartsSeen"
     private static let wantedKey = "tunnelWanted"
+    private static let handshakeFailuresKey = "tunnelHandshakeFailures"
+    private static let keysResetKey = "tunnelKeysReset"
     /// The person has it on (or it was on when the Mac went down): it comes back after the next login.
     private static var wanted: Bool {
         get { UserDefaults.standard.bool(forKey: wantedKey) }
@@ -145,7 +167,7 @@ final class WarpTunnelModel: ObservableObject {
             for attempt in 0..<TunnelRestore.attempts {
                 guard await Self.waitForNetwork(timeout: 180) else { AppLog.shared.add("tunnel", "сети нет: туннель не включён"); return }
                 guard phase == .off else { return }
-                connect()
+                connect(userInitiated: false)
                 while isWorking { try? await Task.sleep(nanoseconds: 500_000_000) }
                 if isOn { return }
                 guard TunnelRestore.triesAgain(message: errorMessage, attempt: attempt) else {
@@ -354,11 +376,11 @@ final class WarpTunnelModel: ObservableObject {
 
     /// The first start on a Mac, with nothing to enter: makes this Mac's own WARP account (keys and address), puts it together
     /// with the shared preset from the app, installs everything and starts the tunnel, all in one password prompt.
-    func enable() {
+    func enable(phaseText: String = "Создаю личные ключи WARP…") {
         guard bundledFiles != nil, !isWorking else { return }
         errorMessage = nil
         checks = []
-        phase = .working("Создаю личные ключи WARP…")
+        phase = .working(phaseText)
         Task {
             let account: WarpAccount
             do {
@@ -406,22 +428,6 @@ final class WarpTunnelModel: ObservableObject {
         _ = try DNSManager.runPrivileged(steps.joined(separator: "; "))
     }
 
-    /// Stops the tunnel and deletes the helper and the settings (password prompt).
-    func remove() {
-        errorMessage = nil
-        phase = .working("Удаляю…")
-        Task.detached {
-            let result = Result { try DNSManager.runPrivileged(WarpPaths.removeScript) }
-            await MainActor.run {
-                if case .failure(let error) = result, case DNSError.cancelled = error {} else if case .failure(let error) = result {
-                    self.errorMessage = error.localizedDescription
-                }
-                self.checks = []
-                self.finish()
-            }
-        }
-    }
-
     // MARK: On and off
 
     func toggle() { isOn ? disconnect() : connect() }
@@ -430,7 +436,7 @@ final class WarpTunnelModel: ObservableObject {
     nonisolated static func friendly(_ error: Error) -> String {
         let text = error.localizedDescription
         guard text.contains("рукопожатия") else { return text }
-        return text + ". Проверьте интернет и попробуйте ещё раз. Если не помогает, нажмите «Удалить» и включите туннель заново: ключи создадутся новые. В некоторых сетях Cloudflare закрыт, тогда поможет другая сеть."
+        return text + ". Проверьте интернет и попробуйте ещё раз. Если не помогает, при следующей попытке Nimb сам создаст новые ключи. В некоторых сетях Cloudflare закрыт, тогда поможет другая сеть."
     }
 
     /// The number in the first lines of a helper script ("# nimb-tunnel 2: ...").
@@ -461,7 +467,7 @@ final class WarpTunnelModel: ObservableObject {
         return !passwordless || (turningOn && upgrade != nil)
     }
 
-    func connect() {
+    func connect(userInitiated: Bool = true) {
         guard isInstalled, !isWorking else { return }
         errorMessage = nil
         checks = []
@@ -492,12 +498,42 @@ final class WarpTunnelModel: ObservableObject {
                 return try DNSManager.runPrivileged(script)
             }
             await MainActor.run {
+                var message: String?
                 if case .failure(let error) = result {
-                    if case DNSError.cancelled = error {} else { self.errorMessage = Self.friendly(error) }
+                    if case DNSError.cancelled = error {} else { message = Self.friendly(error); self.errorMessage = message }
+                    if case DNSError.cancelled = error { self.finish(); return }
                 }
                 self.finish()
+                self.afterStart(failedWith: message, userAsked: userInitiated)
             }
         }
+    }
+
+    /// Counts the starts that ended with no handshake, and makes new keys when it comes to that (see `TunnelKeyReset`).
+    private func afterStart(failedWith message: String?, userAsked: Bool) {
+        let defaults = UserDefaults.standard
+        let failures = TunnelKeyReset.failures(after: message, previous: defaults.integer(forKey: Self.handshakeFailuresKey))
+        defaults.set(failures, forKey: Self.handshakeFailuresKey)
+        let last = defaults.double(forKey: Self.keysResetKey)
+        let lastReset = last > 0 ? Date(timeIntervalSince1970: last) : nil
+        guard failures >= TunnelKeyReset.failuresNeeded, userAsked, !isOn, lastReset.map({ Date().timeIntervalSince($0) >= TunnelKeyReset.pause }) ?? true else { return }
+        Task {
+            // The internet is looked at first: with none, new keys would not help, and Cloudflare would be asked for nothing.
+            guard await Self.cloudflareReachable(),
+                  TunnelKeyReset.shouldReset(failures: failures, internetWorks: true, lastReset: lastReset, now: Date(), userAsked: userAsked) else { return }
+            defaults.set(Date().timeIntervalSince1970, forKey: Self.keysResetKey)
+            defaults.set(0, forKey: Self.handshakeFailuresKey)
+            AppLog.shared.add("tunnel", "туннель дважды подряд не получил рукопожатие при рабочем интернете: создаю новые ключи")
+            enable(phaseText: "Ключи не подошли, создаю новые…")
+        }
+    }
+
+    /// Cloudflare answers on the open internet (the tunnel is off then): the network is fine.
+    nonisolated private static func cloudflareReachable() async -> Bool {
+        var request = URLRequest(url: URL(string: "https://www.cloudflare.com/cdn-cgi/trace")!, timeoutInterval: 6)
+        request.httpMethod = "GET"
+        guard let (_, response) = try? await URLSession.shared.data(for: request) else { return false }
+        return (response as? HTTPURLResponse)?.statusCode == 200
     }
 
     func disconnect() {

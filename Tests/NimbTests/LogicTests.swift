@@ -324,6 +324,31 @@ import Testing
 }
 
 /// One notification for one version, however often the check runs.
+@Suite struct TunnelKeyResetTests {
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    @Test func countsStartsThatEndedWithNoHandshakeAndForgetsOnAnyOtherEnd() {
+        let none = "сервер не ответил: нет рукопожатия за 16 секунд"
+        #expect(TunnelKeyReset.failures(after: none, previous: 0) == 1)
+        #expect(TunnelKeyReset.failures(after: none, previous: 1) == 2)
+        #expect(TunnelKeyReset.failures(after: "нет $BIN", previous: 1) == 0, "another failure is not the sign of bad keys")
+        #expect(TunnelKeyReset.failures(after: nil, previous: 1) == 0, "a start that worked (or was cancelled) begins the count again")
+    }
+
+    @Test func newKeysOnlyAfterTwoFailuresWithInternetAndOnTheWordOfThePerson() {
+        #expect(!TunnelKeyReset.shouldReset(failures: 1, internetWorks: true, lastReset: nil, now: now, userAsked: true), "once is not enough")
+        #expect(TunnelKeyReset.shouldReset(failures: 2, internetWorks: true, lastReset: nil, now: now, userAsked: true))
+        #expect(!TunnelKeyReset.shouldReset(failures: 2, internetWorks: false, lastReset: nil, now: now, userAsked: true), "with no internet new keys would not help")
+        #expect(!TunnelKeyReset.shouldReset(failures: 3, internetWorks: true, lastReset: nil, now: now, userAsked: false), "a start after a login never asks for a password by itself")
+    }
+
+    @Test func notOftenerThanOnceADay() {
+        let yesterdayAlmost = now.addingTimeInterval(-23 * 3600)
+        #expect(!TunnelKeyReset.shouldReset(failures: 5, internetWorks: true, lastReset: yesterdayAlmost, now: now, userAsked: true))
+        #expect(TunnelKeyReset.shouldReset(failures: 5, internetWorks: true, lastReset: now.addingTimeInterval(-25 * 3600), now: now, userAsked: true))
+    }
+}
+
 @Suite struct TunnelRestoreTests {
     @Test func theTunnelThatWasOnComesBackOnlyWhenItIsOffAndInstalled() {
         #expect(TunnelRestore.shouldRestore(wanted: true, installed: true, isOff: true))

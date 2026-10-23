@@ -34,7 +34,7 @@ struct WarpPage: View {
                 subtitle: subtitle,
                 accessibility: warp.isOn ? "Выключить туннель WARP" : "Включить туннель WARP",
                 disabled: warp.phase == .unavailable || warp.isWorking,
-                action: warp.phase == .notInstalled ? warp.enable : warp.toggle
+                action: { if warp.phase == .notInstalled { warp.enable() } else { warp.toggle() } }
             )
         } right: {
             VStack(spacing: Space.gap) {
@@ -46,7 +46,6 @@ struct WarpPage: View {
                     if let message = warp.errorMessage {
                         NoticeCard(lines: [message], color: Theme.bad, symbol: "xmark.octagon")
                     }
-                    if warp.isInstalled && !warp.isWorking { removeRow }
                     sitesRow
             }
         }
@@ -115,17 +114,5 @@ struct WarpPage: View {
             }
         }
         .card()
-    }
-
-    private var removeRow: some View {
-        HStack(spacing: 10) {
-            Text("Ключи туннеля созданы на этом Mac.")
-                .font(Typo.small)
-                .foregroundStyle(Theme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 8)
-            OutlineButton(title: "Удалить", color: Theme.textSecondary, action: warp.remove)
-        }
-        .padding(.horizontal, 2)
     }
 }
