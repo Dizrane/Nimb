@@ -75,11 +75,18 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
         content.title = "Вышел Nimb \(version)"
         content.body = "Откройте Nimb и нажмите «Обновить до \(version)»."
         content.sound = .default
-        // One identifier for all of them: a newer notification takes the place of the older one in the Notification Centre.
-        center.add(UNNotificationRequest(identifier: "nimb-update", content: content, trigger: nil)) { error in
-            if let error { AppLog.shared.add("notifications", "уведомление не показано: \(error.localizedDescription)") }
-        }
+        post(content, identifier: "nimb-update", failure: "уведомление не показано")
         AppLog.shared.add("notifications", "показал уведомление о версии \(version)")
+    }
+
+    /// One identifier for all notifications of a kind: a newer one takes the place of the older one in the Notification Centre, so there is
+    /// never a pile. The older one is taken out first: a notification that only replaces another in place comes without banner and sound.
+    private func post(_ content: UNNotificationContent, identifier: String, failure: String) {
+        guard let center else { return }
+        center.removeDeliveredNotifications(withIdentifiers: [identifier])
+        center.add(UNNotificationRequest(identifier: identifier, content: content, trigger: nil)) { error in
+            if let error { AppLog.shared.add("notifications", "\(failure): \(error.localizedDescription)") }
+        }
     }
 
     /// The button of the test is idle for a moment after a press, so it cannot be pressed in a rush.
@@ -93,9 +100,7 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
         content.title = "Проверка уведомлений"
         content.body = "Если вы это видите, Nimb сможет сообщить о новой версии."
         content.sound = .default
-        center.add(UNNotificationRequest(identifier: Self.testIdentifier, content: content, trigger: nil)) { error in
-            if let error { AppLog.shared.add("notifications", "проверочное уведомление не показано: \(error.localizedDescription)") }
-        }
+        post(content, identifier: Self.testIdentifier, failure: "проверочное уведомление не показано")
         AppLog.shared.add("notifications", "показал проверочное уведомление")
         testJustSent = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.testJustSent = false }
