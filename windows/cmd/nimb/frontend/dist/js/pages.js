@@ -261,13 +261,13 @@ export class SettingsPage {
   mount(root) { root.innerHTML = shell('Настройки', '<div class="settings" id="body"></div>'); this.body = root.querySelector('#body'); }
   update(S, extra) {
     if (same(this, 'rj', [extra.autostart, S.version, S.update.notify, extra.testSent, S.ai.error, S.media.error])) return;
-    const card = (title, text, button, top = false) => `<div class="card row ${top ? 'top' : ''}"><div class="grow"><div class="nm">${title}</div><div class="sm">${text}</div></div>${button}</div>`;
+    const card = (title, text, button, top = false) => `<div class="card row ${top ? 'top' : ''}"><div class="grow"><div class="nm">${title}</div>${text ? `<div class="sm">${text}</div>` : ''}</div>${button}</div>`;
     const group = (title, ...cards) => `<div class="group"><div class="label">${title}</div><div class="cards">${cards.join('')}</div></div>`;
     // The columns of the Mac (SettingsView.swift); the block «Пароль администратора» is not here (the service has the rights), so Помощь
     // stands over Удаление in the right column.
     setHTML(this.body, `<div class="col">${group('Работа',
         card('Работа в фоне', 'Закрытие окна не выключает Nimb: он остаётся у часов. Выйти можно из меню значка или кнопкой справа.', '<button class="btn" data-a="quit" data-f="quit" id="quit">Выйти из Nimb</button>'),
-        card('Запускать вместе с Windows', 'Nimb стартует тихо, значком у часов.', `<button class="pill ${extra.autostart ? 'on' : ''}" role="switch" aria-checked="${extra.autostart}" aria-label="Запускать вместе с Windows" data-a="autostart" data-f="autostart" id="autostart"></button>`, true),
+        card('Запускать вместе с Windows', '', `<button class="pill ${extra.autostart ? 'on' : ''}" role="switch" aria-checked="${extra.autostart}" aria-label="Запускать вместе с Windows" data-a="autostart" data-f="autostart" id="autostart"></button>`, true),
         notifyCard(S, extra))}</div>
       <div class="col">${group('Помощь',
         card('Сообщить о проблеме', 'Отчёт придёт разработчику. Паролей и адресов в нём нет.', '<button class="btn" data-a="report" data-f="report" id="report">Отправить…</button>'),
