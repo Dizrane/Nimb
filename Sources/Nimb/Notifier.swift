@@ -57,7 +57,7 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
             if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") { NSWorkspace.shared.open(url) }
             return
         }
-        center.requestAuthorization(options: [.alert]) { granted, error in
+        center.requestAuthorization(options: [.alert, .sound]) { granted, error in
             Task { @MainActor in
                 self.refresh()
                 AppLog.shared.add("notifications", granted ? "уведомления разрешены" : "уведомления не разрешены" + (error.map { " (\($0.localizedDescription))" } ?? ""))
@@ -74,6 +74,7 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
         let content = UNMutableNotificationContent()
         content.title = "Вышел Nimb \(version)"
         content.body = "Откройте Nimb и нажмите «Обновить до \(version)»."
+        content.sound = .default
         // One identifier for all of them: a newer notification takes the place of the older one in the Notification Centre.
         center.add(UNNotificationRequest(identifier: "nimb-update", content: content, trigger: nil)) { error in
             if let error { AppLog.shared.add("notifications", "уведомление не показано: \(error.localizedDescription)") }
@@ -91,6 +92,7 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
         let content = UNMutableNotificationContent()
         content.title = "Проверка уведомлений"
         content.body = "Если вы это видите, Nimb сможет сообщить о новой версии."
+        content.sound = .default
         center.add(UNNotificationRequest(identifier: Self.testIdentifier, content: content, trigger: nil)) { error in
             if let error { AppLog.shared.add("notifications", "проверочное уведомление не показано: \(error.localizedDescription)") }
         }
@@ -110,7 +112,7 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
         let active = await MainActor.run { NSApp.isActive }
-        return Self.showsBanner(identifier: notification.request.identifier, appIsActive: active) ? [.banner] : []
+        return Self.showsBanner(identifier: notification.request.identifier, appIsActive: active) ? [.banner, .sound] : []
     }
 
     /// A click on the banner opens the window.
