@@ -47,6 +47,7 @@ func webSocketDomains(dc int, isMedia bool) []string {
 }
 
 func (p *wsPool) warmUp() {
+	defer recoverPanic("прокси Telegram: подготовка соединений")
 	for dc := range p.e.cfg.WebSocketAddress {
 		for _, media := range []bool{false, true} {
 			p.refill(poolKey{dc, media})
@@ -89,6 +90,7 @@ func (p *wsPool) refill(key poolKey) {
 }
 
 func (p *wsPool) fill(key poolKey, address string) {
+	defer recoverPanic("прокси Telegram: пополнение запаса соединений")
 	defer func() {
 		p.mu.Lock()
 		delete(p.refilling, key)

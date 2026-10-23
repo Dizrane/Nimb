@@ -103,7 +103,7 @@ func (a *App) watchSessionEnd() {
 	cb := syscall.NewCallback(func(h, msg, wparam, lparam uintptr) uintptr {
 		if msg == wmEndSession && wparam != 0 {
 			endSession()
-			logLine("Windows завершает сеанс: Nimb закрывается вместе с ним")
+			logExit("Windows завершает сеанс (выключение, перезагрузка или выход из учётной записи)")
 		}
 		r, _, _ := pCallWindowProc.Call(windowProc, h, msg, wparam, lparam)
 		return r

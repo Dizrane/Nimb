@@ -75,9 +75,14 @@ func (a *App) startup(ctx context.Context) {
 	var upgradedFrom string
 	a.previousEndedBadly, upgradedFrom = beginSession(Version)
 	a.watchSessionEnd()
-	logLine("запуск Nimb " + Version)
+	startPulse()
+	logLine(fmt.Sprintf("запуск Nimb %s (процесс %d)", Version, os.Getpid()))
+	if afterWebView2Crash {
+		logLine("Nimb запущен заново: прошлый процесс закончился, потому что завершился браузерный процесс WebView2 (строка «wails: … kind 0» выше)")
+	}
 	if a.previousEndedBadly {
 		logLine("прошлый запуск закончился неожиданно (сбой, принудительное закрытие или выключение питания)")
+		explainPreviousEnd()
 	} else if upgradedFrom != "" {
 		logLine("Nimb обновлён с версии " + upgradedFrom + ": установщик закрыл прошлый запуск, это не сбой")
 	}
@@ -86,11 +91,11 @@ func (a *App) startup(ctx context.Context) {
 		a.tg = engine
 	}
 	if a.settings.get().TelegramAuto {
-		go a.startTelegram()
+		goSafe("запуск прокси Telegram", func() { a.startTelegram() })
 	}
-	go a.watchTelegram()
-	go a.updateLoop()
-	go a.restoreTunnel()
+	goKeep("слежение за прокси Telegram", a.watchTelegram)
+	goKeep("проверка обновлений", a.updateLoop)
+	goSafe("возврат туннеля после перезагрузки", a.restoreTunnel)
 	startTray(a)
 }
 
@@ -109,7 +114,11 @@ func (a *App) ShowWindow() {
 }
 
 // Quit closes Nimb. The proxy of Telegram stops with it; DNS and the tunnel stay as they are, as on the Mac.
-func (a *App) Quit() {
+func (a *App) Quit() { a.quitFrom("кнопка «Выйти из Nimb» в окне") }
+
+// quitFrom closes Nimb and writes down who asked for it.
+func (a *App) quitFrom(reason string) {
+	logExit("по команде человека: " + reason)
 	endSession()
 	if a.tg != nil {
 		a.tg.Stop()
@@ -472,7 +481,10 @@ func (a *App) SetAll(on bool) Result {
 	results := make([]Result, 3)
 	for i, f := range []func(bool) Result{a.SetAI, a.SetTelegram, a.SetMedia} {
 		wg.Add(1)
-		go func() { defer wg.Done(); results[i] = f(on) }()
+		go func() {
+			defer wg.Done()
+			safely("включение службы из «Включить всё»", func() { results[i] = f(on) })
+		}()
 	}
 	wg.Wait()
 	// The result of each of the three, with the words of the error as they came (what the old line with the three structures said).

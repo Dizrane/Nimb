@@ -104,15 +104,24 @@ func (a *App) ReportPrepare() ReportPrep {
 	host := probe.All[0].Host
 	var wg sync.WaitGroup
 	wg.Add(4)
-	go func() { defer wg.Done(); trace = cloudflareTrace() }()
-	go func() { defer wg.Done(); probed = a.probeForReport() }()
+	go func() {
+		defer wg.Done()
+		safely("запрос к Cloudflare для отчёта", func() { trace = cloudflareTrace() })
+	}()
+	go func() {
+		defer wg.Done()
+		safely("проверка DNS для отчёта", func() { probed = a.probeForReport() })
+	}()
 	go func() {
 		defer wg.Done()
 		if resp, err := callService(ipc.Request{Cmd: ipc.Diag}); err == nil {
 			diag = &resp
 		}
 	}()
-	go func() { defer wg.Done(); system, provider = a.dnsAnswers(host, st.AI.On, st.AI.Provider) }()
+	go func() {
+		defer wg.Done()
+		safely("ответы DNS для отчёта", func() { system, provider = a.dnsAnswers(host, st.AI.On, st.AI.Provider) })
+	}()
 	wg.Wait()
 
 	adapters, _ := dnsx.Adapters()
@@ -198,6 +207,7 @@ func (a *App) ReportPrepare() ReportPrep {
 			out = append(out, report.Section("Служба", serviceHead...))
 		}
 	}
+	out = append(out, report.Section("Процесс окна", a.processFacts()...))
 	// What Windows itself wrote about the programs of Nimb: the code of a crash, and what the service manager did with the service.
 	var winEvents []string
 	winEvents = append(winEvents, winevents.Query("Application", "(EventID=1000 or EventID=1001)", 24*time.Hour, []string{"Nimb.exe", "nimb-svc.exe"}, 8)...)

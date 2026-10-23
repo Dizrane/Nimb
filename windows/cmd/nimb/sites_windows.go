@@ -43,14 +43,15 @@ func (a *App) CheckSites() Result {
 	}
 	a.sites.running = true
 	a.sites.mu.Unlock()
-	go func() {
+	goSafe("проверка YouTube и Discord", func() {
+		defer func() { a.sites.mu.Lock(); a.sites.running = false; a.sites.mu.Unlock() }()
 		ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
 		defer cancel()
 		checks := sitecheck.Run(ctx, sitecheck.Targets, sitecheck.Ask)
 		a.sites.mu.Lock()
-		a.sites.checks, a.sites.running = checks, false
+		a.sites.checks = checks
 		a.sites.mu.Unlock()
 		logLine(sitecheck.Line(checks))
-	}()
+	})
 	return Result{OK: true}
 }

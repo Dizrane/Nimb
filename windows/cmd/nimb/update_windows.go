@@ -152,7 +152,7 @@ func (a *App) InstallUpdate() Result {
 	}
 	a.upd.installing, a.upd.err = "Загрузка…", ""
 	a.upd.mu.Unlock()
-	go a.install(*rel)
+	goSafe("установка обновления", func() { a.install(*rel) })
 	return Result{OK: true}
 }
 

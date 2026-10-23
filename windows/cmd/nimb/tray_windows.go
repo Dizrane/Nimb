@@ -26,7 +26,7 @@ var trayItems struct {
 }
 
 func startTray(a *App) {
-	go systray.Run(func() { onTrayReady(a) }, func() {})
+	goSafe("значок у часов", func() { systray.Run(func() { onTrayReady(a) }, func() {}) })
 }
 
 func stopTray() { systray.Quit() }
@@ -60,13 +60,13 @@ func onTrayReady(a *App) {
 	quit := systray.AddMenuItem("Выйти", "")
 
 	for _, p := range trayItems.aiProviders {
-		go func() {
+		goKeep("выбор провайдера в меню значка", func() {
 			for range p.item.ClickedCh {
 				a.SetProvider(p.id)
 			}
-		}()
+		})
 	}
-	go func() {
+	goKeep("меню значка", func() {
 		for {
 			select {
 			case <-trayItems.all.ClickedCh:
@@ -91,12 +91,12 @@ func onTrayReady(a *App) {
 			case <-open.ClickedCh:
 				a.ShowWindow()
 			case <-quit.ClickedCh:
-				a.Quit()
+				a.quitFrom("пункт «Выйти» в меню значка у часов")
 				return
 			}
 		}
-	}()
-	go refreshTray(a)
+	})
+	goKeep("обновление значка у часов", func() { refreshTray(a) })
 }
 
 // refreshTray keeps the menu and the icon in step with the services.

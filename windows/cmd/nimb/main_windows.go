@@ -9,9 +9,11 @@ import (
 	"embed"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"slices"
 
 	"github.com/wailsapp/wails/v2"
+	"github.com/wailsapp/wails/v2/pkg/logger"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
@@ -21,6 +23,14 @@ import (
 var assets embed.FS
 
 func main() {
+	setupDiagnostics()
+	defer func() {
+		if v := recover(); v != nil {
+			logPanic("главный поток", v, debug.Stack())
+			os.Exit(2)
+		}
+	}()
+	afterWebView2Crash = waitForPreviousProcess()
 	useOwnTaskbarIcon()
 	app := NewApp()
 	err := wails.Run(&options.App{
@@ -36,8 +46,14 @@ func main() {
 		OnBeforeClose:     app.beforeClose,
 		HideWindowOnClose: true,
 		StartHidden:       slices.Contains(os.Args[1:], "--hidden"),
-		OnShutdown:        func(context.Context) { endSession() },
-		Bind:              []any{app},
+		OnShutdown: func(context.Context) {
+			logExit("приложение закрывается (Wails вызвал OnShutdown)")
+			endSession()
+		},
+		Logger:             wailsLog{},
+		LogLevel:           logger.WARNING,
+		LogLevelProduction: logger.WARNING,
+		Bind:               []any{app},
 		SingleInstanceLock: &options.SingleInstanceLock{
 			UniqueId:               "com.nimb.windows",
 			OnSecondInstanceLaunch: app.secondInstance,
@@ -59,6 +75,9 @@ func main() {
 		},
 	})
 	if err != nil {
+		logLine("выход: Wails вернул ошибку: " + err.Error())
 		println("error:", err.Error())
+		return
 	}
+	logExit("Wails закончил работу без ошибки")
 }

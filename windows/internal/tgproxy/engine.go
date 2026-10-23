@@ -167,6 +167,7 @@ func (e *Engine) Stop() {
 }
 
 func (e *Engine) acceptLoop(l net.Listener) {
+	defer recoverPanic("прокси Telegram: приём соединений")
 	for {
 		conn, err := l.Accept()
 		if err != nil {
@@ -183,6 +184,7 @@ func (e *Engine) acceptLoop(l net.Listener) {
 
 // handle is one client.
 func (e *Engine) handle(client net.Conn) {
+	defer recoverPanic("прокси Telegram: соединение клиента")
 	e.mu.Lock()
 	if e.stopped {
 		e.mu.Unlock()
@@ -285,6 +287,7 @@ func (e *Engine) bridgeWS(client net.Conn, c *Ciphers, transport Transport, ws *
 	done := make(chan struct{}, 2)
 	go func() { // the client to Telegram
 		defer func() { done <- struct{}{} }()
+		defer recoverPanic("прокси Telegram: от клиента к Telegram (WebSocket)")
 		splitter := NewSplitter(transport)
 		buf := make([]byte, 64*1024)
 		for {
@@ -310,6 +313,7 @@ func (e *Engine) bridgeWS(client net.Conn, c *Ciphers, transport Transport, ws *
 	}()
 	go func() { // Telegram to the client
 		defer func() { done <- struct{}{} }()
+		defer recoverPanic("прокси Telegram: от Telegram к клиенту (WebSocket)")
 		for {
 			message, err := ws.receive()
 			if err != nil {
@@ -331,6 +335,7 @@ func (e *Engine) bridgeTCP(client net.Conn, c *Ciphers, remote net.Conn) {
 	done := make(chan struct{}, 2)
 	go func() {
 		defer func() { done <- struct{}{} }()
+		defer recoverPanic("прокси Telegram: от клиента к Telegram (TCP)")
 		buf := make([]byte, 64*1024)
 		for {
 			n, err := client.Read(buf)
@@ -347,6 +352,7 @@ func (e *Engine) bridgeTCP(client net.Conn, c *Ciphers, remote net.Conn) {
 	}()
 	go func() {
 		defer func() { done <- struct{}{} }()
+		defer recoverPanic("прокси Telegram: от Telegram к клиенту (TCP)")
 		buf := make([]byte, 64*1024)
 		for {
 			n, err := remote.Read(buf)

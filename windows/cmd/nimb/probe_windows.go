@@ -65,7 +65,7 @@ func (a *App) startProbe(enable bool) Result {
 	}
 	a.probe.running, a.probe.phase, a.probe.done, a.probe.total, a.probe.reports = true, "addresses", 0, 0, nil
 	a.probe.mu.Unlock()
-	go a.runProbe(enable)
+	goSafe("проверка DNS", func() { a.runProbe(enable) })
 	return Result{OK: true}
 }
 
