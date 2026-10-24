@@ -9,6 +9,12 @@ enum AutoReportRules {
         running ? listening && stats.failures * 5 <= stats.totalConnections : !listening
     }
 
+    /// The settings are as Nimb set them: its DNS stands on every connection when it is on, and nowhere when it is off. Whom the system really
+    /// asks is left out here (another VPN or a browser with its own DNS may take it over, and that is not ours to mend); the manual report shows it.
+    static func dnsAgrees(active: DNSProvider?, serviceServers: [[String]]) -> Bool {
+        ReportChecks.dns(active: active, serviceServers: serviceServers, resolver: active?.addresses ?? []).agrees
+    }
+
     /// The tunnel is as the program thinks: when it is on, it has its routes and the traffic goes through it; when it is off, it has no routes.
     /// (Another VPN that carries the traffic while ours is off is the person's business, not a fault of ours: the report of it is the manual one.)
     static func tunnelAgrees(on: Bool, routes: Int, viaTunnel: Bool) -> Bool {

@@ -448,6 +448,14 @@ import Testing
         #expect(DailyDigest.summary(lines: [], sentKeys: []).contains("Записей чёрного ящика: 0"))
     }
 
+    @Test func theDnsOfNimbAgreesByItsSettingsAndNotByWhomTheSystemAsks() throws {
+        let provider = try #require(DNSProvider.all.first)
+        #expect(AutoReportRules.dnsAgrees(active: provider, serviceServers: [provider.addresses, provider.addresses]))
+        #expect(!AutoReportRules.dnsAgrees(active: provider, serviceServers: [provider.addresses, []]), "one connection without it")
+        #expect(AutoReportRules.dnsAgrees(active: nil, serviceServers: [[], []]))
+        #expect(!AutoReportRules.dnsAgrees(active: nil, serviceServers: [provider.addresses]), "left behind after switching off")
+    }
+
     @Test func theRulesOfAgreement() {
         #expect(AutoReportRules.tunnelAgrees(on: true, routes: 5, viaTunnel: true))
         #expect(!AutoReportRules.tunnelAgrees(on: true, routes: 0, viaTunnel: false))

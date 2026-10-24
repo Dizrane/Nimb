@@ -50,10 +50,10 @@ final class BlackBox {
         Task.detached(priority: .utility) {
             let system = DiagnosticReport.snapshot(network: false)
             let tgAgrees = AutoReportRules.telegramAgrees(running: tgRunning, listening: tgListening, stats: tgStats)
-            let dnsCheck = ReportChecks.dns(active: active, serviceServers: system.serviceServers, resolver: system.resolver)
+            let dnsAgrees = AutoReportRules.dnsAgrees(active: active, serviceServers: system.serviceServers)
             let viaTunnel = system.interface.hasPrefix("utun")
             let facts = BlackBoxLine.Facts(
-                dns: active?.name ?? "выкл", dnsAgrees: dnsCheck.agrees,
+                dns: active?.name ?? "выкл", dnsAgrees: dnsAgrees,
                 telegram: tgRunning ? "вкл:\(tgPort) соединений=\(tgStats.totalConnections) ошибок=\(tgStats.failures)" : "выкл", telegramAgrees: tgAgrees,
                 tunnel: tunnelWords, tunnelAgrees: AutoReportRules.tunnelAgrees(on: tunnelOn, routes: system.routes, viaTunnel: viaTunnel),
                 routes: system.routes, interface: system.interface)
