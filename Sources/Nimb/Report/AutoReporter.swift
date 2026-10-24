@@ -44,6 +44,7 @@ enum AutoTrigger: Equatable {
     case error(AutoService)
     case updateCheck
     case tunnelSilent
+    case newKeysFailed
     case dailyDigest
 
     /// The same cause has the same key: the key is what is not repeated.
@@ -56,6 +57,7 @@ enum AutoTrigger: Equatable {
         case .error(let service): "error-\(service.rawValue)"
         case .updateCheck: "update-check"
         case .tunnelSilent: "tunnel-silent"
+        case .newKeysFailed: "keys-failed"
         case .dailyDigest: "daily"
         }
     }
@@ -70,9 +72,15 @@ enum AutoTrigger: Equatable {
         case .error(let service): "ошибка при работе с «\(service.name)»"
         case .updateCheck: "проверка обновлений не удаётся несколько раз подряд"
         case .tunnelSilent: "туннель включён, но сервер не отвечает больше 10 минут"
+        case .newKeysFailed: "новые ключи туннеля не помогли: туннель по-прежнему не включается"
         case .dailyDigest: "ежедневная сводка"
         }
     }
+}
+
+extension AutoTrigger {
+    /// A cause that is told even when another report went within the hour: the one that matters most (what a person's last way out came to).
+    var ignoresHourLimit: Bool { self == .newKeysFailed }
 }
 
 /// How often a report may go. A report that was sent is written down with its key and its time.
@@ -87,9 +95,9 @@ enum AutoReportPolicy {
     static let perHour = 1
     static let perDay = 5
 
-    static func allows(key: String, now: Date, history: [Sent]) -> Bool {
+    static func allows(key: String, now: Date, history: [Sent], ignoresHourLimit: Bool = false) -> Bool {
         if history.contains(where: { $0.key == key && now.timeIntervalSince($0.at) < samePause }) { return false }
-        if history.filter({ now.timeIntervalSince($0.at) < 3600 }).count >= perHour { return false }
+        if !ignoresHourLimit && history.filter({ now.timeIntervalSince($0.at) < 3600 }).count >= perHour { return false }
         return history.filter { now.timeIntervalSince($0.at) < 24 * 3600 }.count < perDay
     }
 
@@ -342,7 +350,7 @@ final class AutoReporter: ObservableObject {
         let defaults = UserDefaults.standard
         let now = Date()
         var history = history(now: now)
-        guard AutoReportPolicy.allows(key: trigger.key, now: now, history: history) else { return }
+        guard AutoReportPolicy.allows(key: trigger.key, now: now, history: history, ignoresHourLimit: trigger.ignoresHourLimit) else { return }
         // Written down before the sending: a second cause in the same moment does not make a second report, and a failed sending is not repeated.
         history.append(AutoReportPolicy.Sent(key: trigger.key, at: now))
         defaults.set(try? JSONEncoder().encode(history), forKey: Self.historyKey)

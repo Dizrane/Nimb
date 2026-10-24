@@ -389,7 +389,7 @@ final class WarpTunnelModel: ObservableObject {
 
     /// The first start on a Mac, with nothing to enter: makes this Mac's own WARP account (keys and address), puts it together
     /// with the shared preset from the app, installs everything and starts the tunnel, all in one password prompt.
-    func enable(phaseText: String = "Создаю личные ключи WARP…") {
+    func enable(phaseText: String = "Создаю личные ключи WARP…", afterKeyReset: Bool = false) {
         guard bundledFiles != nil, !isWorking else { return }
         errorMessage = nil
         checks = []
@@ -400,13 +400,18 @@ final class WarpTunnelModel: ObservableObject {
                 account = try await WarpRegistration.register()
             } catch {
                 errorMessage = error.localizedDescription
+                if afterKeyReset { AutoReporter.shared.notify(.newKeysFailed) }
                 finish()
                 return
             }
             phase = .working("Включаю…")
             let outcome = await Task.detached { Result { try Self.installFiles(configText: account.file, thenStart: true) } }.value
             if case .failure(let error) = outcome {
-                if case DNSError.cancelled = error {} else { errorMessage = Self.friendly(error) }
+                if case DNSError.cancelled = error {} else {
+                    errorMessage = Self.friendly(error)
+                    // New keys were made and the tunnel still does not start: the last way out of the program is gone, and it is told.
+                    if afterKeyReset { AutoReporter.shared.notify(.newKeysFailed) }
+                }
                 // Not installed (the password was refused, say): the account would be left without an owner.
                 if !WarpPaths.isInstalled { await WarpRegistration.delete(account) }
             }
@@ -537,7 +542,7 @@ final class WarpTunnelModel: ObservableObject {
             defaults.set(Date().timeIntervalSince1970, forKey: Self.keysResetKey)
             defaults.set(0, forKey: Self.handshakeFailuresKey)
             AppLog.shared.add("tunnel", "туннель дважды подряд не получил рукопожатие при рабочем интернете: создаю новые ключи")
-            enable(phaseText: "Ключи не подошли, создаю новые…")
+            enable(phaseText: "Ключи не подошли, создаю новые…", afterKeyReset: true)
         }
     }
 

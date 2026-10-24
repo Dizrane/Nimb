@@ -501,6 +501,17 @@ import Testing
         #expect(!BlackBoxLine.line(now: now, uptime: 60, facts: facts, memoryMegabytes: 100).contains("рукопожатие"))
     }
 
+    @Test func theReportThatNewKeysDidNotHelpIsNotHeldBackByTheHourLimit() {
+        let hourAgo = [AutoReportPolicy.Sent(key: "error-tunnel", at: now.addingTimeInterval(-10 * 60))]
+        #expect(!AutoReportPolicy.allows(key: "keys-failed", now: now, history: hourAgo), "an ordinary cause waits")
+        #expect(AutoReportPolicy.allows(key: "keys-failed", now: now, history: hourAgo, ignoresHourLimit: AutoTrigger.newKeysFailed.ignoresHourLimit))
+        #expect(!AutoTrigger.tunnelDropped.ignoresHourLimit)
+        let same = hourAgo + [AutoReportPolicy.Sent(key: "keys-failed", at: now.addingTimeInterval(-3600))]
+        #expect(!AutoReportPolicy.allows(key: "keys-failed", now: now, history: same, ignoresHourLimit: true), "the same cause is still told once in six hours")
+        #expect(AutoTrigger.newKeysFailed.key == "keys-failed")
+        #expect(AutoTrigger.newKeysFailed.title.contains("новые ключи"))
+    }
+
     @Test func theRulesOfAgreement() {
         #expect(AutoReportRules.tunnelAgrees(on: true, routes: 5, viaTunnel: true))
         #expect(!AutoReportRules.tunnelAgrees(on: true, routes: 0, viaTunnel: false))
@@ -516,7 +527,7 @@ import Testing
         #expect(AutoTrigger.mismatch(.telegram).key == "mismatch-telegram")
         #expect(AutoTrigger.error(.tunnel).key == "error-tunnel")
         #expect(AutoTrigger.error(.tunnel).title.contains("YouTube и Discord"))
-        for trigger in [AutoTrigger.previousEndedBadly, .tunnelRestarted, .tunnelDropped, .mismatch(.dns), .error(.dns), .updateCheck, .tunnelSilent, .dailyDigest] {
+        for trigger in [AutoTrigger.previousEndedBadly, .tunnelRestarted, .tunnelDropped, .mismatch(.dns), .error(.dns), .updateCheck, .tunnelSilent, .newKeysFailed, .dailyDigest] {
             #expect(trigger.key.range(of: "^[A-Za-z0-9:-]{1,40}$", options: .regularExpression) != nil, "the relay takes plain letters in a key")
         }
         #expect(AutoTrigger.previousEndedBadly.key == "crash")
