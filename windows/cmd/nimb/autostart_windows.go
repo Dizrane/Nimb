@@ -56,14 +56,18 @@ func sessionMarker() string { return filepath.Join(dataDir(), "session.marker") 
 
 // beginSession reads what the last run left and makes the mark of this one. upgradedFrom is the version that was running when the
 // installer stopped it, or empty.
-func beginSession(version string) (previousEndedBadly bool, upgradedFrom string) {
+func beginSession(version, lastLogLine string) (previousEndedBadly bool, upgradedFrom string) {
 	raw, err := os.ReadFile(sessionMarker())
 	os.MkdirAll(dataDir(), 0o700)
 	os.WriteFile(sessionMarker(), []byte(version), 0o600)
 	if err != nil {
 		return false, ""
 	}
-	return session.Interpret(string(raw), version)
+	return session.Interpret(string(raw), version, lastLogLine)
 }
 
 func endSession() { os.Remove(sessionMarker()) }
+
+// restoreSession puts the mark back: a controlled exit was prepared (the update) and did not happen, so the program goes on running and a
+// crash from now on must be told as one.
+func restoreSession() { os.WriteFile(sessionMarker(), []byte(Version), 0o600) }

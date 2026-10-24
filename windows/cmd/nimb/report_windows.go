@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -26,6 +25,7 @@ import (
 
 	"github.com/Dizrane/Nimb/windows/internal/dnsx"
 	"github.com/Dizrane/Nimb/windows/internal/ipc"
+	"github.com/Dizrane/Nimb/windows/internal/logfile"
 	"github.com/Dizrane/Nimb/windows/internal/netfacts"
 	"github.com/Dizrane/Nimb/windows/internal/probe"
 	"github.com/Dizrane/Nimb/windows/internal/report"
@@ -217,14 +217,29 @@ func (a *App) ReportPrepare() ReportPrep {
 	}
 	out = append(out, report.Section("События Windows о Nimb (последние сутки)", winEvents...))
 	if diag != nil {
-		out = append(out, report.Section("Метки службы в журнале туннеля (с начала файла)", report.LogTail(diag.TunnelMarks, 30)...))
+		out = append(out, report.Section("Метки службы в журнале туннеля (этот запуск службы)", report.LogTail(diag.TunnelMarks, 30)...))
 		out = append(out, report.Section("Процесс туннеля (последние строки его журнала)", report.LogTail(diag.TunnelLog, 25)...))
 	}
-	windowLog := tailLog(filepath.Join(dataDir(), "window.log"), 500)
+	windowLog := tailLog(windowLogPath(), 500)
 	events := append(report.ParseLog("окно", windowLog, time.Local), report.ParseLog("служба", serviceLog, time.Local)...)
 	out = append(out, report.Section("Хронология (последние сутки)", report.Events(events, time.Now(), 24*time.Hour, 60)...))
+	// The logs above are of this run only. The last run has its own sections, and a run that ended unexpectedly has more of its lines.
+	previousWindow := tailLog(logfile.PreviousPath(windowLogPath()), 10)
+	title := "Прошлый запуск окна (последние строки его журнала)"
 	if a.previousEndedBadly {
-		out = append(out, report.Section("Перед неожиданным завершением (последние строки журнала прошлого запуска)", beforeThisRun(windowLog, 20)...))
+		previousWindow = tailLog(logfile.PreviousPath(windowLogPath()), 25)
+		title = "Перед неожиданным завершением (последние строки журнала прошлого запуска окна)"
+	}
+	if len(previousWindow) > 0 {
+		out = append(out, report.Section(title, previousWindow...))
+	}
+	if diag != nil {
+		if len(diag.ServicePrevious) > 0 {
+			out = append(out, report.Section("Прошлый запуск службы (последние строки её журнала)", diag.ServicePrevious...))
+		}
+		if len(diag.TunnelPrevious) > 0 {
+			out = append(out, report.Section("Прошлый запуск службы: процесс туннеля (последние строки его журнала)", diag.TunnelPrevious...))
+		}
 	}
 	raw := windowLog
 	if len(raw) > 60 {
@@ -465,23 +480,4 @@ func updateLine(u UpdateView) string {
 		state += ", последняя удачная проверка " + time.Unix(u.Checked, 0).Format("2006-01-02 15:04:05")
 	}
 	return state + "; уведомления о версиях " + map[bool]string{true: "включены", false: "выключены"}[u.Notify]
-}
-
-// beforeThisRun are the last n lines of the log of the window before the line that says this run started: what was going on before the
-// run that ended unexpectedly.
-func beforeThisRun(lines []string, n int) []string {
-	start := -1
-	for i, l := range lines {
-		if strings.Contains(l, "  запуск Nimb ") {
-			start = i
-		}
-	}
-	if start <= 0 {
-		return []string{"пусто"}
-	}
-	before := lines[:start]
-	if len(before) > n {
-		before = before[len(before)-n:]
-	}
-	return before
 }

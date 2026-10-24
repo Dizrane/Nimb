@@ -23,7 +23,6 @@ import (
 var assets embed.FS
 
 func main() {
-	setupDiagnostics()
 	defer func() {
 		if v := recover(); v != nil {
 			logPanic("главный поток", v, debug.Stack())

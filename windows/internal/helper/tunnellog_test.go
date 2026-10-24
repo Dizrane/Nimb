@@ -1,7 +1,6 @@
 package helper
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,17 +31,22 @@ func TestTunnelLogKeepsTheLastLinesWhenItGrowsPastTheLimit(t *testing.T) {
 	}
 }
 
-func TestTunnelLogTrimsAnOldBigFileAtOpen(t *testing.T) {
+func TestTheLogOfTheLastRunIsPutAsideAtTheStart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tunnel.log")
-	var b strings.Builder
-	for i := 0; i < 2000; i++ {
-		fmt.Fprintf(&b, "line %d %s\n", i, strings.Repeat("y", 200))
+	first := newTunnelLog(path)
+	first.Mark("up")
+	first.Mark("daemon-exited")
+	second := newTunnelLog(path) // the service starts again
+	if marks := second.Marks(10); len(marks) != 0 {
+		t.Errorf("the marks of the last run are in this run's file: %v", marks)
 	}
-	os.WriteFile(path, []byte(b.String()), 0o600)
-	l := newTunnelLog(path)
-	lines := l.Tail(10000)
-	if len(lines) != tunnelLogKeep || !strings.HasPrefix(lines[len(lines)-1], "line 1999 ") || !strings.HasPrefix(lines[0], "line 1600 ") {
-		t.Errorf("%d lines, first %q", len(lines), lines[0][:12])
+	second.Mark("up")
+	if marks := second.Marks(10); len(marks) != 1 || !strings.HasSuffix(marks[0], "NIMB: up") {
+		t.Errorf("%v", marks)
+	}
+	prev, _ := os.ReadFile(filepath.Join(filepath.Dir(path), "tunnel-previous.log"))
+	if !strings.Contains(string(prev), "NIMB: daemon-exited") {
+		t.Errorf("the last run is not kept: %q", prev)
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sys/windows"
@@ -21,6 +22,7 @@ import (
 	"github.com/Dizrane/Nimb/windows/internal/awgconf"
 	"github.com/Dizrane/Nimb/windows/internal/dnsx"
 	"github.com/Dizrane/Nimb/windows/internal/ipc"
+	"github.com/Dizrane/Nimb/windows/internal/logfile"
 	"github.com/Dizrane/Nimb/windows/internal/tgproxy"
 	"github.com/Dizrane/Nimb/windows/internal/tunnel"
 	"github.com/Dizrane/Nimb/windows/internal/tunneldrop"
@@ -75,6 +77,8 @@ type Helper struct {
 
 	// While the program of the tunnel is being started again after it ended by itself: when that began (the window is told that the tunnel
 	// is on for as long as the mark is fresh) and the channel that is closed to take the restart back (the person switched the tunnel off or on).
+	lastStatus    atomic.Pointer[ipc.Response] // the last answer to «status» (see Handle)
+	lastClosed    time.Time                    // when the last tunnel was closed (zero: none yet)
 	restarting    time.Time
 	restartCancel chan struct{}
 	// tlog is the log of the program of the tunnel.
@@ -115,15 +119,29 @@ func (h *Helper) Close() {
 
 // Handle implements ipc.Handler.
 func (h *Helper) Handle(ctx context.Context, req ipc.Request) ipc.Response {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	// A start of the tunnel can take half a minute with the lock held. The window asks for the status every few seconds and must not stand
+	// waiting for it: while the lock is taken it is given the last status that was made (the window itself knows that it is busy).
 	switch req.Cmd {
 	case ipc.Ping:
 		return ipc.Response{OK: true}
 	case ipc.Status:
-		return ipc.Response{OK: true, Tunnel: h.status(), DNS: h.dnsStatus(), Telegram: h.telegramStatus()}
+		if !h.mu.TryLock() {
+			if last := h.lastStatus.Load(); last != nil {
+				return *last
+			}
+			h.mu.Lock()
+		}
+	default:
+		h.mu.Lock()
+	}
+	defer h.mu.Unlock()
+	switch req.Cmd {
+	case ipc.Status:
+		resp := ipc.Response{OK: true, Tunnel: h.status(), DNS: h.dnsStatus(), Telegram: h.telegramStatus()}
+		h.lastStatus.Store(&resp)
+		return resp
 	case ipc.Diag:
-		return ipc.Response{OK: true, Lines: h.diag(), Version: version.Version, TunnelLog: h.tlog.Tail(tunnelLogReport), TunnelMarks: h.tlog.Marks(tunnelMarksReport)}
+		return ipc.Response{OK: true, Lines: h.diag(), Version: version.Version, TunnelLog: h.tlog.Tail(tunnelLogReport), TunnelMarks: h.tlog.Marks(tunnelMarksReport), ServicePrevious: logfile.Tail(logfile.PreviousPath(filepath.Join(h.dir, "service.log")), 25), TunnelPrevious: logfile.Tail(logfile.PreviousPath(filepath.Join(h.dir, "tunnel.log")), 20)}
 	case ipc.DNSSet:
 		provider, ok := dnsx.Find(req.Provider)
 		if !ok {
@@ -200,11 +218,28 @@ func (h *Helper) up(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("настройки туннеля не прошли проверку: %w", err)
 	}
+	if wait := tunnelrestart.SettleWait(time.Since(h.lastClosed), !h.lastClosed.IsZero()); wait > 0 {
+		h.logf("туннель: прошлый закрыт только что, жду %.0f с, чтобы он ушёл совсем", wait.Seconds())
+		time.Sleep(wait)
+	}
 	h.logf("включаю туннель")
-	t, err := tunnel.Up(cfg, tunnel.Options{Name: "Nimb", DNS: h.tunnelDNS(), Logf: h.logf, DeviceLogf: h.tlog.Logf})
+	var t *tunnel.Tunnel
+	for attempt, timeout := range tunnelrestart.AttemptTimeouts {
+		t, err = tunnel.Up(cfg, tunnel.Options{Name: "Nimb", DNS: h.tunnelDNS(), Logf: h.logf, DeviceLogf: h.tlog.Logf, HandshakeTimeout: timeout})
+		// Two things went wrong at a start right after a stop, and both were gone on a second try: no answer to the handshake, and an adapter
+		// that Windows did not know yet («Element not found» while the routes were set). The tunnel of the failed attempt is already taken
+		// down. One more try, so that the person does not see an error for a start that a moment later would have worked.
+		retryable := errors.Is(err, tunnel.ErrNoHandshake) || errors.Is(err, tunnel.ErrAdapter) || errors.Is(err, windows.ERROR_NOT_FOUND)
+		if !retryable || attempt == len(tunnelrestart.AttemptTimeouts)-1 {
+			break
+		}
+		h.tlog.Mark("start failed, trying once more: " + err.Error())
+		h.logf("туннель: не вышло (%v), пробую ещё раз", err)
+		time.Sleep(tunnelrestart.RetryPause)
+	}
 	if err != nil {
 		if errors.Is(err, tunnel.ErrNoHandshake) {
-			return errors.New("сервер не ответил за 16 секунд, интернет остался прежним")
+			return errors.New("сервер не ответил, интернет остался прежним")
 		}
 		return err
 	}
@@ -229,6 +264,7 @@ func (h *Helper) closeTunnel() {
 	if h.tun != nil {
 		h.tun.Close()
 		h.tun = nil
+		h.lastClosed = time.Now()
 	}
 }
 

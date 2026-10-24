@@ -18,6 +18,9 @@ type Stats struct {
 	WebSocket int
 	DirectTCP int
 	Failures  int
+	// Aborted counts clients that connected and went away before they said anything (Telegram opens connections ahead and drops them; a stop
+	// of the proxy closes the ones that were just opened). It is not a failure of the proxy and is not counted as one.
+	Aborted int
 	// WrongSecret counts connections that did not know this proxy's secret: a client set up for another proxy on the same port.
 	WrongSecret int
 	BytesUp     int64
@@ -58,6 +61,7 @@ type Engine struct {
 	stopped  bool
 	dead     bool // the listener broke by itself
 	port     uint16
+	gen      int // the number of the start; what a connection of an earlier start does to the numbers is not counted
 }
 
 // New makes a proxy for a secret of 32 hex digits.
@@ -83,6 +87,16 @@ func (e *Engine) logf(format string, args ...any) {
 func (e *Engine) count(change func(*Stats)) {
 	e.mu.Lock()
 	change(&e.stats)
+	e.mu.Unlock()
+}
+
+// countGen counts for a connection that began in start number gen. Once the proxy has been stopped or started again its numbers are
+// another count, and a connection that is still unwinding (it was closed by that very stop) must not put errors or negative numbers in it.
+func (e *Engine) countGen(gen int, change func(*Stats)) {
+	e.mu.Lock()
+	if e.gen == gen && !e.stopped {
+		change(&e.stats)
+	}
 	e.mu.Unlock()
 }
 
@@ -119,6 +133,7 @@ func (e *Engine) Port() uint16 {
 func (e *Engine) Start(preferred uint16) (uint16, error) {
 	e.mu.Lock()
 	e.stopped, e.dead, e.stats = false, false, Stats{}
+	e.gen++
 	e.mu.Unlock()
 
 	var last error = errors.New("нет свободного порта")
@@ -195,14 +210,18 @@ func (e *Engine) handle(client net.Conn) {
 		return
 	}
 	e.sessions[client] = struct{}{}
+	gen := e.gen
 	e.stats.Total++
 	e.stats.Active++
 	e.mu.Unlock()
+	count := func(change func(*Stats)) { e.countGen(gen, change) }
 	defer func() {
 		client.Close()
 		e.mu.Lock()
 		delete(e.sessions, client)
-		e.stats.Active--
+		if e.gen == gen && !e.stopped {
+			e.stats.Active--
+		}
 		e.mu.Unlock()
 	}()
 	if tcp, ok := client.(*net.TCPConn); ok {
@@ -212,14 +231,14 @@ func (e *Engine) handle(client net.Conn) {
 	client.SetReadDeadline(time.Now().Add(10 * time.Second))
 	header := make([]byte, handshakeLength)
 	if _, err := io.ReadFull(client, header); err != nil {
-		e.count(func(s *Stats) { s.Failures++ })
-		e.logf("Ошибка соединения: %v", err)
+		// The client went away (or said nothing for ten seconds) before the handshake: nothing of the proxy has failed.
+		count(func(s *Stats) { s.Aborted++ })
 		return
 	}
 	client.SetReadDeadline(time.Time{})
 	hs := ParseHandshake(header, e.secret)
 	if hs == nil {
-		e.count(func(s *Stats) { s.WrongSecret++ })
+		count(func(s *Stats) { s.WrongSecret++ })
 		e.logf("Неверное рукопожатие (чужой secret или протокол)")
 		return
 	}
@@ -241,15 +260,15 @@ func (e *Engine) handle(client net.Conn) {
 	}
 	cancel()
 	if ws != nil {
-		e.count(func(s *Stats) { s.WebSocket++ })
+		count(func(s *Stats) { s.WebSocket++ })
 		e.logf("%s → WebSocket", tag)
 		if err := ws.send(relayInit); err != nil {
 			ws.close()
-			e.count(func(s *Stats) { s.Failures++ })
+			count(func(s *Stats) { s.Failures++ })
 			e.logf("Ошибка соединения: %v", err)
 			return
 		}
-		e.bridgeWS(client, ciphers, hs.Transport, ws)
+		e.bridgeWS(client, ciphers, hs.Transport, ws, count)
 		return
 	}
 
@@ -259,7 +278,7 @@ func (e *Engine) handle(client net.Conn) {
 	}
 	address, ok := table[hs.DC]
 	if !ok {
-		e.count(func(s *Stats) { s.Failures++ })
+		count(func(s *Stats) { s.Failures++ })
 		e.logf("%s: неизвестный дата-центр", tag)
 		return
 	}
@@ -272,21 +291,21 @@ func (e *Engine) handle(client net.Conn) {
 	remote, err := dial(ctx, "tcp", net.JoinHostPort(address, "443"))
 	cancel()
 	if err != nil {
-		e.count(func(s *Stats) { s.Failures++ })
+		count(func(s *Stats) { s.Failures++ })
 		e.logf("Ошибка соединения: %v", err)
 		return
 	}
 	defer remote.Close()
 	if _, err := remote.Write(relayInit); err != nil {
-		e.count(func(s *Stats) { s.Failures++ })
+		count(func(s *Stats) { s.Failures++ })
 		e.logf("Ошибка соединения: %v", err)
 		return
 	}
-	e.count(func(s *Stats) { s.DirectTCP++ })
-	e.bridgeTCP(client, ciphers, remote)
+	count(func(s *Stats) { s.DirectTCP++ })
+	e.bridgeTCP(client, ciphers, remote, count)
 }
 
-func (e *Engine) bridgeWS(client net.Conn, c *Ciphers, transport Transport, ws *wsConn) {
+func (e *Engine) bridgeWS(client net.Conn, c *Ciphers, transport Transport, ws *wsConn, count func(func(*Stats))) {
 	done := make(chan struct{}, 2)
 	go func() { // the client to Telegram
 		defer func() { done <- struct{}{} }()
@@ -296,7 +315,7 @@ func (e *Engine) bridgeWS(client net.Conn, c *Ciphers, transport Transport, ws *
 		for {
 			n, err := client.Read(buf)
 			if n > 0 {
-				e.count(func(s *Stats) { s.BytesUp += int64(n) })
+				count(func(s *Stats) { s.BytesUp += int64(n) })
 				plain := xor(c.FromClient, buf[:n])
 				encrypted := xor(c.ToTelegram, plain)
 				parts := splitter.Split(encrypted, plain)
@@ -322,7 +341,7 @@ func (e *Engine) bridgeWS(client net.Conn, c *Ciphers, transport Transport, ws *
 			if err != nil {
 				return
 			}
-			e.count(func(s *Stats) { s.BytesDown += int64(len(message)) })
+			count(func(s *Stats) { s.BytesDown += int64(len(message)) })
 			if _, err := client.Write(xor(c.ToClient, xor(c.FromTelegram, message))); err != nil {
 				return
 			}
@@ -334,7 +353,7 @@ func (e *Engine) bridgeWS(client net.Conn, c *Ciphers, transport Transport, ws *
 	<-done
 }
 
-func (e *Engine) bridgeTCP(client net.Conn, c *Ciphers, remote net.Conn) {
+func (e *Engine) bridgeTCP(client net.Conn, c *Ciphers, remote net.Conn, count func(func(*Stats))) {
 	done := make(chan struct{}, 2)
 	go func() {
 		defer func() { done <- struct{}{} }()
@@ -343,7 +362,7 @@ func (e *Engine) bridgeTCP(client net.Conn, c *Ciphers, remote net.Conn) {
 		for {
 			n, err := client.Read(buf)
 			if n > 0 {
-				e.count(func(s *Stats) { s.BytesUp += int64(n) })
+				count(func(s *Stats) { s.BytesUp += int64(n) })
 				if _, werr := remote.Write(xor(c.ToTelegram, xor(c.FromClient, buf[:n]))); werr != nil {
 					return
 				}
@@ -360,7 +379,7 @@ func (e *Engine) bridgeTCP(client net.Conn, c *Ciphers, remote net.Conn) {
 		for {
 			n, err := remote.Read(buf)
 			if n > 0 {
-				e.count(func(s *Stats) { s.BytesDown += int64(n) })
+				count(func(s *Stats) { s.BytesDown += int64(n) })
 				if _, werr := client.Write(xor(c.ToClient, xor(c.FromTelegram, buf[:n]))); werr != nil {
 					return
 				}

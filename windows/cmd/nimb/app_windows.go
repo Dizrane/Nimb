@@ -69,10 +69,11 @@ func NewApp() *App {
 }
 
 func (a *App) startup(ctx context.Context) {
+	setupDiagnostics() // the program is the one instance now: its log and its crash output are its own
 	a.ctx = ctx
 	a.sizeWindow()
 	var upgradedFrom string
-	a.previousEndedBadly, upgradedFrom = beginSession(Version)
+	a.previousEndedBadly, upgradedFrom = beginSession(Version, previousLastLine)
 	a.watchSessionEnd()
 	startPulse()
 	logLine(fmt.Sprintf("запуск Nimb %s (процесс %d)", Version, os.Getpid()))
@@ -83,7 +84,11 @@ func (a *App) startup(ctx context.Context) {
 		logLine("прошлый запуск закончился неожиданно (сбой, принудительное закрытие или выключение питания)")
 		explainPreviousEnd()
 	} else if upgradedFrom != "" {
-		logLine("Nimb обновлён с версии " + upgradedFrom + ": установщик закрыл прошлый запуск, это не сбой")
+		from := ""
+		if upgradedFrom != "прежней" { // «прежней»: an old kind of mark that has no version in it (see session.Interpret)
+			from = " с версии " + upgradedFrom
+		}
+		logLine("Nimb обновлён" + from + ": установщик закрыл прошлый запуск, это не сбой")
 	}
 	goSafe("перенос прокси Telegram в службу", a.migrateTelegram)
 	goKeep("проверка обновлений", a.updateLoop)

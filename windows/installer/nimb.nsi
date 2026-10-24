@@ -83,6 +83,12 @@ Section "Nimb"
   ; An older Nimb that is running is stopped first: its files cannot be replaced while they are in use.
   nsExec::Exec 'taskkill /F /IM Nimb.exe'
   Pop $0
+  ; The window was stopped on purpose, not by a crash: the mark of a running program that it left is taken away (the installer that runs
+  ; elevated by the same person has the same %APPDATA%; the version in the mark covers the other cases).
+  ReadEnvStr $R8 APPDATA
+  ${If} $R8 != ""
+    Delete "$R8\Nimb\session.marker"
+  ${EndIf}
   nsExec::Exec 'sc stop NimbHelper'
   Pop $0
   Sleep 1500

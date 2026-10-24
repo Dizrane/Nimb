@@ -2,6 +2,7 @@ package helper
 
 import (
 	"fmt"
+	"github.com/Dizrane/Nimb/windows/internal/logfile"
 	"os"
 	"strings"
 	"sync"
@@ -23,12 +24,9 @@ type tunnelLog struct {
 }
 
 func newTunnelLog(path string) *tunnelLog {
-	l := &tunnelLog{path: path}
-	if info, err := os.Stat(path); err == nil {
-		l.size = info.Size()
-	}
-	l.trim()
-	return l
+	// The log of the last run of the service is put aside: this file holds this run only (its marks are the story of this run).
+	logfile.Rotate(path)
+	return &tunnelLog{path: path}
 }
 
 // Logf writes a line with the time.
@@ -52,24 +50,8 @@ func (l *tunnelLog) Logf(format string, args ...any) {
 // lines of the daemon.
 func (l *tunnelLog) Mark(what string) { l.Logf("NIMB: %s", what) }
 
-// trim keeps the last tunnelLogKeep lines when the file is over the limit. The caller holds the lock (or is the only user).
-func (l *tunnelLog) trim() {
-	if l.size <= tunnelLogLimit {
-		return
-	}
-	raw, err := os.ReadFile(l.path)
-	if err != nil {
-		return
-	}
-	lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
-	if len(lines) > tunnelLogKeep {
-		lines = lines[len(lines)-tunnelLogKeep:]
-	}
-	text := strings.Join(lines, "\n") + "\n"
-	if err := os.WriteFile(l.path, []byte(text), 0o600); err == nil {
-		l.size = int64(len(text))
-	}
-}
+// trim cuts the file to its last tunnelLogKeep lines when it is over the limit. The caller holds the lock.
+func (l *tunnelLog) trim() { l.size = logfile.TrimIfOver(l.path, tunnelLogLimit, tunnelLogKeep) }
 
 // Tail returns the last n lines.
 func (l *tunnelLog) Tail(n int) []string {

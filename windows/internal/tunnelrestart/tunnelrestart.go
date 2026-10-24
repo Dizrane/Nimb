@@ -98,3 +98,22 @@ func ShouldRestore(wanted, hasAccount, isOff bool) bool { return wanted && hasAc
 
 // TriesAgain: a start that failed (no answer from Cloudflare, the network was not up yet) is tried again, up to Attempts times.
 func TriesAgain(failed bool, attempt int) bool { return failed && attempt+1 < Attempts }
+
+// Starting the tunnel right after it was stopped sometimes got no answer from the server (the same start fifteen seconds later worked): the
+// old adapter and the socket of the old one may not be gone yet, and the server may not take a new handshake of the same keys at once. So a
+// start waits until the old tunnel has been closed for SettleAfterClose, and a start that gets no answer is made once more.
+const (
+	SettleAfterClose = 2 * time.Second
+	RetryPause       = 3 * time.Second
+)
+
+// AttemptTimeouts are how long each of the two attempts waits for the handshake.
+var AttemptTimeouts = []time.Duration{10 * time.Second, 16 * time.Second}
+
+// SettleWait is how much longer to wait before starting, when the old tunnel was closed sinceClosed ago (zero: it was never closed).
+func SettleWait(sinceClosed time.Duration, closedBefore bool) time.Duration {
+	if !closedBefore || sinceClosed >= SettleAfterClose {
+		return 0
+	}
+	return SettleAfterClose - max(sinceClosed, 0)
+}

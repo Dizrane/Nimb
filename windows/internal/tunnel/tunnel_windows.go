@@ -38,6 +38,9 @@ type Options struct {
 	DeviceLogf func(format string, args ...any)
 }
 
+// ErrAdapter means that the adapter could not be made (right after a tunnel was closed Windows may still be removing the old one).
+var ErrAdapter = errors.New("не удалось создать сетевой адаптер")
+
 // ErrNoHandshake means the server did not answer in time. The tunnel is already taken down when it is returned.
 var ErrNoHandshake = errors.New("сервер не ответил: рукопожатия нет")
 
@@ -78,7 +81,7 @@ func Up(cfg *awgconf.Config, opt Options) (t *Tunnel, err error) {
 	logf("создаю сетевой адаптер «%s»", opt.Name)
 	nativeTun, err := tun.CreateTUN(opt.Name, cfg.MTU)
 	if err != nil {
-		return nil, fmt.Errorf("не удалось создать сетевой адаптер: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrAdapter, err)
 	}
 	native, ok := nativeTun.(*tun.NativeTun)
 	if !ok {
@@ -105,6 +108,11 @@ func Up(cfg *awgconf.Config, opt Options) (t *Tunnel, err error) {
 
 	if err = dev.IpcSet(uapi); err != nil {
 		return t, fmt.Errorf("демон отклонил настройки: %w", err)
+	}
+	// A handshake that got no answer is sent again after five seconds by default. Right after an earlier tunnel was closed the first one was
+	// sometimes lost (seen in the VM), and five more seconds were five seconds of a person looking at «включаю»: try again after two.
+	if !strings.Contains(uapi, "rekey_timeout=") {
+		dev.IpcSet("rekey_timeout=2\n")
 	}
 	if err = dev.Up(); err != nil {
 		return t, fmt.Errorf("не удалось запустить туннель: %w", err)
@@ -264,13 +272,14 @@ func (t *Tunnel) configureInterface(cfg *awgconf.Config, dns []netip.Addr) error
 		// The routes first, the address after. Setting the routes replaces every route of the adapter, and that includes the
 		// local route that the system makes for the address: without it the system drops every answer as "not locally
 		// destined" and nothing is received (found in the Windows 11 VM, 2026-10-21).
-		if err := t.luid.SetRoutesForFamily(family, routes); err != nil {
+		if err := retryNotFound(func() error { return t.luid.SetRoutesForFamily(family, routes) }); err != nil {
 			return fmt.Errorf("не удалось добавить маршруты: %w", err)
 		}
-		if err := t.luid.SetIPAddressesForFamily(family, addrs); err != nil {
+		if err := retryNotFound(func() error { return t.luid.SetIPAddressesForFamily(family, addrs) }); err != nil {
 			return fmt.Errorf("не удалось назначить адрес: %w", err)
 		}
-		ipif, err := t.luid.IPInterface(family)
+		var ipif *winipcfg.MibIPInterfaceRow
+		err := retryNotFound(func() (e error) { ipif, e = t.luid.IPInterface(family); return e })
 		if err != nil {
 			return fmt.Errorf("не удалось настроить интерфейс: %w", err)
 		}
@@ -282,7 +291,7 @@ func (t *Tunnel) configureInterface(cfg *awgconf.Config, dns []netip.Addr) error
 		// The routes of the tunnel must win over the real network.
 		ipif.UseAutomaticMetric = false
 		ipif.Metric = 0
-		if err := ipif.Set(); err != nil {
+		if err := retryNotFound(ipif.Set); err != nil {
 			return fmt.Errorf("не удалось настроить интерфейс: %w", err)
 		}
 		var servers []netip.Addr
@@ -291,7 +300,7 @@ func (t *Tunnel) configureInterface(cfg *awgconf.Config, dns []netip.Addr) error
 				servers = append(servers, d)
 			}
 		}
-		if err := t.luid.SetDNS(family, servers, nil); err != nil {
+		if err := retryNotFound(func() error { return t.luid.SetDNS(family, servers, nil) }); err != nil {
 			return fmt.Errorf("не удалось задать DNS: %w", err)
 		}
 	}
@@ -395,4 +404,18 @@ func uplink(family winipcfg.AddressFamily, except winipcfg.LUID) (index uint32, 
 		}
 	}
 	return index, found
+}
+
+// retryNotFound runs f again for a few seconds while it says "element not found". The adapter that was made a moment ago is not always
+// known to the part of Windows that sets addresses and routes yet, and the first call after a quick off and on of the tunnel fell on that
+// (seen in the VM: «не удалось добавить маршруты: Element not found»).
+func retryNotFound(f func() error) error {
+	var err error
+	for i := 0; i < 20; i++ {
+		if err = f(); !errors.Is(err, windows.ERROR_NOT_FOUND) {
+			return err
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	return err
 }

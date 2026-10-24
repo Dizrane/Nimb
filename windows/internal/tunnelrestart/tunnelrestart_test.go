@@ -101,3 +101,24 @@ func TestRestoreRules(t *testing.T) {
 }
 
 func itoa(t time.Time) string { return string(Add("", t)[:len(Add("", t))-1]) }
+
+func TestAStartRightAfterAStopWaitsForTheOldTunnelToSettle(t *testing.T) {
+	if SettleWait(time.Hour, false) != 0 || SettleWait(0, false) != 0 {
+		t.Error("a tunnel that was never closed: no waiting")
+	}
+	if got := SettleWait(time.Second, true); got != time.Second {
+		t.Errorf("one second after: %v", got)
+	}
+	if got := SettleWait(0, true); got != SettleAfterClose {
+		t.Errorf("at once: %v", got)
+	}
+	if SettleWait(SettleAfterClose, true) != 0 || SettleWait(time.Minute, true) != 0 {
+		t.Error("long enough after: no waiting")
+	}
+	if got := SettleWait(-time.Second, true); got != SettleAfterClose {
+		t.Errorf("a clock that went back: %v", got)
+	}
+	if len(AttemptTimeouts) != 2 || AttemptTimeouts[0] >= AttemptTimeouts[1] {
+		t.Errorf("%v", AttemptTimeouts)
+	}
+}

@@ -69,6 +69,10 @@ type Response struct {
 	TunnelLog []string `json:"tunnelLog,omitempty"`
 	// TunnelMarks are the lines of that log that the service itself wrote (up, daemon-exited, restarting, restarted, ...), from further back.
 	TunnelMarks []string `json:"tunnelMarks,omitempty"`
+	// ServicePrevious and TunnelPrevious are the last lines of the logs of the service and of the program of the tunnel from the run of the
+	// service before this one (the files above are of this run only).
+	ServicePrevious []string `json:"servicePrevious,omitempty"`
+	TunnelPrevious  []string `json:"tunnelPrevious,omitempty"`
 }
 
 // TelegramStatus is the state of the proxy of Telegram: whether it listens, where, with what key (the window makes the link from them) and

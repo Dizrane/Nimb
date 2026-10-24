@@ -182,7 +182,11 @@ func (a *App) install(rel update.Release) {
 	verb, _ := syscall.UTF16PtrFromString("runas")
 	file, _ := syscall.UTF16PtrFromString(path)
 	args, _ := syscall.UTF16PtrFromString("/S /relaunch")
+	// The installer stops this program: that is a controlled end, so the mark of a running program goes first (and comes back if the
+	// installer does not take over).
+	endSession()
 	if err := windows.ShellExecute(0, verb, file, args, nil, windows.SW_SHOWNORMAL); err != nil {
+		restoreSession()
 		os.RemoveAll(dir)
 		if err == windows.ERROR_CANCELLED {
 			fail("Установка отменена: Windows не получила разрешения.")
@@ -194,6 +198,7 @@ func (a *App) install(rel update.Release) {
 	// The installer stops this program in a moment; if it does not (it failed), the page says so after a minute.
 	go func() {
 		time.Sleep(2 * time.Minute)
+		restoreSession()
 		a.upd.mu.Lock()
 		a.upd.installing = ""
 		a.upd.mu.Unlock()

@@ -20,6 +20,7 @@ import (
 
 	"github.com/wailsapp/wails/v2/pkg/logger"
 
+	"github.com/Dizrane/Nimb/windows/internal/logfile"
 	"github.com/Dizrane/Nimb/windows/internal/tunnelrestart"
 	"github.com/Dizrane/Nimb/windows/internal/winevents"
 )
@@ -41,10 +42,18 @@ func alivePath() string         { return filepath.Join(dataDir(), "alive.stamp")
 // out of memory): the message and the stacks of all goroutines. It is read at the start and put into the log and into the report.
 var previousCrash []string
 
+// previousLastLine is the last line of the log of the last run.
+var previousLastLine string
+
 // setupDiagnostics is the first thing the program does. The runtime writes a panic that nobody caught, or a fatal error, to the standard
 // error; a program of the window has none, and the message was lost. Since Go 1.23 it can be told to write it to a file too.
 func setupDiagnostics() {
 	os.MkdirAll(dataDir(), 0o700)
+	// The log of the last run is put aside, so that this file holds this run only; its last line tells how the last run ended (an update
+	// from a version that left an old kind of mark is known by it, see session.Interpret).
+	logMu.Lock()
+	previousLastLine = logfile.Rotate(windowLogPath())
+	logMu.Unlock()
 	if raw, err := os.ReadFile(crashPath()); err == nil && len(strings.TrimSpace(string(raw))) > 0 {
 		os.Rename(crashPath(), crashPreviousPath())
 		lines := strings.Split(strings.TrimRight(string(raw), "\r\n"), "\n")

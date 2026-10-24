@@ -18,6 +18,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/sys/windows/svc"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/Dizrane/Nimb/windows/internal/helper"
 	"github.com/Dizrane/Nimb/windows/internal/ipc"
+	"github.com/Dizrane/Nimb/windows/internal/logfile"
 )
 
 const serviceName = "NimbHelper"
@@ -112,22 +114,36 @@ func serve(ctx context.Context, logf func(string, ...any)) error {
 	return err
 }
 
-// openLog writes to a file in the data folder; the file does not grow past one megabyte (it starts again). It never gets keys.
+// openLog writes to a file in the data folder. The log of the last run of the service is put aside as the previous one, so that this file holds
+// this run only; a run that writes a lot has it cut to its last lines when it passes a megabyte. It never gets keys.
 func openLog() (func(string, ...any), func()) {
 	// On a first install the folder does not exist yet (the helper makes it, and closes it to the users, a moment later); without this the
 	// log could not be opened and the service would write none until its next start.
 	os.MkdirAll(helper.DataDir(), 0o700)
 	path := filepath.Join(helper.DataDir(), "service.log")
-	if st, err := os.Stat(path); err == nil && st.Size() > 1<<20 {
-		os.Remove(path)
-	}
+	logfile.Rotate(path)
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return func(string, ...any) {}, func() {}
 	}
+	var mu sync.Mutex
+	writes := 0
 	return func(format string, args ...any) {
-		fmt.Fprintf(f, "%s  %s\n", time.Now().Format("2006-01-02 15:04:05"), fmt.Sprintf(format, args...))
-	}, func() { f.Close() }
+			mu.Lock()
+			defer mu.Unlock()
+			fmt.Fprintf(f, "%s  %s\n", time.Now().Format("2006-01-02 15:04:05"), fmt.Sprintf(format, args...))
+			if writes++; writes%200 == 0 {
+				f.Close() // Windows cannot rewrite a file that is open in this way
+				logfile.TrimIfOver(path, 1<<20, 2000)
+				f, _ = os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+			}
+		}, func() {
+			mu.Lock()
+			defer mu.Unlock()
+			if f != nil {
+				f.Close()
+			}
+		}
 }
 
 // cleanup is called by the uninstaller after the service is removed.
