@@ -1,5 +1,5 @@
 #!/bin/sh
-# nimb-tunnel 12: brings the Nimb WARP tunnel up and down. It runs as root, from /usr/local/libexec/nimb, which only root
+# nimb-tunnel 14: brings the Nimb WARP tunnel up and down. It runs as root, from /usr/local/libexec/nimb, which only root
 # can write to. The settings are read from warp.conf next to it, a file of plain key=value lines that Nimb wrote after
 # checking every value; nothing in it is ever executed.
 #
@@ -7,8 +7,8 @@
 #                       the network (the route to the server) and, if the daemon ends by itself, starts it again (up to three
 #                       times in ten minutes; only when that fails the routes stay out and a note tells Nimb)
 #                       When YouTube does not open through the server of the settings (the exit of some servers is filtered), it tries a few
-#                       other WARP servers one after another and keeps the first that opens YouTube and Discord (not oftener than once in
-#                       six hours); the keys are the same for all of them
+#                       other WARP servers one after another and keeps the first that opens YouTube and Discord (a search that found nothing
+#                       is not repeated for ten minutes); it happens at a start only, a tunnel that works is never moved to another server
 #   nimb-tunnel down    remove the routes and stop it
 #   nimb-tunnel status  print "up <interface> <pid>" or "down"
 #   nimb-tunnel unregister  delete this Mac's anonymous WARP account at Cloudflare (best effort)
@@ -33,7 +33,7 @@ fi
 
 # Other WARP servers to try when YouTube does not open at the one in the settings: they are reached from different cities.
 SERVERS="162.159.192.1 188.114.97.1 188.114.99.1"
-SEARCH_PAUSE=21600          # seconds between two searches
+SEARCH_PAUSE=600            # seconds to wait after a search that found nothing
 PROBE_WEB=https://www.cloudflare.com/cdn-cgi/trace
 PROBE_VIDEO=https://www.youtube.com/generate_204
 PROBE_CHAT=https://discord.com/
@@ -188,16 +188,38 @@ saved_server() {
 
 # The site answers through the tunnel (any answer of the server: the name and the handshake of TLS went through).
 probe_ok() {
-    code=$(curl -s -o /dev/null -m 6 --connect-timeout 4 -w '%{http_code}' "$1" 2>/dev/null)
+    code=$(curl -sI -o /dev/null -m 5 --connect-timeout 3 -w '%{http_code}' "$1" 2>/dev/null)
     case "$code" in ''|000) return 1 ;; esac
     return 0
 }
 
 good_now() { probe_ok "$PROBE_VIDEO" && probe_ok "$PROBE_CHAT"; }
 
-# YouTube does not open at the server that is up, though the internet works: other servers are tried, once in six hours at the most. The
-# exit of a server can be in a city whose network filters YouTube; another server of Cloudflare leaves from another city. It all happens
-# before the watcher is started, so there is never more than one of them.
+# Tries the servers one after another (the one in the settings among them, unless it is the one that is up) and keeps the first at which
+# YouTube and Discord both open: it is written down for the next starts. Returns 1 when none does; the tunnel is then down.
+try_servers() { # try_servers <the server that is up now>
+    saved=$(saved_server)
+    for cand in $SERVERS conf; do
+        if [ "$cand" = conf ]; then
+            [ -z "$saved" ] && continue
+            tryhost=""
+        else
+            [ "$cand" = "$1" ] && continue
+            tryhost=$cand
+        fi
+        bring_up "$tryhost" || continue
+        if good_now; then
+            if [ -n "$tryhost" ]; then printf '%s\n' "$tryhost" > "$DIR/server"; else rm -f "$DIR/server"; fi
+            log_mark "server ${tryhost:-of the settings} opens YouTube and Discord"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# YouTube or Discord does not open at the server that is up, though the internet works: other servers are tried. A search that found
+# nothing is not repeated for ten minutes (YouTube may be down everywhere, and every start would wait for it). The exit of a server can be in a city whose network filters YouTube; another server of Cloudflare leaves from another city. It all
+# happens before the watcher is started, so there is never more than one of them.
 search_server() {
     probe_ok "$PROBE_WEB" || return 0
     good_now && return 0
@@ -205,26 +227,11 @@ search_server() {
     case "$last" in ''|*[!0-9]*) last=0 ;; esac
     now=$(date +%s)
     [ $((now - last)) -lt "$SEARCH_PAUSE" ] && return 0
-    saved=$(saved_server)
     current=$(state_get server)
-    log_mark "server $current does not open YouTube: trying others"
-    for cand in $SERVERS conf; do
-        if [ "$cand" = conf ]; then
-            [ -z "$saved" ] && continue
-            tryhost=""
-        else
-            [ "$cand" = "$current" ] && continue
-            tryhost=$cand
-        fi
-        bring_up "$tryhost" || continue
-        if good_now; then
-            if [ -n "$tryhost" ]; then printf '%s\n' "$tryhost" > "$DIR/server"; else rm -f "$DIR/server"; fi
-            log_mark "server ${tryhost:-of the settings} opens YouTube"
-            printf '%s\n' "$(date +%s)" > "$DIR/search.at"
-            return 0
-        fi
-    done
-    log_mark "no server opens YouTube: back to ${saved:-the settings}"
+    log_mark "server $current does not open YouTube or Discord: trying others"
+    try_servers "$current" && { rm -f "$DIR/search.at"; return 0; }
+    saved=$(saved_server)
+    log_mark "no server opens YouTube and Discord: back to ${saved:-the settings}"
     printf '%s\n' "$(date +%s)" > "$DIR/search.at"
     if [ -n "$saved" ] && bring_up "$saved"; then return 0; fi
     bring_up ""

@@ -139,11 +139,11 @@ echo 198.51.100.2 > "$PROBE/video.good"
 helper_r up >/dev/null 2>&1
 check "YouTube opens at the second server tried: the tunnel is up at it" '[ "$(state_server)" = 198.51.100.2 ]'
 check "after a search there is one watcher, and it is the one of the state" '[ "$(pgrep -f "$HELPER" | wc -l | tr -d " ")" = 1 ] && [ "$(pgrep -f "$HELPER")" = "$(sed -n "s/^watcher=//p" "$WORK/run/r.state")" ]'
-check "the server that opened YouTube is kept, and the search is written down" '[ "$(cat "$WORK/server")" = 198.51.100.2 ] && [ -s "$WORK/search.at" ] && grep -q "opens YouTube" "$WORK/run/r.log"'
+check "the server that opened YouTube is kept, and the search leaves no pause behind" '[ "$(cat "$WORK/server")" = 198.51.100.2 ] && [ ! -f "$WORK/search.at" ] && grep -q "opens YouTube" "$WORK/run/r.log"'
 helper_r down; sleep 1
-at_before=$(cat "$WORK/search.at"); n_before=$(searches)
+n_before=$(searches)
 helper_r up >/dev/null 2>&1
-check "the next start uses the kept server and does not search again" '[ "$(state_server)" = 198.51.100.2 ] && [ "$(cat "$WORK/search.at")" = "$at_before" ] && [ "$(searches)" = "$n_before" ]'
+check "the next start uses the kept server and does not search again" '[ "$(state_server)" = 198.51.100.2 ] && [ "$(searches)" = "$n_before" ]'
 helper_r down; sleep 1
 echo 203.0.113.7 > "$PROBE/video.good"; rm -f "$WORK/search.at"
 helper_r up >/dev/null 2>&1
