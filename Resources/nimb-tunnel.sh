@@ -1,11 +1,13 @@
 #!/bin/sh
-# nimb-tunnel 14: brings the Nimb WARP tunnel up and down. It runs as root, from /usr/local/libexec/nimb, which only root
+# nimb-tunnel 15: brings the Nimb WARP tunnel up and down. It runs as root, from /usr/local/libexec/nimb, which only root
 # can write to. The settings are read from warp.conf next to it, a file of plain key=value lines that Nimb wrote after
 # checking every value; nothing in it is ever executed.
 #
 #   nimb-tunnel up      start amneziawg-go, configure it, add the routes, wait for the handshake; a small watcher then follows
 #                       the network (the route to the server) and, if the daemon ends by itself, starts it again (up to three
 #                       times in ten minutes; only when that fails the routes stay out and a note tells Nimb)
+#                       When the server of the settings does not answer the handshake at all (the network may close that address), the other
+#                       servers are tried before the start fails (and before Nimb thinks of new keys).
 #                       When YouTube does not open through the server of the settings (the exit of some servers is filtered), it tries a few
 #                       other WARP servers one after another and keeps the first that opens YouTube and Discord (a search that found nothing
 #                       is not repeated for ten minutes); it happens at a start only, a tunnel that works is never moved to another server
@@ -34,10 +36,11 @@ fi
 # Other WARP servers to try when YouTube does not open at the one in the settings: they are reached from different cities.
 SERVERS="162.159.192.1 188.114.97.1 188.114.99.1"
 SEARCH_PAUSE=600            # seconds to wait after a search that found nothing
+HANDSHAKE_WAIT=16           # seconds to wait for the handshake with a server
 PROBE_WEB=https://www.cloudflare.com/cdn-cgi/trace
 PROBE_VIDEO=https://www.youtube.com/generate_204
 PROBE_CHAT=https://discord.com/
-if [ -n "${NIMB_TUNNEL_TEST:-}" ]; then SERVERS="${NIMB_TUNNEL_SERVERS:-$SERVERS}"; fi
+if [ -n "${NIMB_TUNNEL_TEST:-}" ]; then SERVERS="${NIMB_TUNNEL_SERVERS:-$SERVERS}"; HANDSHAKE_WAIT="${NIMB_TUNNEL_HANDSHAKE_WAIT:-$HANDSHAKE_WAIT}"; fi
 
 say() { printf '%s\n' "$*"; }
 fail() { printf '%s\n' "$*" >&2; exit 1; }
@@ -268,7 +271,25 @@ cmd_up() {
     if [ -n "$saved" ]; then
         if bring_up "$saved"; then started=yes; else log_mark "server $saved did not answer: the one of the settings is tried"; fi
     fi
-    if [ $started = no ]; then bring_up "" || fail "$UPERR"; fi
+    if [ $started = no ]; then
+        if bring_up ""; then
+            started=yes
+        elif [ -z "${NIMB_TUNNEL_RESTART:-}" ]; then
+            # No handshake at all: the network may close this address (or the keys are bad, and then no server answers). The other servers
+            # are tried before the start fails; a start that fails counts towards new keys, and keys that are fine must not be thrown away.
+            first_error=$UPERR
+            case "$UPERR" in
+                *рукопожатия*)
+                    for cand in $SERVERS; do
+                        [ "$cand" = "$saved" ] && continue
+                        if bring_up "$cand"; then started=yes; printf '%s\n' "$cand" > "$DIR/server"; log_mark "server $cand answers, the one of the settings does not"; break; fi
+                    done ;;
+            esac
+            [ $started = yes ] || fail "$first_error"
+        else
+            fail "$UPERR"
+        fi
+    fi
     # A start by the watcher (the daemon ended by itself) is quick and does not search.
     if [ -z "${NIMB_TUNNEL_RESTART:-}" ]; then search_server || fail "$UPERR"; fi
     start_watcher
@@ -392,13 +413,13 @@ allowed_ip=$cidr"; done
 
     # 5. Wait for the handshake; without it a full tunnel would swallow all traffic, so take everything down again.
     i=0; shake=0
-    while [ $i -lt 16 ]; do
+    while [ $i -lt "$HANDSHAKE_WAIT" ]; do
         shake=$(printf 'get=1\n\n' | uapi "$sock" | tr -d '\r' | sed -n 's/^last_handshake_time_sec=//p' | head -1)
         [ -n "$shake" ] && [ "$shake" != 0 ] && break
         shake=0
         sleep 1; i=$((i + 1))
     done
-    if [ "$shake" = 0 ]; then take_down; UPERR="сервер не ответил: нет рукопожатия за 16 секунд"; return 1; fi
+    if [ "$shake" = 0 ]; then take_down; UPERR="сервер не ответил: нет рукопожатия за $HANDSHAKE_WAIT секунд"; return 1; fi
     return 0
 }
 

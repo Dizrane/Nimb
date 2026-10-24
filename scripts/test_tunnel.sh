@@ -17,8 +17,14 @@ chmod +x "$WORK/bin/route"
 printf '#!/bin/sh\nexit 0\n' > "$WORK/bin/ifconfig"
 chmod +x "$WORK/bin/ifconfig"
 # The daemon answers `get=1` with the lines of the file named by NIMB_NC_REPLY (nothing if there is none).
+# With NIMB_PROBE_DIR/shake.bad listing servers, those servers answer the configuration but never the handshake.
 cat > "$WORK/bin/nc" <<'STUB'
 #!/bin/sh
+payload=$(cat)
+if [ -n "${NIMB_PROBE_DIR:-}" ] && [ -f "$NIMB_PROBE_DIR/shake.bad" ]; then
+    server=$(sed -n 's/^server=//p' "$NIMB_TUNNEL_RUN.state" 2>/dev/null | head -1)
+    case "$payload" in *get=1*) grep -qx "$server" "$NIMB_PROBE_DIR/shake.bad" && { printf 'errno=0\n'; exit 0; } ;; esac
+fi
 [ -n "${NIMB_NC_REPLY:-}" ] && cat "$NIMB_NC_REPLY"
 exit 0
 STUB
@@ -162,6 +168,22 @@ helper_r up >/dev/null 2>&1
 check "the internet is gone: it is not a matter of the server, no search" '[ "$(searches)" = "$n_before" ] && [ ! -f "$WORK/search.at" ]'
 helper_r down; sleep 1
 rm -f "$PROBE/web.down" "$WORK/server" "$WORK/search.at"
+# The server of the settings does not answer the handshake (the network may close it): the other servers are tried before the start fails.
+export NIMB_TUNNEL_HANDSHAKE_WAIT=2
+rm -f "$WORK/server" "$WORK/search.at"
+printf '203.0.113.7\n' > "$PROBE/shake.bad"
+printf '198.51.100.1\n198.51.100.2\n' > "$PROBE/video.good"
+helper_r up >/dev/null 2>&1
+check "no handshake at the server of the settings: the tunnel is up at another server, and it is kept" '[ "$(state_server)" = 198.51.100.1 ] && [ "$(cat "$WORK/server")" = 198.51.100.1 ]'
+helper_r down; sleep 1
+# No server answers: the start fails with the usual words (they count towards new keys), nothing is left running or kept.
+rm -f "$WORK/server"
+printf '203.0.113.7\n198.51.100.1\n198.51.100.2\n' > "$PROBE/shake.bad"
+message=$(helper_r up 2>&1 >/dev/null); code=$?
+check "no server answers: the start fails with the words about the handshake" '[ "$code" != 0 ] && echo "$message" | grep -q "рукопожатия"'
+check "and nothing is left: no state, no server kept" '[ ! -f "$WORK/run/r.state" ] && [ ! -f "$WORK/server" ]'
+rm -f "$PROBE/shake.bad"
+unset NIMB_TUNNEL_HANDSHAKE_WAIT
 check "a search never makes the daemon look as if it ended by itself" '[ "$(grep -c "daemon-exited" "$WORK/run/r.log" 2>/dev/null || true)" = "$exited_before" ]'
 unset NIMB_PROBE_DIR NIMB_TUNNEL_SERVERS
 

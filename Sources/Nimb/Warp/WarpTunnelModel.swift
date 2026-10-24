@@ -286,7 +286,7 @@ final class WarpTunnelModel: ObservableObject {
 
     private var loggedServer: String?
 
-    /// The helper may have found another WARP server that opens YouTube (see `nimb-tunnel 14`): the diary says which one the tunnel is at.
+    /// The helper may have found another WARP server that opens YouTube (see `nimb-tunnel 15`): the diary says which one the tunnel is at.
     private func noticeServer() {
         guard isOn, let text = try? String(contentsOfFile: WarpPaths.stateFile, encoding: .utf8),
               let line = text.split(separator: "\n").first(where: { $0.hasPrefix("server=") }) else { return }
