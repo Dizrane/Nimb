@@ -22,6 +22,13 @@ func (h *Helper) diag() []string {
 	lines := []string{fmt.Sprintf("Служба Nimb %s, работает с %s", version.Version, h.started.Format("2006-01-02 15:04:05"))}
 
 	st := h.status()
+	if addr := h.tunnelServer(); addr != "" {
+		how := "из аккаунта"
+		if h.server != "" {
+			how = "найден поиском: на нём открываются YouTube и Discord"
+		}
+		lines = append(lines, "Сервер туннеля: "+addr+" ("+how+")")
+	}
 	if st.Restarting {
 		lines = append(lines, "Туннель: программа остановилась сама, служба запускает её снова")
 	} else if st.Up {

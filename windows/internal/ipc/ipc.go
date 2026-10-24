@@ -69,6 +69,8 @@ type Response struct {
 	TunnelLog []string `json:"tunnelLog,omitempty"`
 	// TunnelMarks are the lines of that log that the service itself wrote (up, daemon-exited, restarting, restarted, ...), from further back.
 	TunnelMarks []string `json:"tunnelMarks,omitempty"`
+	// TunnelServer is the address of the WARP server that the tunnel is at, for the city it leaves from (an address of Cloudflare).
+	TunnelServer string `json:"tunnelServer,omitempty"`
 	// ServicePrevious and TunnelPrevious are the last lines of the logs of the service and of the program of the tunnel from the run of the
 	// service before this one (the files above are of this run only).
 	ServicePrevious []string `json:"servicePrevious,omitempty"`
@@ -191,7 +193,7 @@ func write(conn net.Conn, resp Response) {
 // server for up to 16 seconds), so the wait is generous.
 func Call(conn net.Conn, req Request) (Response, error) {
 	defer conn.Close()
-	conn.SetDeadline(time.Now().Add(60 * time.Second))
+	conn.SetDeadline(time.Now().Add(120 * time.Second)) // a start of the tunnel that looks through the servers can take a minute
 	b, _ := json.Marshal(req)
 	if _, err := conn.Write(append(b, '\n')); err != nil {
 		return Response{}, fmt.Errorf("служба не отвечает: %w", err)

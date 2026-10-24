@@ -29,6 +29,7 @@ import (
 	"github.com/Dizrane/Nimb/windows/internal/netfacts"
 	"github.com/Dizrane/Nimb/windows/internal/probe"
 	"github.com/Dizrane/Nimb/windows/internal/report"
+	"github.com/Dizrane/Nimb/windows/internal/serverpick"
 	"github.com/Dizrane/Nimb/windows/internal/tunneldrop"
 	"github.com/Dizrane/Nimb/windows/internal/winevents"
 )
@@ -256,6 +257,12 @@ func (a *App) ReportPrepare() ReportPrep {
 	env.Public = probe.Addresses(probed)
 	for _, p := range dnsx.Providers {
 		env.Public = append(env.Public, p.Addresses...)
+	}
+	// The server of WARP that the tunnel is at (and the others that are tried) are addresses of Cloudflare; the city they leave from says
+	// much about a tunnel where YouTube does not open.
+	env.Public = append(env.Public, serverpick.Servers...)
+	if diag != nil && diag.TunnelServer != "" {
+		env.Public = append(env.Public, diag.TunnelServer)
 	}
 	facts := report.Clean(strings.Join(out, "\n\n"), env)
 	a.mu.Lock()
