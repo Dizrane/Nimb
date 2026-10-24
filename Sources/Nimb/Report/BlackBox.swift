@@ -52,11 +52,12 @@ final class BlackBox {
             let tgAgrees = AutoReportRules.telegramAgrees(running: tgRunning, listening: tgListening, stats: tgStats)
             let dnsAgrees = AutoReportRules.dnsAgrees(active: active, serviceServers: system.serviceServers)
             let viaTunnel = system.interface.hasPrefix("utun")
+            let handshake = tunnelOn ? (try? String(contentsOfFile: WarpPaths.daemonLog, encoding: .utf8)).flatMap { TunnelHandshake.age(inLog: $0, now: Date()) } : nil
             let facts = BlackBoxLine.Facts(
                 dns: active?.name ?? "выкл", dnsAgrees: dnsAgrees,
                 telegram: tgRunning ? "вкл:\(tgPort) соединений=\(tgStats.totalConnections) ошибок=\(tgStats.failures)" : "выкл", telegramAgrees: tgAgrees,
                 tunnel: tunnelWords, tunnelAgrees: AutoReportRules.tunnelAgrees(on: tunnelOn, routes: system.routes, viaTunnel: viaTunnel),
-                routes: system.routes, interface: system.interface)
+                routes: system.routes, interface: system.interface, handshakeSeconds: handshake)
             let line = BlackBoxLine.line(now: Date(), uptime: uptime, facts: facts, memoryMegabytes: BlackBoxLine.residentMegabytes())
             await MainActor.run {
                 self.append(line)
@@ -97,6 +98,8 @@ enum BlackBoxLine {
         var tunnelAgrees: Bool
         var routes: Int
         var interface: String
+        /// Seconds since the server of the tunnel last answered (only while it is on, and only when the log of the daemon says).
+        var handshakeSeconds: Int?
     }
 
     static func phaseWords(_ phase: WarpTunnelModel.Phase) -> String {
@@ -125,7 +128,7 @@ enum BlackBoxLine {
             "работает=\(hours)ч\(String(format: "%02d", minutes))м",
             "dns=\(facts.dns) совпало=\(ok(facts.dnsAgrees))",
             "telegram=\(facts.telegram) совпало=\(ok(facts.telegramAgrees))",
-            "туннель=\(facts.tunnel) совпало=\(ok(facts.tunnelAgrees)) маршрутов=\(facts.routes)",
+            "туннель=\(facts.tunnel) совпало=\(ok(facts.tunnelAgrees)) маршрутов=\(facts.routes)" + (facts.handshakeSeconds.map { " рукопожатие=\($0)с" } ?? ""),
             "трафик_через=\(facts.interface)",
             "память=\(memoryMegabytes)МБ",
         ].joined(separator: " | ")

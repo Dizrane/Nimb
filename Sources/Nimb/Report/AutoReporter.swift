@@ -43,6 +43,7 @@ enum AutoTrigger: Equatable {
     case mismatch(AutoService)
     case error(AutoService)
     case updateCheck
+    case tunnelSilent
     case dailyDigest
 
     /// The same cause has the same key: the key is what is not repeated.
@@ -54,6 +55,7 @@ enum AutoTrigger: Equatable {
         case .mismatch(let service): "mismatch-\(service.rawValue)"
         case .error(let service): "error-\(service.rawValue)"
         case .updateCheck: "update-check"
+        case .tunnelSilent: "tunnel-silent"
         case .dailyDigest: "daily"
         }
     }
@@ -67,6 +69,7 @@ enum AutoTrigger: Equatable {
         case .mismatch(let service): "«\(service.name)» работает не так, как должен, больше 10 минут"
         case .error(let service): "ошибка при работе с «\(service.name)»"
         case .updateCheck: "проверка обновлений не удаётся несколько раз подряд"
+        case .tunnelSilent: "туннель включён, но сервер не отвечает больше 10 минут"
         case .dailyDigest: "ежедневная сводка"
         }
     }
@@ -94,6 +97,56 @@ enum AutoReportPolicy {
     static func pruned(_ history: [Sent], now: Date) -> [Sent] { history.filter { now.timeIntervalSince($0.at) < 24 * 3600 } }
 }
 
+/// How long ago the server of the tunnel last answered: the daemon writes «Received handshake response» into its log with the time, a
+/// healthy tunnel does it every two minutes. A tunnel that is on and silent for longer carries the traffic into nothing.
+enum TunnelHandshake {
+    static let staleAfter: TimeInterval = 300
+
+    private static let pattern = try? NSRegularExpression(pattern: #"(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}) .*Received handshake response"#)
+    private static let stamp: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy/MM/dd HH:mm:ss"
+        return f
+    }()
+
+    /// Seconds since the last answer in the log; nil when the log has none (it was cut, or the tunnel has just begun).
+    static func age(inLog text: String, now: Date) -> Int? {
+        guard let pattern else { return nil }
+        for line in text.split(separator: "\n", omittingEmptySubsequences: true).reversed() where line.contains("Received handshake response") {
+            let line = String(line)
+            guard let match = pattern.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)), let range = Range(match.range(at: 1), in: line),
+                  let when = stamp.date(from: String(line[range])) else { continue }
+            return max(0, Int(now.timeIntervalSince(when)))
+        }
+        return nil
+    }
+}
+
+/// A report that could not go (the net was down, which is just when it is wanted) waits and goes at the first chance, for a day at most.
+enum PendingReports {
+    struct Item: Codable, Equatable {
+        let id: String
+        let trigger: String
+        let install: String
+        let text: String
+        let at: Date
+    }
+
+    static let keepFor: TimeInterval = 24 * 3600
+    static let keepCount = 3
+
+    /// The ones that are still worth sending: not older than a day, the latest few.
+    static func fresh(_ items: [Item], now: Date) -> [Item] {
+        Array(items.filter { now.timeIntervalSince($0.at) < keepFor }.suffix(keepCount))
+    }
+
+    static func decode(_ data: Data?) -> [Item] {
+        guard let data, let items = try? JSONDecoder().decode([Item].self, from: data) else { return [] }
+        return items
+    }
+}
+
 /// The report of the day: once in 24 hours, with the small things that are not worth a report of their own. It does not count in the limits
 /// above (it is one a day by its own clock), and it carries the numbers of the black box and the causes that were told that day.
 enum DailyDigest {
@@ -114,9 +167,14 @@ enum DailyDigest {
         var out = ["— Сутки в цифрах —", "Записей чёрного ящика: \(lines.count) из \(BlackBoxLine.keepLines)"]
         // The box keeps the last lines, not the last day: the period says what the numbers are about, and the lines say how long it worked.
         if let first = lines.first?.prefix(19), let last = lines.last?.prefix(19) {
-            out.append("Период записей: с \(first) по \(last); работы по записям около \(lines.count * Int(BlackBox.interval) / 60) мин")
+            out.append("Период записей: с \(first) по \(last); работы по записям около \(lines.count * 5) мин")
         }
         for name in ["dns", "telegram", "туннель"] { out.append("\(name): не совпало в \(disagreements[name] ?? 0) записях") }
+        let silent = lines.filter { line in
+            guard let range = line.range(of: "рукопожатие="), let seconds = Int(line[range.upperBound...].prefix { $0.isNumber }) else { return false }
+            return Double(seconds) > TunnelHandshake.staleAfter
+        }.count
+        if silent > 0 { out.append("туннель включён, но сервер не отвечал: в \(silent) записях") }
         if let top = memory.max(), let now = memory.last { out.append("Память: до \(top) МБ, в последней записи \(now) МБ") }
         out.append("Отчётов по сбоям за сутки: \(sentKeys.count)" + (sentKeys.isEmpty ? "" : " (\(sentKeys.joined(separator: ", ")))"))
         return out.joined(separator: "\n")
@@ -150,6 +208,10 @@ final class AutoReporter: ObservableObject {
     private static let countKey = "helpTestingCount"
     private static let lastKey = "helpTestingLast"
     private static let digestKey = "helpTestingDigest"
+    private static let pendingURL: URL = {
+        let base = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first ?? URL(fileURLWithPath: NSHomeDirectory())
+        return base.appendingPathComponent("Logs/Nimb/pending-reports.json")
+    }()
 
     @Published private(set) var enabled: Bool
     @Published private(set) var sentCount: Int
@@ -197,6 +259,7 @@ final class AutoReporter: ObservableObject {
             AppLog.shared.add("тестирование", "включено: отчёты при сбоях отправляются сами, сводка раз в сутки")
         } else {
             for key in [Self.installKey, Self.historyKey, Self.countKey, Self.lastKey, Self.digestKey] { defaults.removeObject(forKey: key) }
+            try? FileManager.default.removeItem(at: Self.pendingURL)
             sentCount = 0
             lastSent = nil
             AppLog.shared.add("тестирование", "выключено: номер установки стёрт")
@@ -217,7 +280,42 @@ final class AutoReporter: ObservableObject {
         if tracker.observe("dns", agrees: facts.dnsAgrees) { notify(.mismatch(.dns)) }
         if tracker.observe("telegram", agrees: facts.telegramAgrees) { notify(.mismatch(.telegram)) }
         if tracker.observe("tunnel", agrees: facts.tunnelAgrees) { notify(.mismatch(.tunnel)) }
+        let silent = facts.handshakeSeconds.map { Double($0) > TunnelHandshake.staleAfter } ?? false
+        if tracker.observe("handshake", agrees: !silent) { notify(.tunnelSilent) }
         sendDigestIfDue()
+        retryPending()
+    }
+
+    private var retrying = false
+
+    /// Reports that did not go are tried again at each look of the black box, oldest first, until one fails (the net is still down).
+    private func retryPending() {
+        guard !retrying else { return }
+        let items = PendingReports.fresh(PendingReports.decode(try? Data(contentsOf: Self.pendingURL)), now: Date())
+        guard !items.isEmpty else { try? FileManager.default.removeItem(at: Self.pendingURL); return }
+        retrying = true
+        Task {
+            var left = items
+            for item in items {
+                do {
+                    try await ReportSender.send(id: item.id, text: item.text, auto: (trigger: item.trigger, install: item.install))
+                    left.removeAll { $0 == item }
+                    recordSent()
+                    AppLog.shared.add("тестирование", "отчёт \(item.id) отправлен позже, когда сеть вернулась")
+                } catch {
+                    break
+                }
+            }
+            if left.isEmpty { try? FileManager.default.removeItem(at: Self.pendingURL) } else { try? JSONEncoder().encode(left).write(to: Self.pendingURL) }
+            retrying = false
+        }
+    }
+
+    private func recordSent() {
+        sentCount += 1
+        lastSent = Date()
+        UserDefaults.standard.set(sentCount, forKey: Self.countKey)
+        UserDefaults.standard.set(lastSent?.timeIntervalSince1970 ?? 0, forKey: Self.lastKey)
     }
 
     private func history(now: Date) -> [AutoReportPolicy.Sent] {
@@ -261,13 +359,14 @@ final class AutoReporter: ObservableObject {
             let text = DiagnosticReport.head(id: id, description: "авто: \(trigger.title) (установка \(install))", contact: "") + "\n\n" + (summary.map { $0 + "\n\n" } ?? "") + facts
             do {
                 try await ReportSender.send(id: id, text: text, auto: (trigger: trigger.key, install: install))
-                sentCount += 1
-                lastSent = Date()
-                defaults.set(sentCount, forKey: Self.countKey)
-                defaults.set(lastSent?.timeIntervalSince1970 ?? 0, forKey: Self.lastKey)
+                recordSent()
                 AppLog.shared.add("тестирование", "отчёт \(id) отправлен: \(trigger.title)")
             } catch {
-                AppLog.shared.add("тестирование", "отчёт \(id) не отправлен: \(error.localizedDescription)")
+                // Kept for the next looks: the net may be down just because of the fault that is being told.
+                let item = PendingReports.Item(id: id, trigger: trigger.key, install: install, text: text, at: Date())
+                let kept = PendingReports.fresh(PendingReports.decode(try? Data(contentsOf: Self.pendingURL)) + [item], now: Date())
+                try? JSONEncoder().encode(kept).write(to: Self.pendingURL)
+                AppLog.shared.add("тестирование", "отчёт \(id) не отправлен, будет ещё попытка: \(error.localizedDescription)")
             }
         }
     }

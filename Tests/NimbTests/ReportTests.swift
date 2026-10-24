@@ -456,6 +456,51 @@ import Testing
         #expect(!AutoReportRules.dnsAgrees(active: nil, serviceServers: [provider.addresses]), "left behind after switching off")
     }
 
+    @Test func theLastAnswerOfTheServerIsReadFromTheLogOfTheDaemon() throws {
+        let log = """
+        DEBUG: (utun4) 2026/10/23 21:20:13 peer(bmXO…fgyo) - Received handshake response
+        DEBUG: (utun4) 2026/10/23 21:22:14 peer(bmXO…fgyo) - Sending handshake initiation
+        DEBUG: (utun4) 2026/10/23 21:22:14 peer(bmXO…fgyo) - Received handshake response
+        DEBUG: (utun4) 2026/10/23 21:22:14 peer(bmXO…fgyo) - Sending keepalive packet
+        ERROR: (utun4) 2026/10/23 21:30:00 peer(bmXO…fgyo) - Failed to send data packets: sendmsg: can't assign requested address
+        """
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy/MM/dd HH:mm:ss"
+        let answered = try #require(formatter.date(from: "2026/10/23 21:22:14"))
+        #expect(TunnelHandshake.age(inLog: log, now: answered.addingTimeInterval(95)) == 95, "the last answer counts, not the first")
+        #expect(TunnelHandshake.age(inLog: "DEBUG: nothing here\nNIMB: 2026/10/23 21:00:00 up", now: answered) == nil)
+        #expect(TunnelHandshake.age(inLog: "", now: answered) == nil)
+    }
+
+    @Test func aReportThatCouldNotGoWaitsADayAtMostAndOnlyThreeAreKept() {
+        func item(_ id: String, _ age: TimeInterval) -> PendingReports.Item {
+            PendingReports.Item(id: id, trigger: "tunnel-silent", install: "ABCD2345", text: "text", at: now.addingTimeInterval(-age))
+        }
+        let kept = PendingReports.fresh([item("old", 25 * 3600), item("a", 3 * 3600), item("b", 2 * 3600), item("c", 3600), item("d", 60)], now: now)
+        #expect(kept.map(\.id) == ["b", "c", "d"])
+        #expect(PendingReports.fresh([], now: now).isEmpty)
+        #expect(PendingReports.decode(nil).isEmpty)
+        let data = try? JSONEncoder().encode([item("a", 60)])
+        #expect(PendingReports.decode(data).first?.id == "a")
+    }
+
+    @Test func theDigestCountsTheLooksWhenTheServerOfTheTunnelWasSilent() {
+        let quiet = "2026-10-23 10:00:00 | работает=1ч00м | туннель=вкл:utun4 совпало=да маршрутов=5 рукопожатие=95с | память=120МБ"
+        let silent = "2026-10-23 10:05:00 | работает=1ч05м | туннель=вкл:utun4 совпало=да маршрутов=5 рукопожатие=640с | память=120МБ"
+        let summary = DailyDigest.summary(lines: [quiet, silent, silent], sentKeys: [])
+        #expect(summary.contains("сервер не отвечал: в 2 записях"))
+        #expect(!DailyDigest.summary(lines: [quiet], sentKeys: []).contains("сервер не отвечал"))
+    }
+
+    @Test func theLineOfTheBlackBoxCarriesTheAgeOfTheAnswerOnlyWhenKnown() {
+        var facts = BlackBoxLine.Facts(dns: "выкл", dnsAgrees: true, telegram: "выкл", telegramAgrees: true,
+                                       tunnel: "вкл:utun4", tunnelAgrees: true, routes: 5, interface: "utun4", handshakeSeconds: 95)
+        #expect(BlackBoxLine.line(now: now, uptime: 60, facts: facts, memoryMegabytes: 100).contains("маршрутов=5 рукопожатие=95с"))
+        facts.handshakeSeconds = nil
+        #expect(!BlackBoxLine.line(now: now, uptime: 60, facts: facts, memoryMegabytes: 100).contains("рукопожатие"))
+    }
+
     @Test func theRulesOfAgreement() {
         #expect(AutoReportRules.tunnelAgrees(on: true, routes: 5, viaTunnel: true))
         #expect(!AutoReportRules.tunnelAgrees(on: true, routes: 0, viaTunnel: false))
@@ -471,7 +516,7 @@ import Testing
         #expect(AutoTrigger.mismatch(.telegram).key == "mismatch-telegram")
         #expect(AutoTrigger.error(.tunnel).key == "error-tunnel")
         #expect(AutoTrigger.error(.tunnel).title.contains("YouTube и Discord"))
-        for trigger in [AutoTrigger.previousEndedBadly, .tunnelRestarted, .tunnelDropped, .mismatch(.dns), .error(.dns), .updateCheck, .dailyDigest] {
+        for trigger in [AutoTrigger.previousEndedBadly, .tunnelRestarted, .tunnelDropped, .mismatch(.dns), .error(.dns), .updateCheck, .tunnelSilent, .dailyDigest] {
             #expect(trigger.key.range(of: "^[A-Za-z0-9:-]{1,40}$", options: .regularExpression) != nil, "the relay takes plain letters in a key")
         }
         #expect(AutoTrigger.previousEndedBadly.key == "crash")
