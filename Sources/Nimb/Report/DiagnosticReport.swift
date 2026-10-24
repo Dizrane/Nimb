@@ -71,7 +71,8 @@ enum DiagnosticReport {
         if !box.isEmpty { out.append(section("Чёрный ящик (состояние раз в 5 минут)", box)) }
 
         let services = await Task.detached(priority: .utility) { DNSManager.physicalServices() }.value
-        let keep = Set(dns.reports.flatMap { $0.samples.compactMap(\.address) })
+        // The server of the tunnel is Cloudflare's, not the person's: which one it is tells the city the traffic leaves from.
+        let keep = Set(dns.reports.flatMap { $0.samples.compactMap(\.address) } + [system.tunnelServer].compactMap { $0 })
         return ReportRedactor.clean(out.joined(separator: "\n\n"), services: services, keep: keep)
     }
 
@@ -174,12 +175,13 @@ enum DiagnosticReport {
         if state.isEmpty {
             lines.append("Туннель: файла состояния нет")
         } else {
-            let keys = ["pid", "interface", "watcher"]
+            let keys = ["pid", "interface", "server", "watcher"]
             lines.append("Туннель: " + state.split(separator: "\n").compactMap { line -> String? in
                 let parts = line.split(separator: "=", maxSplits: 1).map(String.init)
                 return parts.count == 2 && keys.contains(parts[0]) ? "\(parts[0])=\(parts[1])" : nil
             }.joined(separator: ", "))
             system.routes = state.split(separator: "\n").filter { $0.hasPrefix("route=") }.count
+            system.tunnelServer = state.split(separator: "\n").first { $0.hasPrefix("server=") }.map { String($0.dropFirst("server=".count)) }
             lines.append("Маршрутов туннеля: \(system.routes)")
         }
         lines.append("Помощник туннеля: \(FileManager.default.isExecutableFile(atPath: WarpPaths.helper) ? "есть" : "нет"), настройки: \(FileManager.default.fileExists(atPath: WarpPaths.config) ? "есть" : "нет")")

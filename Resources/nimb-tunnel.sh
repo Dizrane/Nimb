@@ -1,11 +1,14 @@
 #!/bin/sh
-# nimb-tunnel 9: brings the Nimb WARP tunnel up and down. It runs as root, from /usr/local/libexec/nimb, which only root
+# nimb-tunnel 12: brings the Nimb WARP tunnel up and down. It runs as root, from /usr/local/libexec/nimb, which only root
 # can write to. The settings are read from warp.conf next to it, a file of plain key=value lines that Nimb wrote after
 # checking every value; nothing in it is ever executed.
 #
 #   nimb-tunnel up      start amneziawg-go, configure it, add the routes, wait for the handshake; a small watcher then follows
 #                       the network (the route to the server) and, if the daemon ends by itself, starts it again (up to three
 #                       times in ten minutes; only when that fails the routes stay out and a note tells Nimb)
+#                       When YouTube does not open through the server of the settings (the exit of some servers is filtered), it tries a few
+#                       other WARP servers one after another and keeps the first that opens YouTube and Discord (not oftener than once in
+#                       six hours); the keys are the same for all of them
 #   nimb-tunnel down    remove the routes and stop it
 #   nimb-tunnel status  print "up <interface> <pid>" or "down"
 #   nimb-tunnel unregister  delete this Mac's anonymous WARP account at Cloudflare (best effort)
@@ -27,6 +30,14 @@ RESTART_WAITS="0 3 15"      # seconds to wait before each try to start the daemo
 if [ -n "${NIMB_TUNNEL_TEST:-}" ]; then
     SOCKDIR="${NIMB_TUNNEL_SOCKDIR:-$SOCKDIR}"; TICK="${NIMB_TUNNEL_TICK:-$TICK}"; RESTART_WAITS="${NIMB_TUNNEL_RESTART_WAITS:-$RESTART_WAITS}"
 fi
+
+# Other WARP servers to try when YouTube does not open at the one in the settings: they are reached from different cities.
+SERVERS="162.159.192.1 188.114.97.1 188.114.99.1"
+SEARCH_PAUSE=21600          # seconds between two searches
+PROBE_WEB=https://www.cloudflare.com/cdn-cgi/trace
+PROBE_VIDEO=https://www.youtube.com/generate_204
+PROBE_CHAT=https://discord.com/
+if [ -n "${NIMB_TUNNEL_TEST:-}" ]; then SERVERS="${NIMB_TUNNEL_SERVERS:-$SERVERS}"; fi
 
 say() { printf '%s\n' "$*"; }
 fail() { printf '%s\n' "$*" >&2; exit 1; }
@@ -166,6 +177,66 @@ take_down() {
 # A restart that the watcher started must not outlive a `down` of the person that came in the meantime.
 stopped_by_person() { [ -n "${NIMB_TUNNEL_RESTART:-}" ] && [ -f "$RUN.stopped" ]; }
 
+# The server that was found to open YouTube (written by the search below); nothing if it is not one of the known servers.
+saved_server() {
+    saved=$(head -1 "$DIR/server" 2>/dev/null | tr -d '[:space:]')
+    for known in $SERVERS; do
+        if [ "$saved" = "$known" ]; then printf '%s\n' "$saved"; return 0; fi
+    done
+    return 0
+}
+
+# The site answers through the tunnel (any answer of the server: the name and the handshake of TLS went through).
+probe_ok() {
+    code=$(curl -s -o /dev/null -m 6 --connect-timeout 4 -w '%{http_code}' "$1" 2>/dev/null)
+    case "$code" in ''|000) return 1 ;; esac
+    return 0
+}
+
+good_now() { probe_ok "$PROBE_VIDEO" && probe_ok "$PROBE_CHAT"; }
+
+# YouTube does not open at the server that is up, though the internet works: other servers are tried, once in six hours at the most. The
+# exit of a server can be in a city whose network filters YouTube; another server of Cloudflare leaves from another city. It all happens
+# before the watcher is started, so there is never more than one of them.
+search_server() {
+    probe_ok "$PROBE_WEB" || return 0
+    good_now && return 0
+    last=$(cat "$DIR/search.at" 2>/dev/null)
+    case "$last" in ''|*[!0-9]*) last=0 ;; esac
+    now=$(date +%s)
+    [ $((now - last)) -lt "$SEARCH_PAUSE" ] && return 0
+    saved=$(saved_server)
+    current=$(state_get server)
+    log_mark "server $current does not open YouTube: trying others"
+    for cand in $SERVERS conf; do
+        if [ "$cand" = conf ]; then
+            [ -z "$saved" ] && continue
+            tryhost=""
+        else
+            [ "$cand" = "$current" ] && continue
+            tryhost=$cand
+        fi
+        bring_up "$tryhost" || continue
+        if good_now; then
+            if [ -n "$tryhost" ]; then printf '%s\n' "$tryhost" > "$DIR/server"; else rm -f "$DIR/server"; fi
+            log_mark "server ${tryhost:-of the settings} opens YouTube"
+            printf '%s\n' "$(date +%s)" > "$DIR/search.at"
+            return 0
+        fi
+    done
+    log_mark "no server opens YouTube: back to ${saved:-the settings}"
+    printf '%s\n' "$(date +%s)" > "$DIR/search.at"
+    if [ -n "$saved" ] && bring_up "$saved"; then return 0; fi
+    bring_up ""
+}
+
+# The watcher follows the network and the daemon (see `watch_network`). One only, started when the server is final.
+start_watcher() {
+    [ "$watching" = yes ] || return 0
+    watch_network "$pid" "$host" </dev/null >/dev/null 2>&1 &
+    printf 'watcher=%s\n' "$!" >> "$STATE"
+}
+
 cmd_up() {
     pid=$(state_get pid)
     if alive "$pid"; then say "already up"; return 0; fi
@@ -174,8 +245,31 @@ cmd_up() {
     [ -n "${NIMB_TUNNEL_RESTART:-}" ] || rm -f "$RUN.stopped"
     [ -x "$BIN" ] || fail "нет $BIN"
     [ -f "$CONF" ] || fail "нет $CONF"
+    read_settings
+    stopped_by_person && fail "остановлено"
+    # The daemon and the watcher must not share the process group of whatever started this script. The administrator prompt of macOS runs
+    # it under `authtrampoline`, which the system ends by itself after about twelve minutes ("idle-exit" under memory pressure), and then
+    # launchd clears away the rest of its process group, the daemon among it (that is what ended the tunnel by itself). With job control
+    # on, each job started below gets a group of its own and outlives it.
+    set -m
+    # A hangup of whatever started this script (its session, its terminal) must not take the daemon and the watcher with it: an ignored
+    # signal stays ignored in the processes started from here.
+    trap '' HUP
+    # The server that opened YouTube last time first; if it does not answer any more, the one in the settings.
+    started=no
+    saved=$(saved_server)
+    if [ -n "$saved" ]; then
+        if bring_up "$saved"; then started=yes; else log_mark "server $saved did not answer: the one of the settings is tried"; fi
+    fi
+    if [ $started = no ]; then bring_up "" || fail "$UPERR"; fi
+    # A start by the watcher (the daemon ended by itself) is quick and does not search.
+    if [ -z "${NIMB_TUNNEL_RESTART:-}" ]; then search_server || fail "$UPERR"; fi
+    start_watcher
+    say "up $iface $pid"
+}
 
-    # 1. Read the settings.
+# 1. Reads the settings into variables, before anything is started: a mistake here changes nothing.
+read_settings() {
     private_key=""; mtu=1280; addr4=""; addr6=""
     device=""; peer_keys=""; allowed=""; endpoint=""; public_key=""
     while IFS= read -r line; do
@@ -208,28 +302,26 @@ persistent_keepalive_interval=25" ;; esac
     [ -n "$private_key" ] && [ -n "$public_key" ] && [ -n "$endpoint" ] || fail "в warp.conf не хватает ключа, пира или адреса сервера"
 
     # An endpoint that is a host name is turned into an address now, before the routes change.
-    host=${endpoint%:*}; port=${endpoint##*:}
-    case "$host" in
-        \[*\]) host=${host#\[}; host=${host%\]} ;;
+    conf_host=${endpoint%:*}; port=${endpoint##*:}
+    case "$conf_host" in
+        \[*\]) conf_host=${conf_host#\[}; conf_host=${conf_host%\]} ;;
     esac
-    case "$host" in
+    case "$conf_host" in
         *[!0-9.]*:*) ;; # an IPv6 literal
-        *[!0-9.]*) host=$(dscacheutil -q host -a name "$host" 2>/dev/null | sed -n 's/^ip_address: //p' | head -1) ;;
+        *[!0-9.]*) conf_host=$(dscacheutil -q host -a name "$conf_host" 2>/dev/null | sed -n 's/^ip_address: //p' | head -1) ;;
     esac
-    [ -n "$host" ] || fail "не удалось определить адрес сервера $endpoint"
-    case "$host" in *:*) endpoint="[$host]:$port" ;; *) endpoint="$host:$port" ;; esac
+    [ -n "$conf_host" ] || fail "не удалось определить адрес сервера $endpoint"
+}
 
-    # 2. Start the daemon; it makes a utun interface of its own.
-    stopped_by_person && fail "остановлено"
+# 2-5. Starts the daemon, configures it, adds the address and the routes and waits for the handshake with the server `$1` (empty: the one in
+# the settings). On a failure it takes everything down again, says why in $UPERR and returns 1; on success `pid`, `iface`, `host` and
+# `watching` say what is up (the watcher is started by `cmd_up`).
+bring_up() {
+    host=${1:-$conf_host}
+    case "$host" in *:*) endpoint="[$host]:$port" ;; *) endpoint="$host:$port" ;; esac
+    take_down
+    stopped_by_person && { UPERR="остановлено"; return 1; }
     rm -f "$RUN.name"
-    # The daemon and the watcher must not share the process group of whatever started this script. The administrator prompt of macOS runs
-    # it under `authtrampoline`, which the system ends by itself after about twelve minutes ("idle-exit" under memory pressure), and then
-    # launchd clears away the rest of its process group, the daemon among it (that is what ended the tunnel by itself). With job control
-    # on, each job started below gets a group of its own and outlives it.
-    set -m
-    # A hangup of whatever started this script (its session, its terminal) must not take the daemon and the watcher with it: an ignored
-    # signal stays ignored in the processes started from here.
-    trap '' HUP
     loglevel=verbose
     [ -n "${NIMB_TUNNEL_TEST:-}" ] && loglevel=${NIMB_TUNNEL_LOG_LEVEL:-error}
     trim_log
@@ -238,14 +330,14 @@ persistent_keepalive_interval=25" ;; esac
     pid=$!
     i=0; while [ ! -s "$RUN.name" ] && alive "$pid" && [ $i -lt 40 ]; do sleep 0.25; i=$((i + 1)); done
     iface=$(cat "$RUN.name" 2>/dev/null)
-    if [ -z "$iface" ] || ! alive "$pid"; then kill "$pid" 2>/dev/null; fail "amneziawg-go не запустился (см. $LOG)"; fi
+    if [ -z "$iface" ] || ! alive "$pid"; then kill "$pid" 2>/dev/null; UPERR="amneziawg-go не запустился (см. $LOG)"; return 1; fi
     sock="$SOCKDIR/$iface.sock"
     i=0; while [ ! -S "$sock" ] && [ $i -lt 40 ]; do sleep 0.25; i=$((i + 1)); done
-    [ -S "$sock" ] || { kill "$pid" 2>/dev/null; fail "нет управляющего сокета $sock"; }
+    [ -S "$sock" ] || { kill "$pid" 2>/dev/null; UPERR="нет управляющего сокета $sock"; return 1; }
 
-    { printf 'pid=%s\ninterface=%s\n' "$pid" "$iface"; } > "$STATE"
+    { printf 'pid=%s\ninterface=%s\nserver=%s\n' "$pid" "$iface" "$host"; } > "$STATE"
     chmod 644 "$STATE"
-    stopped_by_person && { take_down; fail "остановлено"; }
+    stopped_by_person && { take_down; UPERR="остановлено"; return 1; }
 
     # 3. Configure it.
     payload="set=1
@@ -259,11 +351,11 @@ allowed_ip=$cidr"; done
     reply=$(printf '%s\n\n' "$payload" | uapi "$sock" | tr -d '\r')
     case "$reply" in
         *errno=0*) ;;
-        *) take_down; fail "amneziawg-go отклонил настройки: $reply" ;;
+        *) take_down; UPERR="amneziawg-go отклонил настройки: $reply"; return 1 ;;
     esac
 
     # 4. Address and routes.
-    stopped_by_person && { take_down; fail "остановлено"; }
+    stopped_by_person && { take_down; UPERR="остановлено"; return 1; }
     [ -n "$addr4" ] && ifconfig "$iface" inet "$addr4" "$addr4" netmask 255.255.255.255 mtu "$mtu" up
     [ -n "$addr6" ] && ifconfig "$iface" inet6 "$addr6" prefixlen 128 up >/dev/null 2>&1
     ifconfig "$iface" up
@@ -299,12 +391,8 @@ allowed_ip=$cidr"; done
         shake=0
         sleep 1; i=$((i + 1))
     done
-    if [ "$shake" = 0 ]; then take_down; fail "сервер не ответил: нет рукопожатия за 16 секунд"; fi
-    if [ $watching = yes ]; then
-        watch_network "$pid" "$host" </dev/null >/dev/null 2>&1 &
-        printf 'watcher=%s\n' "$!" >> "$STATE"
-    fi
-    say "up $iface $pid"
+    if [ "$shake" = 0 ]; then take_down; UPERR="сервер не ответил: нет рукопожатия за 16 секунд"; return 1; fi
+    return 0
 }
 
 # Deletes the account that Nimb registered for this Mac. Never fails: the account expires by itself if Cloudflare is out of reach.

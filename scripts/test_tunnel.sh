@@ -23,6 +23,22 @@ cat > "$WORK/bin/nc" <<'STUB'
 exit 0
 STUB
 chmod +x "$WORK/bin/nc"
+# `curl` answers for the probes of the helper (it asks YouTube, Discord and Cloudflare through the tunnel). Without NIMB_PROBE_DIR everything
+# opens, so that no search starts; with it, YouTube opens at the servers listed in $NIMB_PROBE_DIR/video.good (the helper writes the server it
+# is connected to in its state file), and the internet is gone when $NIMB_PROBE_DIR/web.down exists.
+cat > "$WORK/bin/curl" <<'STUB'
+#!/bin/sh
+for a in "$@"; do url=$a; done
+[ -n "${NIMB_PROBE_DIR:-}" ] || { printf 204; exit 0; }
+server=$(sed -n 's/^server=//p' "$NIMB_TUNNEL_RUN.state" 2>/dev/null | head -1)
+case "$url" in
+    *cloudflare.com*) [ -f "$NIMB_PROBE_DIR/web.down" ] && printf 000 || printf 200 ;;
+    *youtube.com*) grep -qx "$server" "$NIMB_PROBE_DIR/video.good" 2>/dev/null && printf 204 || printf 000 ;;
+    *discord.com*) printf 200 ;;
+    *) printf 000 ;;
+esac
+STUB
+chmod +x "$WORK/bin/curl"
 fail=0
 check() { if eval "$2"; then echo "ok:   $1"; else echo "FAIL: $1"; fail=1; fi; }
 
@@ -110,6 +126,44 @@ sleep 3
 check "the group of the process that started the helper is killed: the daemon stays, as the same process" '[ -n "$pid6" ] && kill -0 "$pid6" 2>/dev/null && [ "$(state_pid)" = "$pid6" ] && [ ! -s "$WORK/run/r.restarts" ]'
 helper_r down
 sleep 1
+
+# YouTube does not open at the server of the settings: other servers are tried, the first that opens YouTube and Discord is kept, and it is
+# used at the next start. A search comes once in six hours at the most, and not when the internet is gone.
+PROBE="$WORK/probe"; mkdir -p "$PROBE"
+export NIMB_PROBE_DIR="$PROBE" NIMB_TUNNEL_SERVERS="198.51.100.1 198.51.100.2"
+state_server() { sed -n 's/^server=//p' "$WORK/run/r.state" 2>/dev/null | head -1; }
+searches() { grep -c "does not open YouTube" "$WORK/run/r.log" 2>/dev/null || true; }
+rm -f "$WORK/server" "$WORK/search.at" "$PROBE/web.down"
+exited_before=$(grep -c "daemon-exited" "$WORK/run/r.log" 2>/dev/null || true)
+echo 198.51.100.2 > "$PROBE/video.good"
+helper_r up >/dev/null 2>&1
+check "YouTube opens at the second server tried: the tunnel is up at it" '[ "$(state_server)" = 198.51.100.2 ]'
+check "after a search there is one watcher, and it is the one of the state" '[ "$(pgrep -f "$HELPER" | wc -l | tr -d " ")" = 1 ] && [ "$(pgrep -f "$HELPER")" = "$(sed -n "s/^watcher=//p" "$WORK/run/r.state")" ]'
+check "the server that opened YouTube is kept, and the search is written down" '[ "$(cat "$WORK/server")" = 198.51.100.2 ] && [ -s "$WORK/search.at" ] && grep -q "opens YouTube" "$WORK/run/r.log"'
+helper_r down; sleep 1
+at_before=$(cat "$WORK/search.at"); n_before=$(searches)
+helper_r up >/dev/null 2>&1
+check "the next start uses the kept server and does not search again" '[ "$(state_server)" = 198.51.100.2 ] && [ "$(cat "$WORK/search.at")" = "$at_before" ] && [ "$(searches)" = "$n_before" ]'
+helper_r down; sleep 1
+echo 203.0.113.7 > "$PROBE/video.good"; rm -f "$WORK/search.at"
+helper_r up >/dev/null 2>&1
+check "the kept server stopped opening YouTube: the one of the settings is found good, and the kept one is forgotten" '[ "$(state_server)" = 203.0.113.7 ] && [ ! -f "$WORK/server" ]'
+helper_r down; sleep 1
+: > "$PROBE/video.good"; rm -f "$WORK/search.at"; n_before=$(searches)
+helper_r up >/dev/null 2>&1
+check "no server opens YouTube: back at the server of the settings, nothing is kept" '[ "$(state_server)" = 203.0.113.7 ] && [ ! -f "$WORK/server" ] && grep -q "no server opens YouTube" "$WORK/run/r.log" && [ "$(searches)" -gt "$n_before" ]'
+helper_r down; sleep 1
+n_before=$(searches)
+helper_r up >/dev/null 2>&1
+check "a search that has just been made is not made again" '[ "$(searches)" = "$n_before" ] && [ "$(state_server)" = 203.0.113.7 ]'
+helper_r down; sleep 1
+rm -f "$WORK/search.at"; touch "$PROBE/web.down"; n_before=$(searches)
+helper_r up >/dev/null 2>&1
+check "the internet is gone: it is not a matter of the server, no search" '[ "$(searches)" = "$n_before" ] && [ ! -f "$WORK/search.at" ]'
+helper_r down; sleep 1
+rm -f "$PROBE/web.down" "$WORK/server" "$WORK/search.at"
+check "a search never makes the daemon look as if it ended by itself" '[ "$(grep -c "daemon-exited" "$WORK/run/r.log" 2>/dev/null || true)" = "$exited_before" ]'
+unset NIMB_PROBE_DIR NIMB_TUNNEL_SERVERS
 
 # The server does not answer: nothing is done to the tunnel. (An earlier helper switched it off after five minutes of silence, and it
 # switched off tunnels that worked.) The watcher only follows the network and ends when the daemon ends.

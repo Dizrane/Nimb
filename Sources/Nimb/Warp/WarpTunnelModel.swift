@@ -284,10 +284,23 @@ final class WarpTunnelModel: ObservableObject {
         errorMessage = TunnelDrop.message(for: drop.reason)
     }
 
+    private var loggedServer: String?
+
+    /// The helper may have found another WARP server that opens YouTube (see `nimb-tunnel 12`): the diary says which one the tunnel is at.
+    private func noticeServer() {
+        guard isOn, let text = try? String(contentsOfFile: WarpPaths.stateFile, encoding: .utf8),
+              let line = text.split(separator: "\n").first(where: { $0.hasPrefix("server=") }) else { return }
+        let server = String(line.dropFirst("server=".count))
+        guard server != loggedServer else { return }
+        loggedServer = server
+        AppLog.shared.add("tunnel", "сервер WARP: \(server)")
+    }
+
     /// The end of an operation: "working" gives way straight to the real state, with no "off" in between.
     private func finish() {
         let next = currentPhase()
         if next != phase { phase = next }
+        noticeServer()
         // What the person did last is what comes back after a restart (the restore itself decides for itself, see `restoreAfterLogin`).
         if !restoring { Self.wanted = isOn }
     }

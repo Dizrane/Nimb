@@ -27,6 +27,8 @@ struct SystemSnapshot {
     var resolver: [String] = []
     /// The routes of the tunnel in its state file.
     var routes = 0
+    /// The WARP server the tunnel is connected to (its state file).
+    var tunnelServer: String?
     /// What the helper wrote when it took the tunnel down itself, if that was lately.
     var dropped: String?
     /// The restarts of the tunnel program by the helper in the last day.
