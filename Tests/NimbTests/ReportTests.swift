@@ -444,7 +444,7 @@ import Testing
         #expect(summary.contains("telegram: не совпало в 0 записях"))
         #expect(summary.contains("туннель: не совпало в 1 записях"))
         #expect(summary.contains("до 180 МБ, в последней записи 150 МБ"))
-        #expect(summary.contains("Отчётов по сбоям за сутки: 1 (tunnel-restarted)"))
+        #expect(summary.contains("Отчётов по сбоям за это время: 1 (tunnel-restarted)"))
         #expect(DailyDigest.summary(lines: [], sentKeys: []).contains("Записей чёрного ящика: 0"))
     }
 
@@ -530,6 +530,25 @@ import Testing
         #expect(partial == "\(provider.name) задан на 1 из 2 подключений; не так на: Wi-Fi")
         #expect(DNSManager.applySummary(nil, services: ["Wi-Fi"], current: ["Wi-Fi": []]) == "автоматический DNS на 1 из 1 подключений")
         #expect(DNSManager.applySummary(nil, services: ["Wi-Fi", "iPhone USB"], current: ["Wi-Fi": [], "iPhone USB": provider.addresses]).contains("не так на: iPhone USB"))
+    }
+
+    @Test func theDigestCountsWhatCameAfterTheLastDigestAndNothingBefore() throws {
+        let format = DateFormatter()
+        format.locale = Locale(identifier: "en_US_POSIX")
+        format.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        let since = try #require(format.date(from: "2026-10-24 12:00:00"))
+        let all = [
+            "2026-10-24 11:59:59 | работает=1ч | dns=выкл совпало=НЕТ",
+            "2026-10-24 12:00:00 | работает=1ч | dns=выкл совпало=НЕТ",
+            "2026-10-24 12:00:01 | работает=1ч | dns=выкл совпало=да",
+            "2026-10-25 08:00:00 | работает=2ч | dns=выкл совпало=да",
+            "строка без времени",
+        ]
+        let kept = DailyDigest.lines(all, since: since)
+        #expect(kept.count == 2, "only what is later than the last digest")
+        #expect(kept.first?.hasPrefix("2026-10-24 12:00:01") == true)
+        #expect(DailyDigest.lines([], since: since).isEmpty)
+        #expect(DailyDigest.lines(all, since: .distantPast).count == 4, "a line with no time is not a line of the box")
     }
 
     @Test func theRulesOfAgreement() {

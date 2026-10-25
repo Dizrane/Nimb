@@ -167,7 +167,16 @@ enum DailyDigest {
 
     static func isDue(now: Date, last: Date) -> Bool { now.timeIntervalSince(last) >= every }
 
-    /// The day in numbers, from the lines of the black box (see `BlackBoxLine.line`) and the keys of the reports sent in the day.
+    /// The lines of the black box written after `since` (the time of the last digest, or of the switch being turned on): the digests follow
+    /// each other with nothing counted twice and nothing missed, even when the program was closed for days. A line starts with its time.
+    static func lines(_ all: [String], since: Date) -> [String] {
+        let format = DateFormatter()
+        format.locale = Locale(identifier: "en_US_POSIX")
+        format.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return all.filter { line in format.date(from: String(line.prefix(19))).map { $0 > since } ?? false }
+    }
+
+    /// The time since the last digest in numbers, from the lines of the black box (see `BlackBoxLine.line`) and the keys of the reports sent in the day.
     static func summary(lines: [String], sentKeys: [String]) -> String {
         var disagreements = ["dns": 0, "telegram": 0, "туннель": 0]
         var memory: [Int] = []
@@ -177,7 +186,7 @@ enum DailyDigest {
                 if part.hasPrefix("память="), let value = Int(part.dropFirst("память=".count).dropLast("МБ".count)) { memory.append(value) }
             }
         }
-        var out = ["— Сутки в цифрах —", "Записей чёрного ящика: \(lines.count) из \(BlackBoxLine.keepLines)"]
+        var out = ["— Со времени прошлой сводки в цифрах —", "Записей чёрного ящика: \(lines.count) из \(BlackBoxLine.keepLines)"]
         // The box keeps the last lines, not the last day: the period says what the numbers are about, and the lines say how long it worked.
         if let first = lines.first?.prefix(19), let last = lines.last?.prefix(19) {
             out.append("Период записей: с \(first) по \(last); работы по записям около \(lines.count * 5) мин")
@@ -189,7 +198,7 @@ enum DailyDigest {
         }.count
         if silent > 0 { out.append("туннель включён, но сервер не отвечал: в \(silent) записях") }
         if let top = memory.max(), let now = memory.last { out.append("Память: до \(top) МБ, в последней записи \(now) МБ") }
-        out.append("Отчётов по сбоям за сутки: \(sentKeys.count)" + (sentKeys.isEmpty ? "" : " (\(sentKeys.joined(separator: ", ")))"))
+        out.append("Отчётов по сбоям за это время: \(sentKeys.count)" + (sentKeys.isEmpty ? "" : " (\(sentKeys.joined(separator: ", ")))"))
         return out.joined(separator: "\n")
     }
 }
@@ -346,7 +355,8 @@ final class AutoReporter: ObservableObject {
         guard stamp > 0 else { defaults.set(now.timeIntervalSince1970, forKey: Self.digestKey); return }
         guard DailyDigest.isDue(now: now, last: Date(timeIntervalSince1970: stamp)) else { return }
         defaults.set(now.timeIntervalSince1970, forKey: Self.digestKey)
-        let summary = DailyDigest.summary(lines: BlackBox.lastLines(BlackBoxLine.keepLines), sentKeys: history(now: now).map(\.key))
+        let lines = DailyDigest.lines(BlackBox.lastLines(BlackBoxLine.keepLines), since: Date(timeIntervalSince1970: stamp))
+        let summary = DailyDigest.summary(lines: lines, sentKeys: history(now: now).map(\.key))
         deliver(.dailyDigest, summary: summary)
     }
 
