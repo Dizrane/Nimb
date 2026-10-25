@@ -15,6 +15,10 @@ enum AutoReportRules {
         ReportChecks.dns(active: active, serviceServers: serviceServers, resolver: active?.addresses ?? []).agrees
     }
 
+    /// What the count of a disagreement is fed with: a disagreement of the settings while the internet is gone says nothing about Nimb (the
+    /// Wi-Fi was lost, another program set the DNS again), so it counts as an agreement until the net answers.
+    static func dnsCounts(agrees: Bool, online: Bool) -> Bool { agrees || !online }
+
     /// The tunnel is as the program thinks: when it is on, it has its routes and the traffic goes through it; when it is off, it has no routes.
     /// (Another VPN that carries the traffic while ours is off is the person's business, not a fault of ours: the report of it is the manual one.)
     static func tunnelAgrees(on: Bool, routes: Int, viaTunnel: Bool) -> Bool {
@@ -285,7 +289,7 @@ final class AutoReporter: ObservableObject {
     /// A look of the black box: a service that disagrees with what it should be, for long enough, is a cause.
     func observe(_ facts: BlackBoxLine.Facts) {
         guard enabled else { return }
-        if tracker.observe("dns", agrees: facts.dnsAgrees) { notify(.mismatch(.dns)) }
+        observeDNS(agrees: facts.dnsAgrees)
         if tracker.observe("telegram", agrees: facts.telegramAgrees) { notify(.mismatch(.telegram)) }
         if tracker.observe("tunnel", agrees: facts.tunnelAgrees) { notify(.mismatch(.tunnel)) }
         let silent = facts.handshakeSeconds.map { Double($0) > TunnelHandshake.staleAfter } ?? false
@@ -343,6 +347,15 @@ final class AutoReporter: ObservableObject {
         defaults.set(now.timeIntervalSince1970, forKey: Self.digestKey)
         let summary = DailyDigest.summary(lines: BlackBox.lastLines(BlackBoxLine.keepLines), sentKeys: history(now: now).map(\.key))
         deliver(.dailyDigest, summary: summary)
+    }
+
+    /// A disagreement of the DNS is counted only while Cloudflare answers (one small request, and only while there is a disagreement).
+    private func observeDNS(agrees: Bool) {
+        guard !agrees else { _ = tracker.observe("dns", agrees: true); return }
+        Task {
+            let online = await WarpTunnelModel.cloudflareReachable()
+            if tracker.observe("dns", agrees: AutoReportRules.dnsCounts(agrees: false, online: online)) { notify(.mismatch(.dns)) }
+        }
     }
 
     func notify(_ trigger: AutoTrigger) {

@@ -547,7 +547,7 @@ final class WarpTunnelModel: ObservableObject {
     }
 
     /// Cloudflare answers on the open internet (the tunnel is off then): the network is fine.
-    nonisolated private static func cloudflareReachable() async -> Bool {
+    nonisolated static func cloudflareReachable() async -> Bool {
         var request = URLRequest(url: URL(string: "https://www.cloudflare.com/cdn-cgi/trace")!, timeoutInterval: 6)
         request.httpMethod = "GET"
         guard let (_, response) = try? await URLSession.shared.data(for: request) else { return false }

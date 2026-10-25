@@ -229,7 +229,10 @@ final class DNSViewModel: ObservableObject {
         Task.detached {
             let services = DNSManager.physicalServices()
             let result = Result { try DNSManager.apply(provider, to: services) }
+            // What the system says now, for the diary: not what the command said.
+            let summary = DNSManager.applySummary(provider, services: services, current: Dictionary(uniqueKeysWithValues: services.map { ($0, DNSManager.servers(of: $0)) }))
             await MainActor.run {
+                AppLog.shared.add("dns", summary)
                 // `apply` has read the servers back and checked them, so success means the state is the one asked for. It
                 // is set in the same moment as "not busy": a reading that came later left a gap in which the page, the
                 // menu and "turn everything off" still saw the old state.

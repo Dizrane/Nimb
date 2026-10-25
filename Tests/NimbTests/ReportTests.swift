@@ -512,6 +512,26 @@ import Testing
         #expect(AutoTrigger.newKeysFailed.title.contains("новые ключи"))
     }
 
+    @Test func aDisagreementOfTheDnsCountsOnlyWhileTheNetAnswers() {
+        #expect(AutoReportRules.dnsCounts(agrees: false, online: true) == false, "the net is there: a real disagreement")
+        #expect(AutoReportRules.dnsCounts(agrees: false, online: false), "no net: it does not count")
+        #expect(AutoReportRules.dnsCounts(agrees: true, online: true))
+        var tracker = MismatchTracker()
+        let first = tracker.observe("dns", agrees: AutoReportRules.dnsCounts(agrees: false, online: false))
+        let second = tracker.observe("dns", agrees: AutoReportRules.dnsCounts(agrees: false, online: false))
+        #expect(!first && !second, "an outage never makes the count")
+    }
+
+    @Test func theDiaryTellsWhereTheDnsIsNotAsAskedFor() throws {
+        let provider = try #require(DNSProvider.all.first)
+        let ok = [provider.addresses, provider.addresses]
+        #expect(DNSManager.applySummary(provider, services: ["Wi-Fi", "Ethernet"], current: ["Wi-Fi": ok[0], "Ethernet": ok[1]]) == "\(provider.name) задан на 2 из 2 подключений")
+        let partial = DNSManager.applySummary(provider, services: ["Wi-Fi", "Ethernet"], current: ["Wi-Fi": ["9.9.9.9"], "Ethernet": provider.addresses])
+        #expect(partial == "\(provider.name) задан на 1 из 2 подключений; не так на: Wi-Fi")
+        #expect(DNSManager.applySummary(nil, services: ["Wi-Fi"], current: ["Wi-Fi": []]) == "автоматический DNS на 1 из 1 подключений")
+        #expect(DNSManager.applySummary(nil, services: ["Wi-Fi", "iPhone USB"], current: ["Wi-Fi": [], "iPhone USB": provider.addresses]).contains("не так на: iPhone USB"))
+    }
+
     @Test func theRulesOfAgreement() {
         #expect(AutoReportRules.tunnelAgrees(on: true, routes: 5, viaTunnel: true))
         #expect(!AutoReportRules.tunnelAgrees(on: true, routes: 0, viaTunnel: false))

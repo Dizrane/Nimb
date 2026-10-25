@@ -115,6 +115,16 @@ enum DNSManager {
         return resolvers
     }
 
+    /// What the diary says after a change: on how many connections the DNS is as it was asked for, and where it is not (a connection that a
+    /// program other than Nimb has changed again shows here, and the report knows it was not a failure of the command).
+    static func applySummary(_ provider: DNSProvider?, services: [String], current: [String: [String]]) -> String {
+        let expected = provider?.addresses ?? []
+        let missed = services.filter { (current[$0] ?? []) != expected }
+        let head = provider.map { "\($0.name) задан" } ?? "автоматический DNS"
+        let base = "\(head) на \(services.count - missed.count) из \(services.count) подключений"
+        return missed.isEmpty ? base : base + "; не так на: " + missed.joined(separator: ", ")
+    }
+
     // MARK: Writing (asks for the administrator password)
 
     /// Sets `provider` on all given services, or resets them to automatic DNS when it is nil.
