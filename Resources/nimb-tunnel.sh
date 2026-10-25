@@ -12,7 +12,8 @@
 #                       other WARP servers one after another and keeps the first that opens YouTube and Discord (a search that found nothing
 #                       is not repeated for ten minutes); it happens at a start only, a tunnel that works is never moved to another server
 #                       A tunnel that is up but dead (the server has not answered the handshake for ten minutes, and the internet does not
-#                       answer through it either: the whole traffic of the Mac goes into it) is restarted, then moved to another server;
+#                       answer through it either: the whole traffic of the Mac goes into it, while the server can still be reached the
+#                       usual way, so the trouble is the tunnel's and not the internet's) is restarted, then moved to another server;
 #                       if none answers, it is taken down, so that the Mac has its internet back, and a note tells Nimb
 #   nimb-tunnel down    remove the routes and stop it
 #   nimb-tunnel status  print "up <interface> <pid>" or "down"
@@ -269,6 +270,15 @@ dead_check() {
     dead_looks=$((${dead_looks:-0} + 1))
     [ "$dead_looks" -ge "$DEAD_LOOKS" ] || return 0
     dead_looks=0
+    # Is the server reachable the usual way? Its address goes past the tunnel (the route of the tunnel to it is of the network itself), so
+    # a connection to it says whether the internet of the Mac works. If it does not, the trouble is the Mac's internet, not the tunnel's:
+    # the tunnel is left alone and comes back with the internet. Taking it down then would only leave the person to switch it on again.
+    if ! nc -z -G 4 "$(state_get server)" 443 </dev/null >/dev/null 2>&1; then
+        [ -n "${dead_wan_noted:-}" ] || log_mark "the tunnel is silent, and its server is not reachable the usual way either: the internet of the Mac is down, the tunnel is left to come back with it"
+        dead_wan_noted=yes
+        return 0
+    fi
+    dead_wan_noted=""
     log_mark "the tunnel is dead (no handshake for $((now - shake)) s, no internet through it): reviving"
     # The child ends this watcher with its first `bring_up` (this watcher is the one of the state) and goes on without it.
     "$SELF" revive >>"$LOG" 2>&1

@@ -20,6 +20,8 @@ chmod +x "$WORK/bin/ifconfig"
 # With NIMB_PROBE_DIR/shake.bad listing servers, those servers answer the configuration but never the handshake.
 cat > "$WORK/bin/nc" <<'STUB'
 #!/bin/sh
+# `nc -z host port` (a plain connection to the server): it works unless NIMB_PROBE_DIR/wan.down exists.
+case "$*" in *-z*) [ -f "${NIMB_PROBE_DIR:-/nonexistent}/wan.down" ] && exit 1; exit 0 ;; esac
 payload=$(cat)
 if [ -n "${NIMB_PROBE_DIR:-}" ] && [ -f "$NIMB_PROBE_DIR/shake.bad" ]; then
     server=$(sed -n 's/^server=//p' "$NIMB_TUNNEL_RUN.state" 2>/dev/null | head -1)
@@ -203,8 +205,12 @@ n_dead=$(grep -c "the tunnel is dead" "$WORK/run/r.log")
 sleep 8
 check "no network at all (no route to the router): the tunnel is left alone, it will come back with the network" '[ "$(grep -c "the tunnel is dead" "$WORK/run/r.log")" = "$n_dead" ] && [ "$(state_server)" = 198.51.100.1 ]'
 echo "192.0.2.1 en0" > "$WORK/run/r.fake-uplink"
-touch "$PROBE/web.down"
-i=0; while [ $i -lt 60 ] && [ -f "$WORK/run/r.state" ]; do sleep 1; i=$((i + 1)); done
+# The internet of the Mac is down (the server cannot be reached the usual way either): not the tunnel's trouble, it is left to come back.
+touch "$PROBE/web.down" "$PROBE/wan.down"
+sleep 9
+check "the server cannot be reached the usual way: the internet is down, the tunnel is left alone" '[ "$(grep -c "the tunnel is dead" "$WORK/run/r.log")" = "$n_dead" ] && [ "$(state_server)" = 198.51.100.1 ] && grep -q "the internet of the Mac is down" "$WORK/run/r.log" && [ ! -f "$WORK/run/r.dropped" ]'
+rm -f "$PROBE/wan.down"
+i=0; while [ $i -lt 60 ] && [ ! -f "$WORK/run/r.dropped" ]; do sleep 1; i=$((i + 1)); done
 sleep 1
 check "no server answers: the tunnel is taken down, nothing is left running, and the note says it was not the person" '[ ! -f "$WORK/run/r.state" ] && grep -Eq "^[0-9]+ no-handshake$" "$WORK/run/r.dropped" && ! pgrep -f "$WORK/amneziawg-go" >/dev/null && ! pgrep -f "$HELPER" >/dev/null && [ ! -f "$WORK/run/r.restarting" ]'
 rm -f "$PROBE/web.down" "$PROBE/web.bad" "$WORK/run/r.dropped" "$WORK/server"
