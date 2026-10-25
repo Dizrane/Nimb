@@ -41,6 +41,14 @@ final class BlackBox {
 
     private func record() {
         guard let dns, let telegram, let warp else { return }
+        Task {
+            // What Nimb thinks of the DNS is first made to follow the system (see `syncFromSystem`).
+            await dns.syncFromSystem()
+            self.recordNow(dns: dns, telegram: telegram, warp: warp)
+        }
+    }
+
+    private func recordNow(dns: DNSViewModel, telegram: TelegramProxyModel, warp: WarpTunnelModel) {
         // What the models know now (on the main thread), then what the system says (off it).
         let active = dns.active
         let tgRunning = telegram.isRunning, tgPort = telegram.port, tgListening = telegram.isListening, tgStats = telegram.stats

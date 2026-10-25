@@ -102,7 +102,14 @@ final class DNSViewModel: ObservableObject {
     /// Re-reads the system state off the main thread; skipped while a change is in progress.
     func refresh() {
         guard !isLocked else { return }
-        Task.detached {
+        Task { await syncFromSystem() }
+    }
+
+    /// The same, for a caller that has to wait for it: the black box looks at the system and at what Nimb thinks of it, and a Nimb that is only
+    /// in the menu bar (nobody opened its window or its menu) would otherwise judge by what it saw last, which another program may have changed.
+    func syncFromSystem() async {
+        guard !isLocked else { return }
+        let read = await Task.detached { () -> (active: DNSProvider?, warnings: [String], access: DNSManager.PasswordlessState) in
             let services = DNSManager.physicalServices()
             let active = DNSManager.activeProvider(on: services)
             var warnings: [String] = []
@@ -112,17 +119,14 @@ final class DNSViewModel: ObservableObject {
                 warnings = ["\(partial.provider.name) задан не на всех подключениях (нет на: \(partial.missing.joined(separator: ", "))). Нажмите кнопку, чтобы применить заново."]
                     + DNSManager.overrideWarnings(for: partial.provider)
             }
-            let shownWarnings = warnings
-            let access = DNSManager.passwordlessState(for: services)
-            await MainActor.run {
-                guard !self.isLocked else { return }
-                // Only what changed is published: the same value set again would redraw the pages and the menu for nothing.
-                if self.access != access { self.access = access }
-                if self.active != active { self.active = active }
-                if self.warnings != shownWarnings { self.warnings = shownWarnings }
-                if let active, self.selected != active { self.selected = active }
-            }
-        }
+            return (active, warnings, DNSManager.passwordlessState(for: services))
+        }.value
+        guard !isLocked else { return }
+        // Only what changed is published: the same value set again would redraw the pages and the menu for nothing.
+        if access != read.access { access = read.access }
+        if active != read.active { active = read.active }
+        if warnings != read.warnings { warnings = read.warnings }
+        if let active = read.active, selected != active { selected = active }
     }
 
     /// Turns the selected provider on, or resets to automatic DNS if one is already active.
