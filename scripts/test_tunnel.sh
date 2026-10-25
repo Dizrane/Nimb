@@ -47,6 +47,13 @@ case "$url" in
 esac
 STUB
 chmod +x "$WORK/bin/curl"
+# `scutil` writes down what it was told (the tunnel makes itself known to the system as its primary connection and takes it away).
+export NIMB_SCUTIL_LOG="$WORK/scutil.log"
+cat > "$WORK/bin/scutil" <<'STUB'
+#!/bin/sh
+cat >> "$NIMB_SCUTIL_LOG"
+STUB
+chmod +x "$WORK/bin/scutil"
 fail=0
 check() { if eval "$2"; then echo "ok:   $1"; else echo "FAIL: $1"; fail=1; fi; }
 
@@ -97,6 +104,7 @@ wait_restarts() { i=0; while [ $i -lt 10 ]; do [ "$(wc -l < "$WORK/run/r.restart
 helper_r up >/dev/null 2>&1
 pid1=$(state_pid)
 check "the stand-in tunnel is up" '[ -n "$pid1" ] && kill -0 "$pid1" 2>/dev/null'
+check "the tunnel does not make itself the primary connection of the system (that took the DNS of the Mac with it)" '! grep -q "OverridePrimary" "$WORK/scutil.log" && ! grep -q "^set " "$WORK/scutil.log"'
 wpid1=$(sed -n 's/^watcher=//p' "$WORK/run/r.state" | head -1)
 check "the daemon and the watcher have a process group each, of their own" '[ "$(ps -o pgid= -p "$pid1" | tr -d " ")" = "$pid1" ] && [ -n "$wpid1" ] && [ "$(ps -o pgid= -p "$wpid1" | tr -d " ")" = "$wpid1" ]'
 kill "$pid1"; wait_new_pid "$pid1"; wait_restarts 1; pid2=$(state_pid)
@@ -113,8 +121,10 @@ check "a tunnel that keeps dying is left alone: the note comes, the state goes" 
 : > "$WORK/run/r.restarts"
 helper_r up >/dev/null 2>&1
 pid5=$(state_pid)
+: > "$WORK/scutil.log"
 helper_r down
 sleep 4
+check "down takes away a record that an earlier helper may have left" 'grep -q "remove State:/Network/Service/NimbWARP/IPv4" "$WORK/scutil.log"'
 check "down is final: no daemon, no state, nothing started again" '! kill -0 "$pid5" 2>/dev/null && [ ! -f "$WORK/run/r.state" ] && [ -f "$WORK/run/r.stopped" ] && [ ! -s "$WORK/run/r.restarts" ]'
 check "up after down clears the sign of it" 'helper_r up >/dev/null 2>&1; [ ! -f "$WORK/run/r.stopped" ] && [ -n "$(state_pid)" ]'
 helper_r down

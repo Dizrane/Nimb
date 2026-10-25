@@ -1,5 +1,5 @@
 #!/bin/sh
-# nimb-tunnel 16: brings the Nimb WARP tunnel up and down. It runs as root, from /usr/local/libexec/nimb, which only root
+# nimb-tunnel 18: brings the Nimb WARP tunnel up and down. It runs as root, from /usr/local/libexec/nimb, which only root
 # can write to. The settings are read from warp.conf next to it, a file of plain key=value lines that Nimb wrote after
 # checking every value; nothing in it is ever executed.
 #
@@ -97,6 +97,7 @@ retarget() { # retarget <endpoint host> "<gateway> <interface>"
 # The routes of the tunnel, taken out. With a full tunnel they send every packet of the Mac into the interface of the daemon: if the
 # daemon is gone and they stay, the Mac has no internet at all.
 drop_routes() {
+    unregister_primary
     [ -f "$STATE" ] || return 0
     sed -n 's/^route=//p' "$STATE" | while IFS= read -r route; do
         # shellcheck disable=SC2086
@@ -170,7 +171,18 @@ cmd_down() {
     take_down
 }
 
+# Helper 17 made the tunnel the primary connection of the system for a while (a record in the dynamic store of the network settings, with
+# `OverridePrimary`). It took the DNS of the Mac with it: the primary connection has the last word about DNS, and the record had none, so the
+# AI services stopped answering. That was taken out again (helper 18). The record is only removed now, in case an earlier run left one: a
+# record that stayed would point the whole Mac at an interface that is gone.
+unregister_primary() {
+    scutil >/dev/null 2>&1 <<EOF
+remove State:/Network/Service/NimbWARP/IPv4
+EOF
+}
+
 take_down() {
+    unregister_primary
     [ -f "$STATE" ] || return 0
     pid=$(state_get pid)
     # The watcher first: it must not take the end of the daemon for a crash.
