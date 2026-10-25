@@ -538,9 +538,10 @@ import Testing
         #expect(AutoReportRules.tunnelAgrees(on: false, routes: 0, viaTunnel: false))
         #expect(!AutoReportRules.tunnelAgrees(on: false, routes: 3, viaTunnel: true), "routes left behind")
         #expect(AutoReportRules.tunnelAgrees(on: false, routes: 0, viaTunnel: true), "another VPN carries the traffic: not a fault of ours")
-        let stats = TelegramProxyStats()
-        #expect(AutoReportRules.telegramAgrees(running: false, listening: false, stats: stats))
-        #expect(!AutoReportRules.telegramAgrees(running: false, listening: true, stats: stats), "the port is held while it is off")
+        #expect(AutoReportRules.telegramAgrees(running: false, listening: false))
+        #expect(!AutoReportRules.telegramAgrees(running: false, listening: true), "the port is held while it is off")
+        #expect(AutoReportRules.telegramAgrees(running: true, listening: true), "failed connections are the network's, not a fault of Nimb")
+        #expect(!AutoReportRules.telegramAgrees(running: true, listening: false), "on, but nobody listens")
     }
 
     @Test func causesHaveKeysAndWords() {

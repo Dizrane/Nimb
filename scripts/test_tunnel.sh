@@ -38,7 +38,7 @@ for a in "$@"; do url=$a; done
 [ -n "${NIMB_PROBE_DIR:-}" ] || { printf 204; exit 0; }
 server=$(sed -n 's/^server=//p' "$NIMB_TUNNEL_RUN.state" 2>/dev/null | head -1)
 case "$url" in
-    *cloudflare.com*) [ -f "$NIMB_PROBE_DIR/web.down" ] && printf 000 || printf 200 ;;
+    *cloudflare.com*) if [ -f "$NIMB_PROBE_DIR/web.down" ] || grep -qx "$server" "$NIMB_PROBE_DIR/web.bad" 2>/dev/null; then printf 000; else printf 200; fi ;;
     *youtube.com*) grep -qx "$server" "$NIMB_PROBE_DIR/video.good" 2>/dev/null && printf 204 || printf 000 ;;
     *discord.com*) printf 200 ;;
     *) printf 000 ;;
@@ -183,6 +183,32 @@ message=$(helper_r up 2>&1 >/dev/null); code=$?
 check "no server answers: the start fails with the words about the handshake" '[ "$code" != 0 ] && echo "$message" | grep -q "рукопожатия"'
 check "and nothing is left: no state, no server kept" '[ ! -f "$WORK/run/r.state" ] && [ ! -f "$WORK/server" ]'
 rm -f "$PROBE/shake.bad"
+
+# A tunnel that is up but dead: the handshake is old (here the stand-in always says so) and the internet does not answer through it. Two looks of
+# the watcher in a row, then the server is started again, the others after it; none answers: the tunnel is taken down for the internet.
+export NIMB_TUNNEL_DEAD_EVERY=2 NIMB_TUNNEL_DEAD_AFTER=60
+rm -f "$WORK/server" "$WORK/search.at" "$PROBE/web.down" "$PROBE/web.bad" "$WORK/run/r.dropped"
+printf '203.0.113.7\n198.51.100.1\n198.51.100.2\n' > "$PROBE/video.good"
+helper_r up >/dev/null 2>&1
+sleep 7
+check "an old handshake and a working internet: the tunnel is left alone" '[ "$(state_server)" = 203.0.113.7 ] && ! grep -q "the tunnel is dead" "$WORK/run/r.log"'
+printf '203.0.113.7\n' > "$PROBE/web.bad"
+i=0; while [ $i -lt 40 ] && [ "$(state_server)" != 198.51.100.1 ]; do sleep 1; i=$((i + 1)); done
+sleep 1
+check "a dead tunnel is moved to a server through which the internet answers, and it is kept" '[ "$(state_server)" = 198.51.100.1 ] && [ "$(cat "$WORK/server")" = 198.51.100.1 ] && grep -q "the tunnel is dead" "$WORK/run/r.log" && [ ! -f "$WORK/run/r.dropped" ] && [ ! -f "$WORK/run/r.restarting" ]'
+check "and there is one watcher after it" '[ "$(pgrep -f "$HELPER" | wc -l | tr -d " ")" = 1 ] && [ "$(pgrep -f "$HELPER")" = "$(sed -n "s/^watcher=//p" "$WORK/run/r.state")" ]'
+printf '203.0.113.7\n198.51.100.1\n' > "$PROBE/web.bad"
+: > "$WORK/run/r.fake-uplink"
+n_dead=$(grep -c "the tunnel is dead" "$WORK/run/r.log")
+sleep 8
+check "no network at all (no route to the router): the tunnel is left alone, it will come back with the network" '[ "$(grep -c "the tunnel is dead" "$WORK/run/r.log")" = "$n_dead" ] && [ "$(state_server)" = 198.51.100.1 ]'
+echo "192.0.2.1 en0" > "$WORK/run/r.fake-uplink"
+touch "$PROBE/web.down"
+i=0; while [ $i -lt 60 ] && [ -f "$WORK/run/r.state" ]; do sleep 1; i=$((i + 1)); done
+sleep 1
+check "no server answers: the tunnel is taken down, nothing is left running, and the note says it was not the person" '[ ! -f "$WORK/run/r.state" ] && grep -Eq "^[0-9]+ no-handshake$" "$WORK/run/r.dropped" && ! pgrep -f "$WORK/amneziawg-go" >/dev/null && ! pgrep -f "$HELPER" >/dev/null && [ ! -f "$WORK/run/r.restarting" ]'
+rm -f "$PROBE/web.down" "$PROBE/web.bad" "$WORK/run/r.dropped" "$WORK/server"
+unset NIMB_TUNNEL_DEAD_EVERY NIMB_TUNNEL_DEAD_AFTER
 unset NIMB_TUNNEL_HANDSHAKE_WAIT
 check "a search never makes the daemon look as if it ended by itself" '[ "$(grep -c "daemon-exited" "$WORK/run/r.log" 2>/dev/null || true)" = "$exited_before" ]'
 unset NIMB_PROBE_DIR NIMB_TUNNEL_SERVERS

@@ -3,10 +3,11 @@ import Foundation
 
 /// The rules of «Помогать тестированию» that need no program around them: what counts as a fault and how often a report may go.
 enum AutoReportRules {
-    /// The proxy of Telegram does what it should: it listens while it is on and does not listen while it is off, and not more than a fifth of
-    /// its connections fail. (A key that is not ours is the person's business with Telegram, not a fault.)
-    static func telegramAgrees(running: Bool, listening: Bool, stats: TelegramProxyStats) -> Bool {
-        running ? listening && stats.failures * 5 <= stats.totalConnections : !listening
+    /// The proxy of Telegram does what it should: it listens while it is on and does not listen while it is off. How many of its connections
+    /// fail is not counted: it is the network's (a provider that has closed the addresses of Telegram makes nine of ten fail, and nothing in
+    /// Nimb can mend that; the manual report still shows the numbers). A key that is not ours is the person's business with Telegram.
+    static func telegramAgrees(running: Bool, listening: Bool) -> Bool {
+        running ? listening : !listening
     }
 
     /// The settings are as Nimb set them: its DNS stands on every connection when it is on, and nowhere when it is off. Whom the system really

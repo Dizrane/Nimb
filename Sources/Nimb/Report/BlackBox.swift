@@ -49,7 +49,7 @@ final class BlackBox {
         let uptime = Date().timeIntervalSince(started)
         Task.detached(priority: .utility) {
             let system = DiagnosticReport.snapshot(network: false)
-            let tgAgrees = AutoReportRules.telegramAgrees(running: tgRunning, listening: tgListening, stats: tgStats)
+            let tgAgrees = AutoReportRules.telegramAgrees(running: tgRunning, listening: tgListening)
             let dnsAgrees = AutoReportRules.dnsAgrees(active: active, serviceServers: system.serviceServers)
             let viaTunnel = system.interface.hasPrefix("utun")
             let handshake = tunnelOn ? (try? String(contentsOfFile: WarpPaths.daemonLog, encoding: .utf8)).flatMap { TunnelHandshake.age(inLog: $0, now: Date()) } : nil

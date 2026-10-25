@@ -1,5 +1,5 @@
 #!/bin/sh
-# nimb-tunnel 15: brings the Nimb WARP tunnel up and down. It runs as root, from /usr/local/libexec/nimb, which only root
+# nimb-tunnel 16: brings the Nimb WARP tunnel up and down. It runs as root, from /usr/local/libexec/nimb, which only root
 # can write to. The settings are read from warp.conf next to it, a file of plain key=value lines that Nimb wrote after
 # checking every value; nothing in it is ever executed.
 #
@@ -11,6 +11,9 @@
 #                       When YouTube does not open through the server of the settings (the exit of some servers is filtered), it tries a few
 #                       other WARP servers one after another and keeps the first that opens YouTube and Discord (a search that found nothing
 #                       is not repeated for ten minutes); it happens at a start only, a tunnel that works is never moved to another server
+#                       A tunnel that is up but dead (the server has not answered the handshake for ten minutes, and the internet does not
+#                       answer through it either: the whole traffic of the Mac goes into it) is restarted, then moved to another server;
+#                       if none answers, it is taken down, so that the Mac has its internet back, and a note tells Nimb
 #   nimb-tunnel down    remove the routes and stop it
 #   nimb-tunnel status  print "up <interface> <pid>" or "down"
 #   nimb-tunnel unregister  delete this Mac's anonymous WARP account at Cloudflare (best effort)
@@ -37,10 +40,15 @@ fi
 SERVERS="162.159.192.1 188.114.97.1 188.114.99.1"
 SEARCH_PAUSE=600            # seconds to wait after a search that found nothing
 HANDSHAKE_WAIT=16           # seconds to wait for the handshake with a server
+DEAD_EVERY=30               # ticks of the watcher between two looks at the age of the last handshake
+DEAD_AFTER=600              # a handshake older than this (seconds) is the beginning of a dead tunnel (a healthy one renews it every two minutes)
+DEAD_LOOKS=2                # looks in a row (internet dead through the tunnel too) before the tunnel is revived
 PROBE_WEB=https://www.cloudflare.com/cdn-cgi/trace
 PROBE_VIDEO=https://www.youtube.com/generate_204
 PROBE_CHAT=https://discord.com/
-if [ -n "${NIMB_TUNNEL_TEST:-}" ]; then SERVERS="${NIMB_TUNNEL_SERVERS:-$SERVERS}"; HANDSHAKE_WAIT="${NIMB_TUNNEL_HANDSHAKE_WAIT:-$HANDSHAKE_WAIT}"; fi
+if [ -n "${NIMB_TUNNEL_TEST:-}" ]; then SERVERS="${NIMB_TUNNEL_SERVERS:-$SERVERS}"; HANDSHAKE_WAIT="${NIMB_TUNNEL_HANDSHAKE_WAIT:-$HANDSHAKE_WAIT}"
+    DEAD_EVERY="${NIMB_TUNNEL_DEAD_EVERY:-0}"; DEAD_AFTER="${NIMB_TUNNEL_DEAD_AFTER:-$DEAD_AFTER}"
+fi
 
 say() { printf '%s\n' "$*"; }
 fail() { printf '%s\n' "$*" >&2; exit 1; }
@@ -100,6 +108,7 @@ watch_network() { # watch_network <daemon pid> <endpoint host>
     while alive "$1"; do
         sleep "$TICK"
         looks=$((looks + 1))
+        if [ "$DEAD_EVERY" -gt 0 ] && [ $((looks % DEAD_EVERY)) -eq 0 ]; then dead_check; fi
         [ $((looks % 5)) -eq 0 ] || continue
         trim_log
         now=$(uplink_now)
@@ -238,6 +247,68 @@ search_server() {
     printf '%s\n' "$(date +%s)" > "$DIR/search.at"
     if [ -n "$saved" ] && bring_up "$saved"; then return 0; fi
     bring_up ""
+}
+
+# A tunnel that is up but dead: the server has not answered the handshake for ten minutes (a healthy tunnel renews it every two minutes),
+# and the internet does not answer through the tunnel either. All the traffic of the Mac goes into it, so the person has no internet at
+# all until they switch the tunnel off and on. The watcher looks at the age of the last handshake every half minute (no network, only the
+# daemon is asked); only when it is old, the net itself is asked, twice in a row. Not for three minutes after the Mac wakes up (the first
+# handshake is still to come), and not without a network (no route to the router: the tunnel will come back with it).
+dead_check() {
+    now=$(date +%s)
+    if [ -n "${dead_seen:-}" ] && [ $((now - dead_seen)) -gt 90 ]; then dead_grace=$((now + 180)); fi
+    dead_seen=$now
+    [ "$now" -lt "${dead_grace:-0}" ] && return 0
+    iface=$(state_get interface)
+    [ -n "$iface" ] || return 0
+    shake=$(printf 'get=1\n\n' | uapi "$SOCKDIR/$iface.sock" | tr -d '\r' | sed -n 's/^last_handshake_time_sec=//p' | head -1)
+    case "$shake" in ''|0|*[!0-9]*) dead_looks=0; return 0 ;; esac
+    if [ $((now - shake)) -le "$DEAD_AFTER" ]; then dead_looks=0; return 0; fi
+    [ -n "$(uplink_now)" ] || { dead_looks=0; return 0; }
+    if probe_ok "$PROBE_WEB"; then dead_looks=0; return 0; fi
+    dead_looks=$((${dead_looks:-0} + 1))
+    [ "$dead_looks" -ge "$DEAD_LOOKS" ] || return 0
+    dead_looks=0
+    log_mark "the tunnel is dead (no handshake for $((now - shake)) s, no internet through it): reviving"
+    # The child ends this watcher with its first `bring_up` (this watcher is the one of the state) and goes on without it.
+    "$SELF" revive >>"$LOG" 2>&1
+}
+
+# Runs by the watcher of a dead tunnel (as root, no password): the server that is up is started again (the daemon may hold a socket of a
+# network that is gone), then the others one after another; the first through which the internet answers is kept. If none is, the tunnel is
+# taken down, the Mac has its internet back, and a note tells Nimb that it was not the person.
+cmd_revive() {
+    pid=$(state_get pid)
+    alive "$pid" || return 0
+    current=$(state_get server)
+    read_settings
+    set -m
+    trap '' HUP
+    NIMB_TUNNEL_RESTART=1; export NIMB_TUNNEL_RESTART
+    printf '%s\n' "$PPID" > "$RUN.restarting"
+    chmod 644 "$RUN.restarting"
+    tried=" "
+    for cand in "$current" $SERVERS conf; do
+        tryhost=$cand
+        if [ "$cand" = conf ]; then tryhost=""; cand=$conf_host; fi
+        case "$tried" in *" $cand "*) continue ;; esac
+        tried="$tried$cand "
+        bring_up "$tryhost" || continue
+        if probe_ok "$PROBE_WEB"; then
+            case " $SERVERS " in *" $tryhost "*) [ -n "$tryhost" ] && printf '%s\n' "$tryhost" > "$DIR/server" ;; *) rm -f "$DIR/server" ;; esac
+            log_mark "the tunnel is alive again at $(state_get server)"
+            start_watcher
+            rm -f "$RUN.restarting"
+            return 0
+        fi
+        # Handshake, but no internet through it: the next one.
+        log_mark "server ${tryhost:-of the settings} answers, but the internet does not"
+    done
+    take_down
+    rm -f "$RUN.restarting"
+    [ -f "$RUN.stopped" ] || { printf '%s no-handshake\n' "$(date +%s)" > "$RUN.dropped"; chmod 644 "$RUN.dropped"; }
+    log_mark "no server answers: the tunnel is taken down, the internet is back"
+    return 1
 }
 
 # The watcher follows the network and the daemon (see `watch_network`). One only, started when the server is final.
@@ -443,6 +514,7 @@ cmd_unregister() {
 case "${1:-}" in
     unregister) cmd_unregister ;;
     up) cmd_up ;;
+    revive) cmd_revive ;;
     down) cmd_down ;;
     status) cmd_status ;;
     retarget-test) [ -n "${NIMB_TUNNEL_TEST:-}" ] && retarget "$2" "$3" ;;
