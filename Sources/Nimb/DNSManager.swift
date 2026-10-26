@@ -36,6 +36,27 @@ enum DNSManager {
         return result
     }
 
+    /// The warning for a network that lets no DNS through but its own (a university, an office): the provider chosen in Nimb does not answer
+    /// at all while the internet itself works, so with its DNS set no name resolves and nothing opens. `nil` when it answers, and when the
+    /// internet is gone (that is another trouble, and it has its own words).
+    static let unreachablePrefix = "В этой сети DNS"
+
+    static func unreachableWarning(providerName: String, providerAnswers: Bool, internetWorks: Bool) -> String? {
+        guard !providerAnswers, internetWorks else { return nil }
+        return "\(unreachablePrefix) «\(providerName)» не отвечает: так бывает в сетях вуза или офиса, которые пропускают только свой DNS. Пока он включён, адреса могут не открываться совсем. Выключите «Нейросети» или смените сеть."
+    }
+
+    /// Asks the provider itself (each of its addresses, two seconds each), and the internet by an address, with no DNS. Off the main thread.
+    static func unreachableWarning(for provider: DNSProvider) -> String? {
+        func answers(_ server: String) -> Bool {
+            let output = (try? run("/usr/bin/dig", ["+time=2", "+tries=1", "+short", "@\(server)", "example.com", "A"], timeout: 6)) ?? ""
+            return output.split(separator: "\n").contains { $0.first?.isNumber == true }
+        }
+        if provider.addresses.contains(where: answers) { return nil }
+        let internet = (try? run("/usr/bin/curl", ["-s", "-o", "/dev/null", "-m", "4", "--connect-timeout", "3", "-w", "%{http_code}", "https://1.1.1.1/"], timeout: 8)).map { !$0.isEmpty && $0 != "000" } ?? false
+        return unreachableWarning(providerName: provider.name, providerAnswers: false, internetWorks: internet)
+    }
+
     static func servers(of service: String) -> [String] {
         guard let output = try? run("/usr/sbin/networksetup", ["-getdnsservers", service]) else { return [] }
         return output.split(separator: "\n").map(String.init).filter { $0.first?.isNumber == true }

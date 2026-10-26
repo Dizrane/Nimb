@@ -454,7 +454,7 @@ final class WarpTunnelModel: ObservableObject {
     nonisolated static func friendly(_ error: Error) -> String {
         let text = error.localizedDescription
         guard text.contains("рукопожатия") else { return text }
-        return text + ". Проверьте интернет и попробуйте ещё раз. Если не помогает, при следующей попытке Nimb сам создаст новые ключи. В некоторых сетях Cloudflare закрыт, тогда поможет другая сеть."
+        return text + ". Проверьте интернет и попробуйте ещё раз. В некоторых сетях (вуз, работа, отель) туннель закрыт: тогда поможет другая сеть или мобильный интернет."
     }
 
     /// The number in the first lines of a helper script ("# nimb-tunnel 2: ...").

@@ -108,6 +108,22 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
         next.play()
     }
 
+    private var dnsTold = false
+
+    /// The network lets no DNS through but its own (see `DNSManager.unreachableWarning`): the person is told once for as long as it lasts, and
+    /// again when it comes back after a time of working. Called at every look of the black box with what the page shows.
+    func dnsWarning(_ warnings: [String]) {
+        let present = warnings.contains { $0.hasPrefix(DNSManager.unreachablePrefix) }
+        guard present else { dnsTold = false; return }
+        guard !dnsTold, let center, isOn else { return }
+        dnsTold = true
+        let content = UNMutableNotificationContent()
+        content.title = "В этой сети DNS Nimb не отвечает"
+        content.body = "Адреса могут не открываться. Откройте Nimb и выключите «Нейросети»."
+        post(content, identifier: "nimb-dns", failure: "уведомление о DNS не показано")
+        AppLog.shared.add("notifications", "показал уведомление: DNS не отвечает в этой сети")
+    }
+
     /// The button of the test is idle for a moment after a press, so it cannot be pressed in a rush.
     @Published private(set) var testJustSent = false
 

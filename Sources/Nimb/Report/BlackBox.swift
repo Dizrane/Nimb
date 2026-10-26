@@ -44,6 +44,7 @@ final class BlackBox {
         Task {
             // What Nimb thinks of the DNS is first made to follow the system (see `syncFromSystem`).
             await dns.syncFromSystem()
+            Notifier.shared.dnsWarning(dns.warnings)
             self.recordNow(dns: dns, telegram: telegram, warp: warp)
         }
     }

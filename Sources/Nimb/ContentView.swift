@@ -115,6 +115,7 @@ final class DNSViewModel: ObservableObject {
             var warnings: [String] = []
             if let active {
                 warnings = DNSManager.overrideWarnings(for: active)
+                if let unreachable = DNSManager.unreachableWarning(for: active) { warnings.insert(unreachable, at: 0) }
             } else if let partial = DNSManager.partialProvider(on: services) {
                 warnings = ["\(partial.provider.name) задан не на всех подключениях (нет на: \(partial.missing.joined(separator: ", "))). Нажмите кнопку, чтобы применить заново."]
                     + DNSManager.overrideWarnings(for: partial.provider)

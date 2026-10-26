@@ -551,6 +551,31 @@ import Testing
         #expect(DailyDigest.lines(all, since: .distantPast).count == 4, "a line with no time is not a line of the box")
     }
 
+    @Test func aTunnelThatGetsNoAnswerIsNotAFaultOfNimbAndIsNotReported() {
+        #expect(!AutoReportRules.tunnelErrorIsOurs("сервер не ответил: нет рукопожатия за 16 секунд. Проверьте интернет"), "the network does not let it through")
+        #expect(!AutoReportRules.tunnelErrorIsOurs("Туннель остановился сам: его программа неожиданно завершилась."), "it has its own trigger")
+        #expect(!AutoReportRules.tunnelErrorIsOurs("Туннель выключился сам: Cloudflare не отвечал несколько минут."))
+        #expect(AutoReportRules.tunnelErrorIsOurs("amneziawg-go не запустился (см. /var/run/nimb-tunnel.log)"))
+        #expect(AutoReportRules.tunnelErrorIsOurs("Не удалось создать ключи WARP"))
+    }
+
+    @Test func theTextOfTheErrorOfAClosedNetworkDoesNotPromiseNewKeys() {
+        let text = WarpTunnelModel.friendly(DNSError.failed("сервер не ответил: нет рукопожатия за 16 секунд"))
+        #expect(text.contains("рукопожатия"), "the count of failed starts reads these words")
+        #expect(text.contains("вуз, работа, отель"))
+        #expect(!text.contains("новые ключи"))
+        #expect(WarpTunnelModel.friendly(DNSError.failed("нет сокета")) == "нет сокета")
+    }
+
+    @Test func theWarningOfAStrictNetworkComesOnlyWhenTheProviderIsSilentAndTheInternetWorks() {
+        let text = DNSManager.unreachableWarning(providerName: "GeoHide (EU)", providerAnswers: false, internetWorks: true)
+        #expect(text?.hasPrefix(DNSManager.unreachablePrefix) == true)
+        #expect(text?.contains("GeoHide (EU)") == true)
+        #expect(text?.contains("Выключите «Нейросети»") == true)
+        #expect(DNSManager.unreachableWarning(providerName: "GeoHide (EU)", providerAnswers: true, internetWorks: true) == nil)
+        #expect(DNSManager.unreachableWarning(providerName: "GeoHide (EU)", providerAnswers: false, internetWorks: false) == nil, "no internet is another trouble")
+    }
+
     @Test func theRulesOfAgreement() {
         #expect(AutoReportRules.tunnelAgrees(on: true, routes: 5, viaTunnel: true))
         #expect(!AutoReportRules.tunnelAgrees(on: true, routes: 0, viaTunnel: false))

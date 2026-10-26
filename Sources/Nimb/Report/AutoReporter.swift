@@ -10,6 +10,13 @@ enum AutoReportRules {
         running ? listening : !listening
     }
 
+    /// An error of the tunnel that Nimb can do something about. «Нет рукопожатия» (the server does not answer) is not one: the network of a
+    /// university, an office or a hotel lets no tunnel through, and Nimb cannot mend that (a tunnel that was silent after it had worked has its
+    /// own reports, and so has the case when new keys did not help). The words that are the tunnel's own news have their own trigger.
+    static func tunnelErrorIsOurs(_ message: String) -> Bool {
+        !(message.hasPrefix("Туннель остановился") || message.hasPrefix("Туннель выключился") || message.contains("рукопожатия"))
+    }
+
     /// The settings are as Nimb set them: its DNS stands on every connection when it is on, and nowhere when it is off. Whom the system really
     /// asks is left out here (another VPN or a browser with its own DNS may take it over, and that is not ours to mend); the manual report shows it.
     static func dnsAgrees(active: DNSProvider?, serviceServers: [[String]]) -> Bool {
@@ -259,7 +266,7 @@ final class AutoReporter: ObservableObject {
         // An error that the person is shown. The words that are the tunnel's own news (it stopped by itself) have their own trigger.
         dns.$errorMessage.compactMap { $0 }.sink { [weak self] _ in self?.notify(.error(.dns)) }.store(in: &cancellables)
         telegram.$errorMessage.compactMap { $0 }.sink { [weak self] _ in self?.notify(.error(.telegram)) }.store(in: &cancellables)
-        warp.$errorMessage.compactMap { $0 }.filter { !$0.hasPrefix("Туннель остановился") && !$0.hasPrefix("Туннель выключился") }
+        warp.$errorMessage.compactMap { $0 }.filter(AutoReportRules.tunnelErrorIsOurs)
             .sink { [weak self] _ in self?.notify(.error(.tunnel)) }.store(in: &cancellables)
         // The last run ended badly: told a little after the start, when the network is there.
         if SessionMarker.previousEndedBadly {
