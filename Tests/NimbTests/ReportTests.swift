@@ -576,6 +576,13 @@ import Testing
         #expect(DNSManager.unreachableWarning(providerName: "GeoHide (EU)", providerAnswers: false, internetWorks: false) == nil, "no internet is another trouble")
     }
 
+    @Test func theTunnelIsAdvisedToTelegramOnlyWhenItIsOffAndConnectionsKeepFailing() {
+        #expect(TelegramTunnelAdvice.shows(failures: 61, failuresRecently: true, tunnelIsOff: true))
+        #expect(!TelegramTunnelAdvice.shows(failures: 61, failuresRecently: true, tunnelIsOff: false), "the tunnel is on or being switched")
+        #expect(!TelegramTunnelAdvice.shows(failures: 61, failuresRecently: false, tunnelIsOff: true), "the errors have stopped")
+        #expect(!TelegramTunnelAdvice.shows(failures: 2, failuresRecently: true, tunnelIsOff: true), "a couple of errors are nothing")
+    }
+
     @Test func theRulesOfAgreement() {
         #expect(AutoReportRules.tunnelAgrees(on: true, routes: 5, viaTunnel: true))
         #expect(!AutoReportRules.tunnelAgrees(on: true, routes: 0, viaTunnel: false))

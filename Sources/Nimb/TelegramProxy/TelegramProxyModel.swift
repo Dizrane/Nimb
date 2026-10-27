@@ -11,6 +11,8 @@ final class TelegramProxyModel: ObservableObject {
     /// Telegram came with another key a moment ago (a proxy of an older install is still saved in it). It is true only while that goes on:
     /// ten seconds without such a connection and the warning goes away, and it comes back if they start again.
     @Published private(set) var wrongSecretRecently = false
+    /// Connections failed in the last ten minutes: the network does not let them through (see `TelegramTunnelAdvice`).
+    @Published private(set) var failuresRecently = false
     @Published var errorMessage: String? { didSet { if let message = errorMessage { AppLog.shared.add("telegram", "ошибка: \(message)") } } }
     /// Whether the proxy was on when Nimb was last used: it comes back by itself, nobody has to find a switch for it.
     @Published private(set) var autoStart: Bool {
@@ -26,6 +28,7 @@ final class TelegramProxyModel: ObservableObject {
     private var poller: Task<Void, Never>?
     private var isRecovering = false
     private var wrongSecretWatch = RecentCount(quiet: 10)
+    private var failuresWatch = RecentCount(quiet: TelegramTunnelAdvice.quiet)
     /// Opens the main window again after it has been closed; set by the window itself.
     var openMainWindow: (() -> Void)?
 
@@ -82,6 +85,8 @@ final class TelegramProxyModel: ObservableObject {
         autoStart = false
         stats = TelegramProxyStats()
         watchWrongSecret(0, reset: true)
+        failuresWatch.reset()
+        failuresRecently = false
     }
 
     /// Remembers when the count of connections with another key last grew, and says whether that was just now.
@@ -114,6 +119,8 @@ final class TelegramProxyModel: ObservableObject {
                 let snapshot = self.engine.snapshot
                 if snapshot != self.stats { self.stats = snapshot }
                 self.watchWrongSecret(snapshot.wrongSecret)
+                let failing = self.failuresWatch.observe(snapshot.failures, at: Date())
+                if failing != self.failuresRecently { self.failuresRecently = failing }
                 ticks += 1
                 // Every few seconds: is the port still listening? If not, bring it back by itself.
                 if ticks % 3 == 0, self.isRunning, !self.isRecovering, !self.engine.isListening {

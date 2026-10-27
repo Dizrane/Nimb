@@ -16,7 +16,7 @@ struct PageHost: View {
             case .home:
                 HomeHero(scale: 1.25).frame(maxWidth: .infinity, maxHeight: .infinity)
             case .ai: wide { AIPage(model: model) }
-            case .telegram: wide { TelegramPage(telegram: telegram) }
+            case .telegram: wide { TelegramPage(telegram: telegram, warp: warp) }
             case .media: wide { WarpPage(warp: warp) }
             case .settings: wide { SettingsView(model: model, onboarding: onboarding, warp: warp) }
             }

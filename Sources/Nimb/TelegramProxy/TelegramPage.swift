@@ -1,8 +1,21 @@
 import SwiftUI
 
+/// When the proxy of Telegram is told to try the tunnel: some providers let only a part of the servers of Telegram through (the rest, where
+/// some files and pictures are kept, open only through the tunnel). The proxy works alone; this is only advice, and it goes away as soon as
+/// the tunnel is on or the errors stop.
+enum TelegramTunnelAdvice {
+    /// How long without a new failure before the advice is withdrawn.
+    static let quiet: TimeInterval = 600
+
+    static func shows(failures: Int, failuresRecently: Bool, tunnelIsOff: Bool) -> Bool {
+        tunnelIsOff && failuresRecently && failures >= 5
+    }
+}
+
 /// The Telegram page: one switch for the proxy, one button that connects Telegram Desktop to it.
 struct TelegramPage: View {
     @ObservedObject var telegram: TelegramProxyModel
+    @ObservedObject var warp: WarpTunnelModel
     @ObservedObject private var background = BackgroundMode.shared
 
     var body: some View {
@@ -24,6 +37,9 @@ struct TelegramPage: View {
                     if telegram.isRunning {
                         connectCard
                         if !background.enabled { backgroundHint }
+                        if TelegramTunnelAdvice.shows(failures: telegram.stats.failures, failuresRecently: telegram.failuresRecently, tunnelIsOff: warp.phase == .off) {
+                            tunnelAdvice
+                        }
                         if telegram.wrongSecretRecently {
                             NoticeCard(lines: ["Telegram подключается с чужим ключом: в нём, похоже, указан другой прокси на этом порту. Нажмите «Открыть в Telegram» и подтвердите, а старый прокси удалите."], color: Theme.warn, symbol: "exclamationmark.triangle")
                         }
@@ -54,6 +70,18 @@ struct TelegramPage: View {
                 OutlineButton(title: "Скопировать ссылку", color: Theme.textPrimary, action: telegram.copyLink)
                 OutlineButton(title: "Открыть в Telegram", color: Theme.textPrimary, action: telegram.openInTelegram)
             }
+        }
+        .card()
+    }
+
+    private var tunnelAdvice: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text("Часть файлов Telegram лежит на серверах, до которых ваша сеть не достаёт: прокси сам с этим не справится. Туннель «YouTube и Discord» их откроет.")
+                .font(Typo.small)
+                .foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 4)
+            OutlineButton(title: "Включить туннель", color: Theme.textPrimary) { warp.connect() }
         }
         .card()
     }
