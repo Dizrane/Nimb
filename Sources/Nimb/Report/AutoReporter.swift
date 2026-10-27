@@ -29,8 +29,9 @@ enum AutoReportRules {
 
     /// The tunnel is as the program thinks: when it is on, it has its routes and the traffic goes through it; when it is off, it has no routes.
     /// (Another VPN that carries the traffic while ours is off is the person's business, not a fault of ours: the report of it is the manual one.)
-    static func tunnelAgrees(on: Bool, routes: Int, viaTunnel: Bool) -> Bool {
-        on ? routes > 0 && viaTunnel : routes == 0
+    /// While it is being switched on or off (`working`) the routes come and go, so nothing is compared.
+    static func tunnelAgrees(on: Bool, routes: Int, viaTunnel: Bool, working: Bool = false) -> Bool {
+        working || (on ? routes > 0 && viaTunnel : routes == 0)
     }
 }
 

@@ -198,10 +198,10 @@ import Testing
         #expect(!ReportChecks.telegram(running: true, port: 1443, listening: false, stats: TelegramProxyStats()).agrees)
     }
 
-    @Test func aProxyWithManyErrorsOrAnotherKeyDisagrees() {
+    @Test func aProxyWithManyErrorsIsStillAgreedButAnotherKeyIsNot() {
         var many = TelegramProxyStats()
-        many.totalConnections = 10; many.failures = 3
-        #expect(!ReportChecks.telegram(running: true, port: 1443, listening: true, stats: many).agrees)
+        many.totalConnections = 10; many.failures = 8
+        #expect(ReportChecks.telegram(running: true, port: 1443, listening: true, stats: many).agrees, "the errors are the network's, the numbers stay in «увидели»")
         var key = TelegramProxyStats()
         key.totalConnections = 10; key.wrongSecret = 1
         #expect(!ReportChecks.telegram(running: true, port: 1443, listening: true, stats: key).agrees)
@@ -582,6 +582,7 @@ import Testing
         #expect(AutoReportRules.tunnelAgrees(on: false, routes: 0, viaTunnel: false))
         #expect(!AutoReportRules.tunnelAgrees(on: false, routes: 3, viaTunnel: true), "routes left behind")
         #expect(AutoReportRules.tunnelAgrees(on: false, routes: 0, viaTunnel: true), "another VPN carries the traffic: not a fault of ours")
+        #expect(AutoReportRules.tunnelAgrees(on: false, routes: 5, viaTunnel: true, working: true), "being switched on: the routes are coming")
         #expect(AutoReportRules.telegramAgrees(running: false, listening: false))
         #expect(!AutoReportRules.telegramAgrees(running: false, listening: true), "the port is held while it is off")
         #expect(AutoReportRules.telegramAgrees(running: true, listening: true), "failed connections are the network's, not a fault of Nimb")

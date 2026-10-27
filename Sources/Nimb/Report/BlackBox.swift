@@ -54,6 +54,7 @@ final class BlackBox {
         let active = dns.active
         let tgRunning = telegram.isRunning, tgPort = telegram.port, tgListening = telegram.isListening, tgStats = telegram.stats
         let tunnelOn = warp.isOn
+        let tunnelWorking = if case .working = warp.phase { true } else { false }
         let tunnelWords = BlackBoxLine.phaseWords(warp.phase)
         let uptime = Date().timeIntervalSince(started)
         Task.detached(priority: .utility) {
@@ -65,7 +66,7 @@ final class BlackBox {
             let facts = BlackBoxLine.Facts(
                 dns: active?.name ?? "выкл", dnsAgrees: dnsAgrees,
                 telegram: tgRunning ? "вкл:\(tgPort) соединений=\(tgStats.totalConnections) ошибок=\(tgStats.failures)" : "выкл", telegramAgrees: tgAgrees,
-                tunnel: tunnelWords, tunnelAgrees: AutoReportRules.tunnelAgrees(on: tunnelOn, routes: system.routes, viaTunnel: viaTunnel),
+                tunnel: tunnelWords, tunnelAgrees: AutoReportRules.tunnelAgrees(on: tunnelOn, routes: system.routes, viaTunnel: viaTunnel, working: tunnelWorking),
                 routes: system.routes, interface: system.interface, handshakeSeconds: handshake)
             let line = BlackBoxLine.line(now: Date(), uptime: uptime, facts: facts, memoryMegabytes: BlackBoxLine.residentMegabytes())
             await MainActor.run {

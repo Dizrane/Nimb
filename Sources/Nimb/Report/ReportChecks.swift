@@ -75,8 +75,8 @@ enum ReportChecks {
         let total = stats.totalConnections
         var seen = "порт \(port) \(listening ? "слушает" : "не слушает"); соединений \(total), ошибок \(stats.failures), чужой ключ \(stats.wrongSecret), через WebSocket \(stats.webSocket), напрямую \(stats.directTCP)"
         if total == 0 { seen += " (Telegram ещё не подключался)" }
-        return ServiceCheck(name: name, expected: "порт \(port) слушает, Telegram подключается, ошибок не больше пятой части",
-                            seen: seen, agrees: listening && stats.wrongSecret == 0 && stats.failures * 5 <= total)
+        return ServiceCheck(name: name, expected: "порт \(port) слушает, Telegram подключается",
+                            seen: seen, agrees: listening && stats.wrongSecret == 0)
     }
 
     static func tunnel(on: Bool, routes: Int, interface: String, warp: String?, dropped: String?, restarts: [Date] = []) -> ServiceCheck {
