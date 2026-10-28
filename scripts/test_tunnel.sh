@@ -23,6 +23,7 @@ cat > "$WORK/bin/nc" <<'STUB'
 # `nc -z host port` (a plain connection to the server): it works unless NIMB_PROBE_DIR/wan.down exists.
 case "$*" in *-z*) [ -f "${NIMB_PROBE_DIR:-/nonexistent}/wan.down" ] && exit 1; exit 0 ;; esac
 payload=$(cat)
+[ -n "${NIMB_NC_LOG:-}" ] && printf '%s\n' "$payload" >> "$NIMB_NC_LOG"
 if [ -n "${NIMB_PROBE_DIR:-}" ] && [ -f "$NIMB_PROBE_DIR/shake.bad" ]; then
     server=$(sed -n 's/^server=//p' "$NIMB_TUNNEL_RUN.state" 2>/dev/null | head -1)
     case "$payload" in *get=1*) grep -qx "$server" "$NIMB_PROBE_DIR/shake.bad" && { printf 'errno=0\n'; exit 0; } ;; esac
@@ -250,6 +251,39 @@ check "a big log is cut to its last lines" '[ "$(wc -l < "$WORK/run/q.log" | tr 
 check "a silent server: no note is left" '[ ! -f "$WORK/run/q.dropped" ] && [ -f "$WORK/run/q.state" ]'
 kill "$quiet_watcher" "$quiet_daemon" 2>/dev/null
 wait 2>/dev/null
+
+# The Mac moves to another network: the route to the server is made again, and the daemon is told to forget the address it sent from.
+# A new address in the same network (the router is the same) does the same.
+sleep 120 & move_daemon=$!
+printf 'pid=%s\ninterface=utun95\nroute=-host 203.0.113.7 192.0.2.1\nuplink=192.0.2.1 en0\nsrcip=10.0.0.5\n' "$move_daemon" > "$WORK/run/m.state"
+echo "192.0.2.1 en0" > "$WORK/run/m.fake-uplink"
+cat > "$WORK/bin/ifconfig" <<'STUB'
+#!/bin/sh
+[ "$1" = en0 ] && [ -f "$NIMB_FAKE_IP" ] && printf '\tinet %s netmask 0xffffff00 broadcast 10.0.0.255\n' "$(cat "$NIMB_FAKE_IP")"
+exit 0
+STUB
+export NIMB_FAKE_IP="$WORK/run/m.ip" NIMB_NC_LOG="$WORK/nc.log"
+echo 10.0.0.5 > "$NIMB_FAKE_IP"
+: > "$WORK/route.log"; : > "$WORK/nc.log"
+NIMB_TUNNEL_TEST=1 NIMB_TUNNEL_DIR="$WORK" NIMB_TUNNEL_RUN="$WORK/run/m" NIMB_TUNNEL_PATH="$WORK/bin" "$HELPER" watch-test "$move_daemon" 203.0.113.7 >/dev/null 2>&1 &
+move_watcher=$!
+sleep 7
+check "nothing changed: the daemon is not told anything" '! grep -q "endpoint=" "$WORK/nc.log"'
+echo "198.51.100.1 en0" > "$WORK/run/m.fake-uplink"
+sleep 7
+check "another router: the route to the server is made again" 'grep -q "add -host 203.0.113.7 198.51.100.1" "$WORK/route.log"'
+check "another router: the daemon is told the endpoint again" 'grep -q "^endpoint=203.0.113.7:2408$" "$WORK/nc.log" && grep -q "^set=1$" "$WORK/nc.log"'
+: > "$WORK/nc.log"
+echo 10.0.0.77 > "$NIMB_FAKE_IP"
+sleep 7
+check "the same router, a new address: the daemon is told the endpoint again" 'grep -q "^endpoint=203.0.113.7:2408$" "$WORK/nc.log"'
+: > "$WORK/nc.log"
+sleep 7
+check "and then it is left alone" '! grep -q "endpoint=" "$WORK/nc.log"'
+kill "$move_watcher" "$move_daemon" 2>/dev/null
+wait 2>/dev/null
+rm -f "$WORK/bin/ifconfig"; printf '#!/bin/sh\nexit 0\n' > "$WORK/bin/ifconfig"; chmod +x "$WORK/bin/ifconfig"
+unset NIMB_FAKE_IP NIMB_NC_LOG
 
 # `down` by the person: the watcher goes first, then the daemon; no note is left, because nothing happened that the person did not do.
 sleep 120 & down_daemon=$!

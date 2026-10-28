@@ -1,5 +1,5 @@
 #!/bin/sh
-# nimb-tunnel 18: brings the Nimb WARP tunnel up and down. It runs as root, from /usr/local/libexec/nimb, which only root
+# nimb-tunnel 19: brings the Nimb WARP tunnel up and down. It runs as root, from /usr/local/libexec/nimb, which only root
 # can write to. The settings are read from warp.conf next to it, a file of plain key=value lines that Nimb wrote after
 # checking every value; nothing in it is ever executed.
 #
@@ -15,6 +15,8 @@
 #                       answer through it either: the whole traffic of the Mac goes into it, while the server can still be reached the
 #                       usual way, so the trouble is the tunnel's and not the internet's) is restarted, then moved to another server;
 #                       if none answers, it is taken down, so that the Mac has its internet back, and a note tells Nimb
+#                       When the Mac changes its network (or its address in it), the daemon is told to forget the address it sent from: it
+#                       would go on sending from the old one ("can't assign requested address") and no handshake would ever come
 #   nimb-tunnel down    remove the routes and stop it
 #   nimb-tunnel status  print "up <interface> <pid>" or "down"
 #   nimb-tunnel unregister  delete this Mac's anonymous WARP account at Cloudflare (best effort)
@@ -94,6 +96,20 @@ retarget() { # retarget <endpoint host> "<gateway> <interface>"
     fi
 }
 
+# After a change of the network the daemon may keep sending from the address it had in the old one (`sendmsg: can't assign requested address`,
+# and the handshake never comes: the tunnel is dead, and with it the whole traffic of the Mac). Setting the endpoint of the peer again makes the
+# daemon forget that address. The daemon is not restarted: a call in Discord goes on.
+rebind_endpoint() { # rebind_endpoint <endpoint host>
+    (
+        read_settings 2>/dev/null || exit 0
+        sock="$SOCKDIR/$(state_get interface).sock"
+        [ -S "$sock" ] || [ -n "${NIMB_TUNNEL_TEST:-}" ] || exit 0
+        case "$1" in *:*) ep="[$1]:$port" ;; *) ep="$1:$port" ;; esac
+        printf 'set=1\npublic_key=%s\nendpoint=%s\n\n' "$public_key" "$ep" | uapi "$sock" >/dev/null
+    )
+    log_mark "the network changed: the endpoint of the daemon is set again"
+}
+
 # The routes of the tunnel, taken out. With a full tunnel they send every packet of the Mac into the interface of the daemon: if the
 # daemon is gone and they stay, the Mac has no internet at all.
 drop_routes() {
@@ -114,7 +130,17 @@ watch_network() { # watch_network <daemon pid> <endpoint host>
         [ $((looks % 5)) -eq 0 ] || continue
         trim_log
         now=$(uplink_now)
-        [ -n "$now" ] && [ "$now" != "$(state_get uplink)" ] && retarget "$2" "$now"
+        [ -n "$now" ] && [ -f "$STATE" ] || continue
+        changed=no
+        if [ "$now" != "$(state_get uplink)" ]; then retarget "$2" "$now"; changed=yes; fi
+        # The address of the Mac may change with no change of the router (a new lease, a reconnect to the same network).
+        ip=$(ifconfig "${now##* }" 2>/dev/null | awk '$1 == "inet" {print $2; exit}')
+        if [ -n "$ip" ] && [ "$ip" != "$(state_get srcip)" ]; then
+            [ -n "$(state_get srcip)" ] && changed=yes
+            sed -i '' '/^srcip=/d' "$STATE"
+            printf 'srcip=%s\n' "$ip" >> "$STATE"
+        fi
+        [ $changed = yes ] && rebind_endpoint "$2"
     done
     # The daemon stopped without `down` (killed, crashed). Without a state file `down` has already done all this.
     [ -f "$STATE" ] || return 0
