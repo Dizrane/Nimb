@@ -596,6 +596,17 @@ import Testing
         #expect(UpdateError.countsAsFailedCheck(URLError(.notConnectedToInternet)))
     }
 
+    @Test func thePasswordlessRuleNeedsEveryFolderToTheHelperToBeRootsAlone() {
+        #expect(WarpPaths.isSafeFolder(owner: 0, permissions: 0o755))
+        #expect(!WarpPaths.isSafeFolder(owner: 501, permissions: 0o755), "the person owns it: he can swap what is in it")
+        #expect(!WarpPaths.isSafeFolder(owner: 0, permissions: 0o775), "the group may write")
+        #expect(!WarpPaths.isSafeFolder(owner: 0, permissions: 0o777), "everybody may write")
+        let ours: [String: (owner: Int, permissions: Int)] = ["/usr": (0, 0o755), "/usr/local": (501, 0o755), "/usr/local/libexec": (0, 0o755)]
+        #expect(WarpPaths.unsafeFolder(attributes: { ours[$0] }) == "/usr/local", "after a chown of /usr/local")
+        let fine: [String: (owner: Int, permissions: Int)] = ["/usr": (0, 0o755), "/usr/local": (0, 0o755), "/usr/local/libexec": (0, 0o755)]
+        #expect(WarpPaths.unsafeFolder(attributes: { fine[$0] }) == nil, "the folder of the helper is not there yet: the installation makes it as root")
+    }
+
     @Test func theRulesOfAgreement() {
         #expect(AutoReportRules.tunnelAgrees(on: true, routes: 5, viaTunnel: true))
         #expect(!AutoReportRules.tunnelAgrees(on: true, routes: 0, viaTunnel: false))

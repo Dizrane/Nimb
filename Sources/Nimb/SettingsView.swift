@@ -96,7 +96,9 @@ struct SettingsView: View {
                         )
                         PermissionRow(
                             title: "Туннель YouTube и Discord",
-                            detail: warp.passwordless
+                            detail: warp.passwordless && warp.unsafeFolder != nil
+                                ? "Небезопасно: папка «\(warp.unsafeFolder ?? "")» не только у администратора, через неё можно подменить помощника. Заберите разрешение."
+                                : warp.passwordless
                                 ? "Туннель включается и выключается без пароля."
                                 : "Туннель включается по паролю или Touch ID. Можно разрешить без пароля.",
                             granted: warp.passwordless,

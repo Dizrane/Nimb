@@ -25,6 +25,26 @@ enum WarpPaths {
     static let sudoersPath = "/etc/sudoers.d/nimb-tunnel"
     static let passwordlessCommands = ["\(helper) up", "\(helper) down"]
 
+    /// The folders on the way to the helper. The rule «без пароля» starts the helper as root, so nobody but root may be able to put another one
+    /// in its place: whoever can write to any folder on the way (the person, after a `chown -R` of /usr/local, or the group, or others) can
+    /// rename the folder below and put a helper of his own there.
+    static let folderChain = ["/usr", "/usr/local", "/usr/local/libexec", dir]
+
+    static func isSafeFolder(owner: Int, permissions: Int) -> Bool { owner == 0 && permissions & 0o022 == 0 }
+
+    /// The first folder of the chain that exists and is not safe (`nil`: all are). `attributes` says who owns a folder and who may write to it;
+    /// a folder that is not there yet is made by the installation, as root.
+    static func unsafeFolder(attributes: (String) -> (owner: Int, permissions: Int)? = diskAttributes) -> String? {
+        folderChain.first { path in attributes(path).map { !isSafeFolder(owner: $0.owner, permissions: $0.permissions) } ?? false }
+    }
+
+    private static func diskAttributes(_ path: String) -> (owner: Int, permissions: Int)? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
+              let owner = (attributes[.ownerAccountID] as? NSNumber)?.intValue,
+              let permissions = (attributes[.posixPermissions] as? NSNumber)?.intValue else { return nil }
+        return (owner, permissions)
+    }
+
     /// Settings and helper are in place (the config itself is readable by root only, so only its presence is checked).
     static var isInstalled: Bool {
         FileManager.default.isExecutableFile(atPath: helper) && FileManager.default.fileExists(atPath: config)
@@ -135,6 +155,8 @@ final class WarpTunnelModel: ObservableObject {
     /// sudo lets this person start and stop the tunnel without a password.
     @Published private(set) var passwordless = false
     @Published private(set) var isSettingAccess = false
+    /// A folder on the way to the helper that is not root's alone (see `WarpPaths.folderChain`): the rule «без пароля» would not be safe.
+    @Published private(set) var unsafeFolder: String?
 
     private var timer: Timer?
     private static let droppedSeenKey = "tunnelDroppedSeen"
@@ -323,7 +345,8 @@ final class WarpTunnelModel: ObservableObject {
     func refreshAccess() {
         Task.detached {
             let allowed = DNSManager.sudoAllows(WarpPaths.passwordlessCommands)
-            await MainActor.run { self.passwordless = allowed }
+            let unsafe = WarpPaths.unsafeFolder()
+            await MainActor.run { self.passwordless = allowed; if unsafe != self.unsafeFolder { self.unsafeFolder = unsafe } }
         }
     }
 
@@ -332,6 +355,10 @@ final class WarpTunnelModel: ObservableObject {
         guard !isWorking, !isSettingAccess else { return }
         let user = NSUserName()
         if enable {
+            if let folder = WarpPaths.unsafeFolder() {
+                errorMessage = "Правило «без пароля» не включаю: папка «\(folder)» принадлежит не администратору или открыта для записи другим, через неё можно подменить помощника, а он запускается от root. Исправить: sudo chown root:wheel \(folder) && sudo chmod go-w \(folder). Или вводите пароль при каждом включении."
+                return
+            }
             guard user.range(of: #"^[A-Za-z0-9_][A-Za-z0-9._-]*$"#, options: .regularExpression) != nil else {
                 errorMessage = "Имя пользователя «\(user)» содержит необычные символы, правило для него не создаю."
                 return
