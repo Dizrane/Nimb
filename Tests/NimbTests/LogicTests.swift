@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Testing
 @testable import Nimb
@@ -550,6 +551,29 @@ import Testing
         let list = [release("windows-v0.1.0", body: String(repeating: "d", count: 64) + "  Nimb-Setup.exe"),
                     release("v0.9.9", body: hash + "  Nimb-0.9.9.zip")]
         #expect(Updater.newestForMac(in: list)?.sha256 == hash)
+    }
+
+    @Test func theSignatureIsTheAssetNextToTheArchive() {
+        let signed = release("v0.9.9", assets: ["Nimb-0.9.9.dmg", "Nimb-0.9.9.zip", "Nimb-0.9.9.zip.sig"])
+        #expect(Updater.newestForMac(in: [signed])?.signatureURL?.lastPathComponent == "Nimb-0.9.9.zip.sig")
+        #expect(Updater.newestForMac(in: [release("v0.9.9")])?.signatureURL == nil, "a release without it is not installed")
+    }
+
+    @Test func onlyTheMakerOfTheReleasesCanSignAnUpdate() {
+        let maker = Curve25519.Signing.PrivateKey()
+        let zip = Data("the new Nimb".utf8)
+        let signature = (try? maker.signature(for: zip))?.base64EncodedString() ?? ""
+        let keys = [maker.publicKey.rawRepresentation.base64EncodedString()]
+        #expect(Updater.isSigned(zip, signature: signature, keys: keys))
+        #expect(Updater.isSigned(zip, signature: signature + "\n", keys: keys), "the file ends with a line break")
+        #expect(!Updater.isSigned(Data("another Nimb".utf8), signature: signature, keys: keys), "the file was changed")
+        let thief = Curve25519.Signing.PrivateKey()
+        let forged = (try? thief.signature(for: zip))?.base64EncodedString() ?? ""
+        #expect(!Updater.isSigned(zip, signature: forged, keys: keys), "signed with another key")
+        #expect(!Updater.isSigned(zip, signature: "not base64 at all", keys: keys))
+        #expect(!Updater.isSigned(zip, signature: signature, keys: ["garbage"]))
+        #expect(!Updater.isSigned(zip, signature: signature, keys: []))
+        #expect(!Updater.trustedKeys.isEmpty && Data(base64Encoded: Updater.trustedKeys[0])?.count == 32, "the key built into the app is a key")
     }
 
     @Test func theFeedGivesTheNewestTagOfTheMac() {

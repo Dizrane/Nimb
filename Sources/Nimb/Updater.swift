@@ -8,6 +8,9 @@ struct Release: Equatable {
     /// SHA-256 of the zip, taken from the release description.
     let sha256: String?
     let pageURL: URL
+    /// The signature of the zip, an asset next to it (`<zip name>.sig`). The hash in the notes only shows that the file came whole: it lives
+    /// where the zip lives, and whoever can change the one can change the other. The signature cannot be made without the private key.
+    var signatureURL: URL? = nil
 }
 
 struct UpdateError: LocalizedError {
@@ -101,7 +104,8 @@ enum Updater {
             assetName: asset.name,
             zipURL: asset.browser_download_url,
             sha256: sha256(for: asset.name, in: body) ?? firstSHA256(in: body),
-            pageURL: best.html_url
+            pageURL: best.html_url,
+            signatureURL: best.assets.first(where: { $0.name == asset.name + ".sig" })?.browser_download_url
         )
     }
 
@@ -121,7 +125,8 @@ enum Updater {
         guard html.contains(name), let zip = URL(string: "https://github.com/\(repository)/releases/download/\(tag)/\(name)") else {
             throw UpdateError("На странице релиза нет файла \(name).")
         }
-        return Release(version: version, assetName: name, zipURL: zip, sha256: sha256(for: name, in: html), pageURL: page)
+        let signature = html.contains(name + ".sig") ? URL(string: "https://github.com/\(repository)/releases/download/\(tag)/\(name).sig") : nil
+        return Release(version: version, assetName: name, zipURL: zip, sha256: sha256(for: name, in: html), pageURL: page, signatureURL: signature)
     }
 
     /// The newest tag of the Mac in the feed of releases; if the feed cannot be read, the one that `/releases/latest` leads to, when it is a
@@ -184,6 +189,19 @@ enum Updater {
 
     // MARK: Installing
 
+    /// The public keys the updates are signed with (Ed25519, 32 bytes, base64). The private one stays with the maker of the releases, off the net
+    /// (`scripts/sign_release.swift`). More than one is allowed, so that a key can be replaced: the app with the new key goes out first.
+    static let trustedKeys = ["A8Hv9MEsL+jtyYnniwH1PART5CiHUZqgJofpqRz/ttE="]
+
+    /// Whether `signature` (the text of the `.sig` file: base64) is a signature of `data` made by one of the keys.
+    static func isSigned(_ data: Data, signature text: String, keys: [String] = trustedKeys) -> Bool {
+        guard let signature = Data(base64Encoded: text.trimmingCharacters(in: .whitespacesAndNewlines)) else { return false }
+        return keys.contains { key in
+            guard let raw = Data(base64Encoded: key), let publicKey = try? Curve25519.Signing.PublicKey(rawRepresentation: raw) else { return false }
+            return publicKey.isValidSignature(signature, for: data)
+        }
+    }
+
     /// Downloads and verifies the release, then starts a helper that swaps the app after this process exits.
     /// The caller must quit the app once this returns.
     static func install(_ release: Release, status: @escaping @Sendable (String) -> Void) async throws {
@@ -210,6 +228,16 @@ enum Updater {
         try FileManager.default.createDirectory(at: stage, withIntermediateDirectories: true)
         let zip = stage.appendingPathComponent("Nimb.zip")
         try FileManager.default.moveItem(at: downloaded, to: zip)
+
+        status("Проверка подписи…")
+        guard let signatureURL = release.signatureURL else {
+            throw UpdateError("У этого релиза нет подписи, установка отменена. Скачайте обновление вручную со страницы релиза.")
+        }
+        let (signatureData, signatureResponse) = try await URLSession.shared.data(from: signatureURL)
+        guard (signatureResponse as? HTTPURLResponse)?.statusCode == 200,
+              isSigned(try Data(contentsOf: zip), signature: String(decoding: signatureData, as: UTF8.self)) else {
+            throw UpdateError("Подпись не подошла: это обновление сделано не автором Nimb. Установка отменена.")
+        }
 
         status("Проверка…")
         let newApp = try verifyAndUnpack(zip: zip, expectedSHA256: expected, version: release.version, into: stage)
