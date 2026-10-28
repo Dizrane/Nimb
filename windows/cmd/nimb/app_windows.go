@@ -75,6 +75,7 @@ func (a *App) startup(ctx context.Context) {
 	var upgradedFrom string
 	a.previousEndedBadly, upgradedFrom = beginSession(Version, previousLastLine)
 	a.watchSessionEnd()
+	hideTitleBarIcon()
 	startPulse()
 	logLine(fmt.Sprintf("запуск Nimb %s (процесс %d)", Version, os.Getpid()))
 	if afterWebView2Crash {

@@ -62,8 +62,8 @@ func main() {
 			CustomTheme: &windows.ThemeSettings{
 				DarkModeTitleBar:          windows.RGB(0, 0, 0),
 				DarkModeTitleBarInactive:  windows.RGB(0, 0, 0),
-				DarkModeTitleText:         windows.RGB(235, 235, 240),
-				DarkModeTitleTextInactive: windows.RGB(120, 120, 128),
+				DarkModeTitleText:         windows.RGB(0, 0, 0), // as the bar: the text stays for the taskbar and Alt+Tab, but is not seen (the Mac has none)
+				DarkModeTitleTextInactive: windows.RGB(0, 0, 0),
 				DarkModeBorder:            windows.RGB(28, 28, 30),
 				DarkModeBorderInactive:    windows.RGB(28, 28, 30),
 			},

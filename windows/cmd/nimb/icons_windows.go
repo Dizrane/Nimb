@@ -3,9 +3,12 @@
 package main
 
 import (
+	"bytes"
 	_ "embed"
 	"encoding/binary"
 	"fmt"
+	"image"
+	"image/png"
 	"unsafe"
 
 	"fyne.io/systray"
@@ -130,7 +133,9 @@ func setWindowIcon(active bool) {
 	if dpi == 0 {
 		dpi = 96
 	}
-	for _, kind := range []struct{ metric, which uintptr }{{smCxSmIcon, iconSmall}, {smCxIcon, iconBig}} {
+	hideCaptionIcon(hwnd, dpi)
+	// Only the big icon is given (taskbar, Alt+Tab): the title bar has none, as the window of the Mac has no icon and no name there.
+	for _, kind := range []struct{ metric, which uintptr }{{smCxIcon, iconBig}} {
 		size, _, _ := pMetricsForDpi.Call(kind.metric, dpi)
 		icon := iconOfSize(data, int(size))
 		if icon == 0 {
@@ -140,6 +145,36 @@ func setWindowIcon(active bool) {
 		pSendMessage.Call(hwnd, wmSetIcon, kind.which, icon)
 	}
 	shownWindow.hwnd, shownWindow.active, shownWindow.chosen = hwnd, active, true
+}
+
+// hideCaptionIcon gives the title bar a small icon that is empty: the bar then shows no icon (the window of the Mac has no icon and no name
+// there; the title text is of the colour of the bar, see main). The big icon, of the taskbar and Alt+Tab, is the real one. A style of the
+// window that is meant to hide the icon did not (Windows 11 draws the icon of the program anyway), a transparent one does.
+func hideCaptionIcon(hwnd uintptr, dpi uintptr) {
+	size, _, _ := pMetricsForDpi.Call(smCxSmIcon, dpi)
+	var png bytes.Buffer
+	if err := pngEncode(&png, int(size)); err != nil {
+		return
+	}
+	if icon, _, _ := pCreateIconFromRes.Call(uintptr(unsafe.Pointer(&png.Bytes()[0])), uintptr(png.Len()), 1, iconVersion, size, size, 0); icon != 0 {
+		pSendMessage.Call(hwnd, wmSetIcon, iconSmall, icon)
+	}
+}
+
+// hideTitleBarIcon does it at the start, before the first look of the window.
+func hideTitleBarIcon() {
+	if hwnd := ownWindow(); hwnd != 0 {
+		dpi, _, _ := pGetDpiForWindow.Call(hwnd)
+		if dpi == 0 {
+			dpi = 96
+		}
+		hideCaptionIcon(hwnd, dpi)
+	}
+}
+
+// pngEncode writes a transparent square picture of the given size.
+func pngEncode(w *bytes.Buffer, size int) error {
+	return png.Encode(w, image.NewNRGBA(image.Rect(0, 0, size, size)))
 }
 
 // iconOfSize makes an icon of the picture in an .ico file that is the nearest in size (the smallest that is not smaller than wanted).
