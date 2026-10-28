@@ -12,8 +12,13 @@ struct Release: Equatable {
 
 struct UpdateError: LocalizedError {
     let message: String
-    init(_ message: String) { self.message = message }
+    /// GitHub turned the request away because too many came from this address (Cloudflare WARP, which Nimb turns on, is one address for many).
+    let isRateLimit: Bool
+    init(_ message: String, isRateLimit: Bool = false) { self.message = message; self.isRateLimit = isRateLimit }
     var errorDescription: String? { message }
+
+    /// Whether a failed check counts towards the automatic report «updates cannot be checked»: a limit of GitHub is not Nimb's to mend.
+    static func countsAsFailedCheck(_ error: Error) -> Bool { !((error as? UpdateError)?.isRateLimit ?? false) }
 }
 
 /// Checks GitHub for a newer release and replaces the running app with it.
@@ -63,7 +68,7 @@ enum Updater {
         guard status == 200 else {
             throw UpdateError(status == 403 || status == 429
                 ? "GitHub ограничил число запросов с вашего адреса. Попробуйте через несколько минут."
-                : "GitHub не отдал информацию о релизе.")
+                : "GitHub не отдал информацию о релизе.", isRateLimit: status == 403 || status == 429)
         }
         guard let release = newestForMac(in: try JSONDecoder().decode([GitHubRelease].self, from: data)) else {
             throw UpdateError("На GitHub нет релиза Nimb для Mac с файлом Nimb-*.zip.")

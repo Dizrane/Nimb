@@ -324,8 +324,10 @@ final class UpdateViewModel: ObservableObject {
             } catch {
                 AppLog.shared.add("update", "проверка обновлений не удалась: \(error.localizedDescription)")
                 lastCheckFailed = true
-                failedInARow += 1
-                if failedInARow == 3 { AutoReporter.shared.notify(.updateCheck) }
+                if UpdateError.countsAsFailedCheck(error) {
+                    failedInARow += 1
+                    if failedInARow == 3 { AutoReporter.shared.notify(.updateCheck) }
+                }
                 if case .available = before { state = before } else { state = .idle }
             }
         }
@@ -333,13 +335,17 @@ final class UpdateViewModel: ObservableObject {
 
     func install(_ release: Release) {
         state = .installing("Загрузка…")
+        AppLog.shared.add("update", "устанавливаю версию \(release.version)")
         Task {
             do {
                 try await Updater.install(release) { text in
+                    AppLog.shared.add("update", "установка: \(text)")
                     Task { @MainActor in self.state = .installing(text) }
                 }
+                AppLog.shared.add("update", "версия \(release.version) установлена, перезапускаю")
                 AppDelegate.quit(stoppingServices: false)
             } catch {
+                AppLog.shared.add("update", "установка не удалась: \(error.localizedDescription)")
                 state = .failed(error.localizedDescription)
             }
         }

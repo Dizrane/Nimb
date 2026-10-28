@@ -590,6 +590,12 @@ import Testing
         #expect(!WarpTunnelModel.helperNeedsReplacing(installed: 18, bundled: 18))
     }
 
+    @Test func aLimitOfGitHubIsNotAFailedCheckOfUpdates() {
+        #expect(!UpdateError.countsAsFailedCheck(UpdateError("GitHub ограничил число запросов", isRateLimit: true)))
+        #expect(UpdateError.countsAsFailedCheck(UpdateError("GitHub не отдал информацию о релизе.")))
+        #expect(UpdateError.countsAsFailedCheck(URLError(.notConnectedToInternet)))
+    }
+
     @Test func theRulesOfAgreement() {
         #expect(AutoReportRules.tunnelAgrees(on: true, routes: 5, viaTunnel: true))
         #expect(!AutoReportRules.tunnelAgrees(on: true, routes: 0, viaTunnel: false))
