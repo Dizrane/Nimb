@@ -11,3 +11,7 @@ Resources/amneziawg-go
 !windows/cmd/nimb/build/
 windows/cmd/nimb/build/bin/
 windows/cmd/nimb/frontend/wailsjs/
+
+# Reports of people (saved by hand or taken with report-relay/export.sh): never in the repository
+nimb-report-*.txt
+nimb-reports-*.txt
