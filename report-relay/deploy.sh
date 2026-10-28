@@ -62,7 +62,7 @@ printf '%s' "$EXPORT_KEY" | npx wrangler secret put EXPORT_KEY >/dev/null
 CHAT=""
 for _ in 1 2 3 4 5; do
     sleep 3
-    CHAT=$(curl -s -m 20 "$URL/chat?key=$EXPORT_KEY" | python3 -c 'import json,sys
+    CHAT=$(curl -s -m 20 -H "Authorization: Bearer $EXPORT_KEY" "$URL/chat" | python3 -c 'import json,sys
 try: print(json.load(sys.stdin).get("chat") or "")
 except Exception: print("")' || true)
     [ -n "$CHAT" ] && break
@@ -88,6 +88,5 @@ fi
 echo
 echo "Адрес ретранслятора, его нужно вписать в приложение: $URL/"
 echo
-echo "Все накопленные отчёты одним файлом (откройте в браузере, ссылку никому не показывайте):"
-echo "   $URL/export?key=$EXPORT_KEY"
-echo "   Если добавить &clear=1, выгруженные отчёты после этого удалятся."
+echo "Ключ для выгрузки отчётов (сохраните его, показан один раз): $EXPORT_KEY"
+echo "Все накопленные отчёты одним файлом: ./export.sh (спросит ключ; с --clear выгруженные отчёты после этого удалятся)."

@@ -1,7 +1,8 @@
 // Nimb report relay: takes a report from the app, keeps it for 90 days (KV `REPORTS`) and passes it to the developer's Telegram
 // as a text file. A report that the program sends by itself (`auto: true`, the switch «Помогать тестированию») is marked 🤖 in the caption
 // (with tags: #авто #причина #платформа #версия #установка, to search by) and goes to the same chat as the others; a report written by a
-// person is marked ✍️. `GET /export?key=EXPORT_KEY` gives all the kept reports as one text file (`&clear=1` removes them after).
+// person is marked ✍️. `GET /export` with the header `Authorization: Bearer EXPORT_KEY` gives all the kept reports as one text file (`?clear=1` removes them after). The key is
+// in a header and not in the address: an address stays in the history of a browser and in logs.
 // The bot token, the chat and the export key live in the secrets of this Worker; nothing secret is in the app.
 
 const MAX_BODY = 100_000;
@@ -15,8 +16,8 @@ const reply = (body, status = 200) =>
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    if (request.method === "GET" && url.pathname === "/export") return exportReports(url, env);
-    if (request.method === "GET" && url.pathname === "/chat") return findChat(url, env);
+    if (request.method === "GET" && url.pathname === "/export") return exportReports(request, url, env);
+    if (request.method === "GET" && url.pathname === "/chat") return findChat(request, env);
     if (request.method !== "POST") return new Response("Nimb report relay", { status: 200 });
 
     if (Number(request.headers.get("content-length") || 0) > MAX_BODY) return reply({ ok: false, error: "too large" }, 413);
@@ -104,8 +105,8 @@ async function forward(env, data, caption) {
 
 // Used once by deploy.sh: the id of the chat that the person opened with the bot. The Mac of the person may not reach Telegram at all
 // (it is slowed down or closed there), Cloudflare does, so the Worker asks.
-async function findChat(url, env) {
-  if (!sameKey(url.searchParams.get("key"), env.EXPORT_KEY) || !env.BOT_TOKEN) return new Response("no", { status: 401 });
+async function findChat(request, env) {
+  if (!sameKey(bearer(request), env.EXPORT_KEY) || !env.BOT_TOKEN) return new Response("no", { status: 401 });
   const api = env.TELEGRAM_API || "https://api.telegram.org";
   try {
     const response = await fetch(`${api}/bot${env.BOT_TOKEN}/getUpdates`);
@@ -117,6 +118,11 @@ async function findChat(url, env) {
   }
 }
 
+// The key of the person who owns the Worker, from the header `Authorization: Bearer <key>`.
+function bearer(request) {
+  return (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+}
+
 function sameKey(given, wanted) {
   if (typeof given !== "string" || typeof wanted !== "string" || wanted.length < 8 || given.length !== wanted.length) return false;
   let diff = 0;
@@ -125,8 +131,8 @@ function sameKey(given, wanted) {
 }
 
 // All the kept reports in one text file, oldest first, with a list of them at the top.
-async function exportReports(url, env) {
-  if (!env.REPORTS || !sameKey(url.searchParams.get("key"), env.EXPORT_KEY)) return new Response("no", { status: 401 });
+async function exportReports(request, url, env) {
+  if (!env.REPORTS || !sameKey(bearer(request), env.EXPORT_KEY)) return new Response("no", { status: 401 });
   const listed = await env.REPORTS.list({ prefix: "r:", limit: EXPORT_LIMIT });
   const items = [];
   for (const { name } of listed.keys) {

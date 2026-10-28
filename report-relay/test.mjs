@@ -69,11 +69,13 @@ await Promise.all(pending.splice(0));
 kv.delete([...kv.keys()].find((k) => k.endsWith(":SLOW01")));
 globalThis.fetch = async () => { throw new Error("offline"); };
 
-const get = (query, e = kept) => worker.fetch(new Request(`https://relay.test/export${query}`), e);
+const get = (query, e = kept, key) =>
+  worker.fetch(new Request(`https://relay.test/export${query}`, key === undefined ? {} : { headers: { authorization: `Bearer ${key}` } }), e);
 assert.equal((await get("")).status, 401);
-assert.equal((await get("?key=wrong")).status, 401);
-assert.equal((await get("?key=secret-export-key", { ...kept, EXPORT_KEY: "short" })).status, 401);
-r = await get("?key=secret-export-key");
+assert.equal((await get("", kept, "wrong")).status, 401);
+assert.equal((await get("?key=secret-export-key")).status, 401, "the key in the address is not taken any more");
+assert.equal((await get("", { ...kept, EXPORT_KEY: "short" }, "short")).status, 401);
+r = await get("", kept, "secret-export-key");
 assert.equal(r.status, 200);
 assert.match(r.headers.get("content-disposition"), /nimb-reports-\d{4}-\d{2}-\d{2}\.txt/);
 const body = await r.text();
@@ -82,7 +84,7 @@ assert.match(body, /№ AB12CD · 0\.9\.3 · macos · .* · Не включае�
 assert.match(body, /№ ZZ99YY .* Второй человек/);
 assert.ok(body.indexOf("AB12CD") < body.indexOf("ZZ99YY"), "oldest first");
 assert.equal(kv.size, 3, "export alone does not delete");
-await get("?key=secret-export-key&clear=1");
+await get("?clear=1", kept, "secret-export-key");
 assert.equal(kv.size, 0, "clear=1 deletes what was given");
 
 // A report that the program sends by itself is marked, tagged, kept with its cause, and goes to the chat of the automatic reports if there is one.
@@ -114,20 +116,21 @@ assert.equal(kv.size, 0, "clear=1 deletes what was given");
   assert.equal(odd.install, "", "and so is an odd number of installation");
   kv.clear();
   r = await post(autoBody, kept2);
-  const exported = await (await worker.fetch(new Request("https://relay.test/export?key=secret-export-key"), kept2)).text();
+  const exported = await (await worker.fetch(new Request("https://relay.test/export", { headers: { authorization: "Bearer secret-export-key" } }), kept2)).text();
   assert.match(exported, /№ AU70AA · 0\.9\.14 · macos · .* · авто tunnel-dropped · установка K7M2X9QP · /);
-  await worker.fetch(new Request("https://relay.test/export?key=secret-export-key&clear=1"), kept2);
+  await worker.fetch(new Request("https://relay.test/export?clear=1", { headers: { authorization: "Bearer secret-export-key" } }), kept2);
   assert.equal(kv.size, 0);
 }
 
 // The chat of the person is found by the Worker, with the export key.
 globalThis.fetch = async () => new Response(JSON.stringify({ ok: true, result: [{ message: { chat: { id: 7 } } }, { message: { chat: { id: 4242 } } }] }), { status: 200 });
-const find = (query, e = kept) => worker.fetch(new Request(`https://relay.test/chat${query}`), e);
-assert.equal((await find("")).status, 401);
-assert.equal((await find("?key=wrong")).status, 401);
-assert.equal((await find("?key=secret-export-key", { REPORTS, EXPORT_KEY: "secret-export-key" })).status, 401, "needs the bot token");
-assert.deepEqual(await (await find("?key=secret-export-key")).json(), { ok: true, chat: "4242" });
+const find = (e = kept, key) =>
+  worker.fetch(new Request("https://relay.test/chat", key === undefined ? {} : { headers: { authorization: `Bearer ${key}` } }), e);
+assert.equal((await find()).status, 401);
+assert.equal((await find(kept, "wrong")).status, 401);
+assert.equal((await find({ REPORTS, EXPORT_KEY: "secret-export-key" }, "secret-export-key")).status, 401, "needs the bot token");
+assert.deepEqual(await (await find(kept, "secret-export-key")).json(), { ok: true, chat: "4242" });
 globalThis.fetch = async () => new Response(JSON.stringify({ ok: true, result: [] }), { status: 200 });
-assert.deepEqual(await (await find("?key=secret-export-key")).json(), { ok: true, chat: null });
+assert.deepEqual(await (await find(kept, "secret-export-key")).json(), { ok: true, chat: null });
 
 console.log("relay: all checks passed");
