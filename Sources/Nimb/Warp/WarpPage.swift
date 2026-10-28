@@ -82,7 +82,7 @@ struct WarpPage: View {
             Text("Что произойдёт при включении")
                 .font(Typo.name)
                 .foregroundStyle(Theme.textPrimary)
-            Text("Nimb создаст для этого Mac анонимный аккаунт Cloudflare WARP и запросит пароль. Пока туннель включён, через Cloudflare идёт весь трафик Mac, и некоторые сайты, например банки и Госуслуги, могут не открываться: тогда выключите туннель. Включая, вы принимаете условия Cloudflare WARP.")
+            Text("Nimb создаст для этого Mac анонимный аккаунт Cloudflare WARP и запросит пароль. Пока туннель включён, через Cloudflare идёт весь трафик Mac, и некоторые сайты, например банки и Госуслуги, могут не открываться: тогда выключите туннель. Туннель нужен для доступа, а не для анонимности: если он упадёт, трафик пойдёт напрямую. Включая, вы принимаете условия Cloudflare WARP.")
                 .font(Typo.small)
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
