@@ -469,12 +469,15 @@ final class WarpTunnelModel: ObservableObject {
         return (helperVersion(at: WarpPaths.helper), bundled)
     }
 
-    /// The installed helper is older than the one inside this app (after an update of Nimb): it is replaced together with
-    /// the start, in the same password prompt. The settings are left as they are.
+    /// The installed helper is not the one inside this app (after an update of Nimb, or when another build left its own): it is replaced
+    /// together with the start, in the same password prompt. The settings are left as they are. A newer one is replaced too: the app and its
+    /// helper go as a pair, and a report came from a Mac whose helper (version 22) was none of ours and left a dead tunnel for six hours.
+    nonisolated static func helperNeedsReplacing(installed: Int?, bundled: Int) -> Bool { (installed ?? 0) != bundled }
+
     private var upgrade: (binary: URL, helper: URL)? {
         guard let files = bundledFiles,
               let bundled = Self.helperVersion(at: files.helper.path),
-              (Self.helperVersion(at: WarpPaths.helper) ?? 0) < bundled else { return nil }
+              Self.helperNeedsReplacing(installed: Self.helperVersion(at: WarpPaths.helper), bundled: bundled) else { return nil }
         return files
     }
 
