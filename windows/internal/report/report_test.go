@@ -222,3 +222,28 @@ func TestMACAddressesGo(t *testing.T) {
 		t.Errorf("%s", got)
 	}
 }
+
+// A report that goes by itself carries its cause and the number of the installation; a manual one carries neither.
+func TestAnAutomaticReportSaysWhyAndForWhom(t *testing.T) {
+	var got map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		json.Unmarshal(raw, &got)
+	}))
+	defer server.Close()
+	t.Setenv("NIMB_REPORT_URL", server.URL)
+
+	if err := SendAuto(context.Background(), "0.2.3", "ABC234", "текст", "tunnel-silent", "K7M2XQ9P"); err != nil {
+		t.Fatal(err)
+	}
+	if got["auto"] != true || got["trigger"] != "tunnel-silent" || got["install"] != "K7M2XQ9P" || got["platform"] != "windows" || got["v"] != float64(1) || got["id"] != "ABC234" || got["app"] != "0.2.3" {
+		t.Errorf("sent %v", got)
+	}
+	got = nil
+	if err := Send(context.Background(), "0.2.3", "ABC234", "текст"); err != nil {
+		t.Fatal(err)
+	}
+	if _, has := got["auto"]; has || got["install"] != nil || got["trigger"] != nil {
+		t.Errorf("a manual report must not carry the marks of an automatic one: %v", got)
+	}
+}

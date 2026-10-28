@@ -23,6 +23,7 @@ import (
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"github.com/Dizrane/Nimb/windows/internal/autoreport"
 	"github.com/Dizrane/Nimb/windows/internal/dnsx"
 	"github.com/Dizrane/Nimb/windows/internal/ipc"
 	"github.com/Dizrane/Nimb/windows/internal/logfile"
@@ -66,6 +67,16 @@ type ReportPrep struct {
 // providers have not been checked lately, asks them).
 func (a *App) ReportPrepare() ReportPrep {
 	id := report.NewID()
+	facts := a.collectReportFacts()
+	a.mu.Lock()
+	a.reportID, a.reportFacts = id, facts
+	a.mu.Unlock()
+	return ReportPrep{ID: id, Facts: facts}
+}
+
+// collectReportFacts is the body of a report: what a manual one and one that goes by itself («Помогать тестированию») both carry, with
+// what names the person taken out.
+func (a *App) collectReportFacts() string {
 	st := a.GetState()
 	var out []string
 
@@ -142,6 +153,11 @@ func (a *App) ReportPrepare() ReportPrep {
 			WrongSecret: tg.WrongSecret, WebSocket: tg.WebSocket, Direct: tg.DirectTCP}).Lines(),
 		report.Tunnel(report.TunnelFacts{On: st.Media.On, Routes: routes, Via: via, ViaTunnel: viaTunnel, Warp: trace["warp"], Dropped: dropped, Restarts: unixTimes(st.Media.Restarts)}).Lines(),
 	)...))
+
+	// What the black box wrote every five minutes before this moment: what happened before the trouble is there even when it is found later.
+	if box := blackBoxTail(autoreport.ReportLines); len(box) > 0 {
+		out = append(out, report.Section("Чёрный ящик (раз в 5 минут, последние записи)", box...))
+	}
 
 	var shown []string
 	for _, e := range []string{st.AI.Error, st.Telegram.Error, st.Media.Error, st.ServiceError, st.Update.Error} {
@@ -264,11 +280,7 @@ func (a *App) ReportPrepare() ReportPrep {
 	if diag != nil && diag.TunnelServer != "" {
 		env.Public = append(env.Public, diag.TunnelServer)
 	}
-	facts := report.Clean(strings.Join(out, "\n\n"), env)
-	a.mu.Lock()
-	a.reportID, a.reportFacts = id, facts
-	a.mu.Unlock()
-	return ReportPrep{ID: id, Facts: facts}
+	return report.Clean(strings.Join(out, "\n\n"), env)
 }
 
 func joinLines(parts ...[]string) []string {

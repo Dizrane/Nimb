@@ -19,6 +19,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"github.com/Dizrane/Nimb/windows/internal/autoreport"
 	"github.com/Dizrane/Nimb/windows/internal/dnsx"
 	"github.com/Dizrane/Nimb/windows/internal/ipc"
 	"github.com/Dizrane/Nimb/windows/internal/netfacts"
@@ -58,6 +59,8 @@ type App struct {
 	upd   updateState // the look for a new version
 	sites siteState   // the check of YouTube and Discord
 
+	auto autoState // «Помогать тестированию» (autoreport_windows.go)
+
 	hintMu sync.Mutex // the line about the DNS of Firefox
 	hint   string
 	hintAt time.Time
@@ -93,6 +96,11 @@ func (a *App) startup(ctx context.Context) {
 	}
 	goSafe("перенос прокси Telegram в службу", a.migrateTelegram)
 	goKeep("проверка обновлений", a.updateLoop)
+	goKeep("чёрный ящик", a.blackBoxLoop)
+	if a.previousEndedBadly {
+		// Told a little after the start, when the network is there.
+		goSafe("отчёт о неожиданном завершении", func() { time.Sleep(60 * time.Second); a.notifyAuto(autoreport.PreviousEndedBadly) })
+	}
 	goSafe("возврат туннеля после перезагрузки", a.restoreTunnel)
 	startTray(a)
 }
@@ -162,11 +170,13 @@ type State struct {
 		DroppedAt    int64   `json:"droppedAt,omitempty"`
 		DropReason   string  `json:"dropReason,omitempty"`
 		Restarts     []int64 `json:"restarts,omitempty"` // when the program of the tunnel was started again (unix), the last day
+		Restarting   bool    `json:"restarting,omitempty"`
 	} `json:"media"`
 	Providers []Provider `json:"providers"`
 	Probe     ProbeView  `json:"probe"`
 	Update    UpdateView `json:"update"`
 	Sites     SiteView   `json:"sites"`
+	Help      HelpView   `json:"help"`
 }
 
 func providerList() []Provider {
@@ -185,6 +195,7 @@ func (a *App) GetState() State {
 	st.Probe = a.probe.view()
 	st.Update = a.upd.view()
 	st.Sites = a.sites.view()
+	st.Help = a.helpView()
 	st.Update.Notify = !a.settings.get().UpdateNotifyOff
 	st.AI.Warnings = []string{}
 	set := a.settings.get()
@@ -223,6 +234,7 @@ func (a *App) GetState() State {
 			st.Media.HandshakeAgo = resp.Tunnel.HandshakeAgo
 			st.Media.DroppedAt, st.Media.DropReason = resp.Tunnel.DroppedAt, resp.Tunnel.DropReason
 			st.Media.Restarts = resp.Tunnel.Restarts
+			st.Media.Restarting = resp.Tunnel.Restarting
 			a.noticeRestarts(resp.Tunnel)
 			// What the person has on is what comes back after a restart of the computer (the restore itself is in restoreTunnel).
 			if resp.Tunnel.Up && !a.restoring.Load() && !a.settings.get().TunnelWanted {
@@ -285,6 +297,7 @@ func (a *App) noticeRestarts(t *ipc.TunnelStatus) {
 	}
 	a.settings.update(func(s *Settings) { s.TunnelRestartsSeen = fresh[len(fresh)-1].Unix() })
 	logLine(fmt.Sprintf("туннель: программа туннеля остановилась сама, помощник запустил её снова (раз: %d)", len(fresh)))
+	a.notifyAuto(autoreport.TunnelRestarted)
 }
 
 func unixTimes(secs []int64) []time.Time {
@@ -361,6 +374,7 @@ func (a *App) noticeDrop(t *ipc.TunnelStatus) bool {
 	a.mu.Lock()
 	a.errs["media"] = tunneldrop.MessageFor(t.DropReason)
 	a.mu.Unlock()
+	a.notifyAuto(autoreport.TunnelDropped)
 	return true
 }
 
@@ -386,6 +400,7 @@ func (a *App) end(name string, err error) Result {
 	a.mu.Unlock()
 	if err != nil {
 		logLine(serviceName(name) + ": ОШИБКА: " + err.Error())
+		a.autoError(name, err)
 		return Result{Error: err.Error()}
 	}
 	return Result{OK: true}

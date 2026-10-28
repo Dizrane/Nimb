@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/Dizrane/Nimb/windows/internal/autoreport"
 )
 
 // Settings are what the window remembers between runs. They hold no keys of the tunnel (those stay with the service) and nothing
@@ -38,6 +40,17 @@ type Settings struct {
 	UpdateNotifyOff bool `json:"updateNotifyOff,omitempty"`
 	// WindowSized: the window has been given its size (client area 1100 by 660) once; after that the size the person left is kept.
 	WindowSized bool `json:"windowSized,omitempty"`
+
+	// «Помогать тестированию» (off until the person turns it on, see autoreport_windows.go). HelpInstall is the random number of this
+	// installation (it is wiped when the switch is turned off, and so is everything below); HelpHistory are the reports that went in the last
+	// day (their cause and time); HelpCount and HelpLast are how many went and when the last one did (unix); HelpDigest is when the last
+	// digest of the day went, or when the switch was turned on.
+	HelpTesting bool              `json:"helpTesting,omitempty"`
+	HelpInstall string            `json:"helpInstall,omitempty"`
+	HelpHistory []autoreport.Sent `json:"helpHistory,omitempty"`
+	HelpCount   int               `json:"helpCount,omitempty"`
+	HelpLast    int64             `json:"helpLast,omitempty"`
+	HelpDigest  int64             `json:"helpDigest,omitempty"`
 }
 
 type settingsStore struct {

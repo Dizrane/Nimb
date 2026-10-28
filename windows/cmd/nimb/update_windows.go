@@ -16,6 +16,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"github.com/Dizrane/Nimb/windows/internal/autoreport"
 	"github.com/Dizrane/Nimb/windows/internal/notice"
 	"github.com/Dizrane/Nimb/windows/internal/update"
 )
@@ -112,6 +113,7 @@ func (a *App) checkUpdate() {
 		// GitHub answered: there is nothing for Windows to offer yet. That is a check that worked, with no newer version.
 		a.upd.failed, a.upd.retrySoon, a.upd.checked, a.upd.release = false, false, time.Now(), nil
 		a.upd.mu.Unlock()
+		a.resetFailedChecks()
 		a.logCheck("обновления: для Windows пока нет релизов (" + err.Error() + ")")
 		return
 	}
@@ -120,10 +122,21 @@ func (a *App) checkUpdate() {
 		a.upd.failed, a.upd.retrySoon = true, !errors.Is(err, update.ErrLimit)
 		a.upd.mu.Unlock()
 		a.logCheck("обновления: не удалось проверить: " + err.Error())
+		// Three failed checks in a row are told (a limit of GitHub is not a failed check: it is the address of the person that is limited).
+		if !errors.Is(err, update.ErrLimit) {
+			a.auto.mu.Lock()
+			a.auto.failed++
+			told := a.auto.failed == 3
+			a.auto.mu.Unlock()
+			if told {
+				a.notifyAuto(autoreport.UpdateCheck)
+			}
+		}
 		return
 	}
 	newer := update.IsNewer(rel.Version, Version)
 	a.upd.failed, a.upd.retrySoon, a.upd.checked = false, false, time.Now()
+	a.resetFailedChecks()
 	a.upd.err = "" // a check that worked: the error of an installation that did not happen is old news
 	if newer {
 		a.upd.release = &rel

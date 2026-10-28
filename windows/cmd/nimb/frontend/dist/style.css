@@ -19,7 +19,16 @@
 html,body{margin:0;height:100%;background:var(--base);color:var(--t1);font:13px/1.25 var(--sans);overflow:hidden;user-select:none;-webkit-user-select:none;cursor:default;-webkit-font-smoothing:antialiased}
 button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;text-align:inherit}
 :focus-visible{outline:2px solid rgba(255,255,255,.6);outline-offset:2px;border-radius:9px}
-#app{display:flex;flex-direction:column;height:100%}
+/* What is behind everything (js/sky.js): the glow of the halo, still stars, a vignette. 0.10 and 0.17 of the glow, 0.45 and 0.7 of the
+   vignette are the Mac's; they are one gradient each at its full strength and an opacity (0.588 = 0.10/0.17, 0.643 = 0.45/0.7). */
+#sky{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
+#sky>*{position:absolute;inset:0;width:100%;height:100%}
+.sky-glow{background:radial-gradient(circle 300px at 50% 13%,rgba(255,255,255,.17),rgba(255,255,255,0));opacity:.588;transition:opacity 1.7s ease-in-out}
+.sky-stars{opacity:0;transition:opacity 1.7s ease-in-out}
+.sky-vig{background:radial-gradient(circle farthest-corner at 50% 50%,rgba(0,0,0,0) 240px,rgba(0,0,0,.7) 520px);opacity:.643;transition:opacity 1.7s ease-in-out}
+#sky.lit .sky-glow,#sky.lit .sky-vig{opacity:1}
+#sky.lit .sky-stars{opacity:1}
+#app{display:flex;flex-direction:column;height:100%;position:relative;z-index:1}
 .shell{display:flex;flex:1;min-height:0}
 canvas{display:block}
 
@@ -231,3 +240,22 @@ textarea:focus,input[type=text]:focus{outline:none;border-color:rgba(255,255,255
 .note-in{display:flex;align-items:flex-start;gap:10px}
 .note-sign{flex:none;margin-top:1px;display:flex}.note-sign.bad{color:var(--bad)}.note-sign.warn{color:var(--warn)}
 .note-text{font-size:12px;line-height:1.25;color:rgba(255,255,255,.86);user-select:text;-webkit-user-select:text}
+
+/* ---- «Помогать тестированию»: the second line of the card of the report, and its window (HelpTestingRow.swift) ---- */
+.card.stack12{display:flex;flex-direction:column;gap:12px}
+.card.stack12 .hr{height:1px;background:var(--hair);margin:0 -14px}
+.rowline{display:flex;align-items:center;gap:12px}
+.rowline .nm{font-size:15px;font-weight:500;color:var(--t1)}
+.nm-line{display:flex;align-items:center;gap:6px}
+.nm-line .info{width:20px;height:22px;display:flex;align-items:center;justify-content:center;color:var(--t2);flex:none}.nm-line .info:hover{color:#fff}
+.settings .card .rowline .sm{margin-top:3px}
+.pop-back{position:fixed;inset:0 0 42px 0;z-index:30;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(0,0,0,.55)}
+.pop{width:480px;max-width:100%;max-height:100%;display:flex;flex-direction:column;border-radius:14px;background:#0b0b0b;border:1px solid rgba(255,255,255,.2);box-shadow:0 18px 50px rgba(0,0,0,.7)}
+.pop-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px 8px;flex:none}
+.pop-head h3{margin:0;font:400 17px/1.2 var(--serif);color:var(--t1)}
+.pop-body{display:flex;flex-direction:column;gap:10px;padding:2px 16px 16px;overflow:auto;min-height:0;user-select:text;-webkit-user-select:text}
+.pop .pt-t{font-size:12.5px;font-weight:600;color:var(--t1)}
+.pop .pt-x{font-size:12px;line-height:1.3;color:var(--t2);margin-top:2px}
+.pop .hr{height:1px;background:var(--hair)}
+.pop-pre{max-height:160px;margin:0}
+.pop .btn{align-self:flex-start}

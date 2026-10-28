@@ -256,11 +256,48 @@ export function notifyCard(S, extra) {
     <button class="pill ${on ? 'on' : ''}" role="switch" aria-checked="${on}" aria-label="Уведомления об обновлениях" data-a="notify" data-f="notify" id="notify"></button></div>`;
 }
 
+const INFO_CIRCLE = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><circle cx="8" cy="8" r="6.5"/><path d="M8 7.2v4.2M8 4.6v.1" stroke-linecap="round"/></svg>';
+
+/** «сегодня в 14:20», «23 октября в 14:20»: when the last report of «Помогать тестированию» went. */
+function lastWords(unix) {
+  const at = new Date(unix * 1000), now = new Date();
+  const time = at.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  return at.toDateString() === now.toDateString() ? `сегодня в ${time}` : `${at.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })} в ${time}`;
+}
+
+/** The second line of the card «Сообщить о проблеме» (HelpTestingRow.swift): the switch «Помогать тестированию» and what it is. */
+function helpRow(S) {
+  const h = S.help || {};
+  const detail = !h.on ? 'Сам отправит отчёт, если что-то пойдёт не так.'
+    : !h.last ? 'Включено. Пока ничего не отправлено.' : `Отправлено: ${h.count}, последний ${lastWords(h.last)}.`;
+  return `<div class="hr"></div><div class="rowline"><div class="grow"><div class="nm-line"><span class="nm">Помогать тестированию</span>
+    <button class="info" data-a="helpinfo" data-f="helpinfo" id="helpinfo" aria-label="Что такое «Помогать тестированию»" title="Что это и что отправляется">${INFO_CIRCLE}</button></div>
+    <div class="sm">${detail}</div></div>
+    <button class="pill ${h.on ? 'on' : ''}" role="switch" aria-checked="${!!h.on}" aria-label="Помогать тестированию" data-a="helptest" data-f="helptest" id="helptest"></button></div>`;
+}
+
+/** What the switch does, in words, and a report as it would go now (HelpTestingInfo of the Mac). */
+function helpPopover(help) {
+  const point = (title, text) => `<div class="pt"><div class="pt-t">${title}</div><div class="pt-x">${text}</div></div>`;
+  const example = help.preview != null ? `<div class="sm" style="margin:0">Так выглядит отчёт сейчас</div><pre class="preview pop-pre">${esc(help.preview)}</pre>`
+    : `<button class="btn" data-a="helppreview" data-f="helppreview" id="helppreview" ${help.loading ? 'disabled' : ''}>${help.loading ? 'Собираю…' : 'Показать пример отчёта'}</button>`;
+  return `<div class="pop-back" data-a="helpclose"><div class="pop" role="dialog" aria-label="Помогать тестированию" data-stop="1">
+    <div class="pop-head"><h3>Помогать тестированию</h3><button class="btn soft" data-a="helpclose" data-f="helpclose" id="helpclose">Закрыть</button></div>
+    <div class="pop-body">
+    ${point('Когда', 'Сразу уходит отчёт, если сломалось что-то серьёзное: программа закрылась неожиданно, туннель остановился сам или включён, но сервер не отвечает больше 10 минут, сервис работает не так, как должен, больше 10 минут, включение или выключение закончилось ошибкой, проверка обновлений не удаётся несколько раз подряд. Если сайт или сервис просто не открылся, это не причина: такое бывает у всех.')}
+    ${point('Как часто', 'О сбоях: не чаще одного отчёта в час и пяти в сутки, одно и то же не чаще раза в 6 часов. И раз в сутки одна сводка: цифры за день, чтобы видеть мелочи, которые не стоят отдельного отчёта. Отчёт, который не удалось отправить (сети нет), ждёт в файле на этом компьютере не дольше суток и уходит, когда сеть вернётся.')}
+    ${point('Что внутри', 'То же, что в «Сообщить о проблеме»: версии, состояние сервисов, журнал и состояние раз в 5 минут за сутки. Паролей, ключей и ваших личных данных (адрес, адреса вашей сети, имя компьютера) нет. Адреса серверов провайдеров и сервера туннеля (они принадлежат Cloudflare) есть: они помогают найти ошибку.')}
+    ${point('Номер установки', 'Случайный. По нему отчёты с одного компьютера связываются между собой (видно, что это один и тот же компьютер), но не с вами лично. Когда вы выключаете переключатель, он стирается.')}
+    ${point('Пока работает Nimb', 'Записи и отчёты идут, пока Nimb запущен (в том числе у часов). После «Выйти из Nimb» ничего не пишется и не отправляется.')}
+    <div class="hr"></div>${example}</div></div></div>`;
+}
+
 export class SettingsPage {
   constructor(actions) { this.actions = actions; }
   mount(root) { root.innerHTML = shell('Настройки', '<div class="settings" id="body"></div>'); this.body = root.querySelector('#body'); }
   update(S, extra) {
-    if (same(this, 'rj', [extra.autostart, S.version, S.update.notify, extra.testSent, S.ai.error, S.media.error])) return;
+    const help = extra.help || {};
+    if (same(this, 'rj', [extra.autostart, S.version, S.update.notify, extra.testSent, S.ai.error, S.media.error, S.help, help.open, help.preview, help.loading])) return;
     const card = (title, text, button, top = false) => `<div class="card row ${top ? 'top' : ''}"><div class="grow"><div class="nm">${title}</div>${text ? `<div class="sm">${text}</div>` : ''}</div>${button}</div>`;
     const group = (title, ...cards) => `<div class="group"><div class="label">${title}</div><div class="cards">${cards.join('')}</div></div>`;
     // The columns of the Mac (SettingsView.swift); the block «Пароль администратора» is not here (the service has the rights), so Помощь
@@ -270,11 +307,11 @@ export class SettingsPage {
         card('Запускать вместе с Windows', '', `<button class="pill ${extra.autostart ? 'on' : ''}" role="switch" aria-checked="${extra.autostart}" aria-label="Запускать вместе с Windows" data-a="autostart" data-f="autostart" id="autostart"></button>`, true),
         notifyCard(S, extra))}</div>
       <div class="col">${group('Помощь',
-        card('Сообщить о проблеме', 'Отчёт придёт разработчику. Паролей и адресов в нём нет.', '<button class="btn" data-a="report" data-f="report" id="report">Отправить…</button>'),
+        `<div class="card stack12"><div class="rowline"><div class="grow"><div class="nm">Сообщить о проблеме</div><div class="sm">Отчёт придёт разработчику. Паролей и адресов в нём нет.</div></div><button class="btn" data-a="report" data-f="report" id="report">Отправить…</button></div>${helpRow(S)}</div>`,
         card('Первая настройка', 'Короткое обучение по шагам.', '<button class="btn" data-a="onboard" data-f="onboard" id="onboard">Пройти заново</button>'))}
         ${group('Удаление',
         card('Удалить Nimb', 'Вернёт DNS к автоматическому и удалит приложение вместе с настройками.', '<button class="btn red" data-a="uninstall" data-f="uninstall" id="uninstall">Удалить…</button>'))}
-        ${notice(S.ai.error || S.media.error)}</div>`);
+        ${notice(S.ai.error || S.media.error)}</div>${help.open ? helpPopover(help) : ''}`);
   }
   destroy() {}
 }

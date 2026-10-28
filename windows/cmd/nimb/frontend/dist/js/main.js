@@ -5,6 +5,7 @@ import { preload } from './art.js';
 import { api, logPage, SV, ORDER, esc } from './common.js';
 import { HomePage, AIPage, TelegramPage, MediaPage, SettingsPage, ReportPage, showSites } from './pages.js';
 import { Onboarding } from './onboarding.js';
+import { mountSky } from './sky.js';
 
 // The page of Nimb. All it knows comes from Go (window.go.main.App.*): GetState() every two seconds and the actions below.
 let S = null;                 // the state from Go
@@ -12,11 +13,13 @@ let page = 'home';            // home, ai, telegram, media, settings, report
 let current = null;           // the object of the page that is shown
 let onb = null;               // the first setup, while it is shown
 let rep = null;               // the report about a problem
+let help = { open: false, preview: null, loading: false }; // the window «Помогать тестированию» and the example of a report in it
 let testSent = false;         // the test notification was just sent: the button says so for 3 seconds
 let autostart = false;        // whether Nimb starts with Windows (read when the settings open)
 let prevOn = null;            // what worked at the last look, to play an icon when a service goes on
 const icons = {};             // the animated icons of the sidebar
 let rings = null;             // the three small rings of the home row
+let lightSky = () => {};      // lights the sky behind the window when a service is on (js/sky.js)
 
 const isOn = (k) => !!S[k].on;
 const effective = () => ORDER.filter((k) => S[k].on || S[k].busy).length;
@@ -125,7 +128,8 @@ function showPage(name) {
 function render() {
   if (!S) return;
   updateShell();
-  current.update(S, { autostart, testSent });
+  lightSky(effective() > 0);
+  current.update(S, { autostart, testSent, help });
   if (onb) onb.update(S, { autostart, testSent });
 }
 
@@ -241,6 +245,14 @@ document.addEventListener('click', async (e) => {
     case 'onboard': await api().RestartOnboarding(); onb = new Onboarding(actions); render(); break;
     case 'onbnext': onb.next(); render(); break;
     case 'onbclose': case 'onbfinish': await finishOnboarding(); break;
+    case 'helptest': { S.help.on = !S.help.on; render(); await api().SetHelpTesting(S.help.on); await refresh(); break; }
+    case 'helpinfo': help = { open: true, preview: null, loading: false }; render(); break;
+    case 'helpclose': if (!t.classList.contains('pop-back') || e.target === t) { help.open = false; render(); } break;
+    case 'helppreview': {
+      help.loading = true; render();
+      try { help.preview = await api().HelpTestingPreview(); } catch (err) { help.preview = 'Не удалось собрать пример.'; }
+      help.loading = false; render(); break;
+    }
     case 'report': await openReport(); break;
     case 'repcancel': case 'repclose': showPage('settings'); break;
     case 'repdetails': rep.details = !rep.details; await refreshPreview(); current.render(); break;
@@ -257,6 +269,7 @@ document.addEventListener('click', async (e) => {
 
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape' || onb) return;
+  if (help.open) { help.open = false; render(); return; }
   if (page === 'report') showPage('settings'); else if (page !== 'home') showPage('home');
 });
 
@@ -283,6 +296,7 @@ window.addEventListener('load', async () => {
       else { await readAutostart(); firstSetup = true; }
     }
   } catch (e) { /* no first setup */ }
+  lightSky = mountSky();
   buildShell();
   logPage(`размер окна: страница видит ${innerWidth}×${innerHeight}, масштаб экрана ${Math.round(devicePixelRatio * 100)}%`);
   showPage(first);

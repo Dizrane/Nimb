@@ -216,11 +216,25 @@ func Section(title string, lines ...string) string {
 
 // Send posts the report to the relay.
 func Send(ctx context.Context, appVersion, id, text string) error {
+	return send(ctx, appVersion, id, text, nil)
+}
+
+// SendAuto posts a report that the program sends by itself («Помогать тестированию»): the relay marks it with the cause (trigger, plain
+// latin letters, digits and hyphens) and the random number of the installation.
+func SendAuto(ctx context.Context, appVersion, id, text, trigger, install string) error {
+	return send(ctx, appVersion, id, text, map[string]any{"auto": true, "trigger": trigger, "install": install})
+}
+
+func send(ctx context.Context, appVersion, id, text string, extra map[string]any) error {
 	if utf8.RuneCountInString(text) > sendLimit {
 		r := []rune(text)
 		text = string(r[:sendLimit/2]) + "\n…\n" + string(r[len(r)-sendLimit/2:])
 	}
-	body, _ := json.Marshal(map[string]any{"v": 1, "id": id, "app": appVersion, "platform": "windows", "text": text})
+	payload := map[string]any{"v": 1, "id": id, "app": appVersion, "platform": "windows", "text": text}
+	for k, v := range extra {
+		payload[k] = v
+	}
+	body, _ := json.Marshal(payload)
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "POST", Endpoint(), bytes.NewReader(body))
