@@ -495,9 +495,13 @@ struct DNSHero: View {
                             .foregroundStyle(Theme.textPrimary)
                     }
                 } else {
+                    // Centred and of the same width as the words under the figure of the other pages (see `MascotHero`).
                     Text(subtitle)
                         .font(Typo.body)
                         .foregroundStyle(Theme.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: 320)
                 }
             }
             .frame(height: 38, alignment: .top)
