@@ -1045,7 +1045,7 @@ private struct FooterBar: View {
         .overlay(alignment: .top) { Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1) }
     }
 
-    /// «Версия 0.9.0 · проверено сегодня», or the offer of a newer version.
+    /// «Версия 0.9.0 · latest» (« · —» if the check failed), or the offer of a newer version.
     @ViewBuilder
     private var versionLine: some View {
         switch updates.state {
@@ -1074,14 +1074,14 @@ private struct FooterBar: View {
             Text(status)
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.textSecondary)
+                .help(updates.lastCheckFailed ? "Не удалось проверить обновления" : "")
         }
     }
 
     private var status: String {
         let version = "Версия \(Updater.currentVersion)"
         if case .checking = updates.state { return version + " · проверяю…" }
-        guard let checked = updates.lastChecked else { return updates.lastCheckFailed ? version + " · не удалось проверить" : version }
-        if updates.lastCheckFailed { return version + " · не удалось проверить" }
-        return version + (Calendar.current.isDateInToday(checked) ? " · проверено сегодня" : " · проверено " + checked.formatted(.dateTime.day().month(.wide)))
+        if updates.lastCheckFailed { return version + " · —" }
+        return updates.lastChecked == nil ? version : version + " · latest"
     }
 }
