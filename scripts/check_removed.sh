@@ -18,7 +18,7 @@ netstat -rn -f inet 2>/dev/null | grep -q '^0/1.*utun' && found "маршрут 
 networksetup -listallnetworkservices 2>/dev/null | tail -n +2 | sed 's/^\*//' | while IFS= read -r service; do
     servers=$(networksetup -getdnsservers "$service" 2>/dev/null | tr '\n' ' ')
     case "$servers" in
-        *143.20.64.192*|*45.13.237.213*|*83.220.169.155*|*94.250.253.55*|*212.109.195.93*|*109.120.132.43*|*94.249.177.102*|*159.194.200.33*|*193.233.112.67*|*192.255.159.24*)
+        *143.20.64.192*|*45.13.237.213*|*83.220.169.155*|*94.250.253.55*|*212.109.195.93*|*109.120.132.43*|*94.249.177.102*|*179.254.166.171*|*164.5.224.81*|*159.194.200.33*|*193.233.112.67*|*192.255.159.24*)
             echo "ОСТАЛСЯ DNS Nimb на «$service»: $servers" ;;
     esac
 done | grep -q . && { echo "(выше: DNS Nimb ещё стоит на подключении)"; left=1; }

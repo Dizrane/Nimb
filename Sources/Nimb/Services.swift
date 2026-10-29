@@ -44,6 +44,7 @@ struct DNSProvider: Identifiable, Hashable {
         DNSProvider(id: "comss", name: "Comss.one", addresses: ["94.250.253.55", "212.109.195.93"], region: .ru,
                     legacy: [["83.220.169.155", "212.109.195.93"]]),
         DNSProvider(id: "magicdns", name: "MagicDNS", addresses: ["109.120.132.43", "94.249.177.102"], region: .eu),
+        DNSProvider(id: "malwlink", name: "malw.link", addresses: ["179.254.166.171", "164.5.224.81"], region: .eu),
         DNSProvider(id: "geohide", name: "GeoHide (RU)", addresses: ["159.194.200.33", "193.233.112.67"], region: .ru),
         DNSProvider(id: "geohide-us", name: "GeoHide (US)", addresses: ["192.255.159.241", "192.255.159.240"], region: .us),
     ]

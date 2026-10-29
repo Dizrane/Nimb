@@ -171,7 +171,7 @@ import Testing
     }
 
     @Test func thePageListsProvidersByName() {
-        #expect(DNSProvider.byName.map(\.name) == ["Comss.one", "GeoHide (EU)", "GeoHide (RU)", "GeoHide (US)", "MagicDNS"])
+        #expect(DNSProvider.byName.map(\.name) == ["Comss.one", "GeoHide (EU)", "GeoHide (RU)", "GeoHide (US)", "MagicDNS", "malw.link"])
         #expect(Set(DNSProvider.byName.map(\.id)) == Set(DNSProvider.all.map(\.id)))
     }
 
