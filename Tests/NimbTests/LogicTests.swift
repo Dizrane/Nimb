@@ -148,6 +148,37 @@ import Testing
         for address in addresses { #expect(address.range(of: #"^(\d{1,3}\.){3}\d{1,3}$"#, options: .regularExpression) != nil) }
         #expect(DNSProvider.all.first?.id == "geohide-eu", "the first provider is the default one")
     }
+
+    @Test func anEarlierSetOfAddressesIsStillThatProvider() {
+        let comss = DNSProvider.all.first { $0.id == "comss" }!
+        #expect(comss.matches(["94.250.253.55", "212.109.195.93"]))
+        #expect(comss.matches(["83.220.169.155", "212.109.195.93"]), "a Mac set up by an earlier Nimb still shows Comss as on")
+        #expect(!comss.matches(["83.220.169.155"]))
+        #expect(!DNSProvider.all.filter { $0.id != "comss" }.contains { $0.matches(["83.220.169.155", "212.109.195.93"]) })
+        for provider in DNSProvider.all { #expect(provider.allAddresses.contains(provider.addresses[0])) }
+    }
+
+    @Test func aRuleWithoutANewProviderAsksOnlyForThatProvider() {
+        var access = DNSManager.PasswordlessState(enabled: true, uncoveredProviders: ["magicdns"])
+        let magic = DNSProvider.all.first { $0.id == "magicdns" }!
+        #expect(access.needsUpdate)
+        #expect(access.asksPassword(for: magic))
+        #expect(!access.asksPassword(for: DNSProvider.all[0]))
+        #expect(!access.asksPassword(for: nil), "switching off is covered")
+        access.uncoveredProviders = []
+        #expect(!access.needsUpdate && !access.asksPassword(for: magic))
+        #expect(DNSManager.PasswordlessState().asksPassword(for: nil), "no rule: always the password")
+    }
+
+    @Test func thePageListsProvidersByName() {
+        #expect(DNSProvider.byName.map(\.name) == ["Comss.one", "GeoHide (EU)", "GeoHide (RU)", "GeoHide (US)", "MagicDNS"])
+        #expect(Set(DNSProvider.byName.map(\.id)) == Set(DNSProvider.all.map(\.id)))
+    }
+
+    @Test func perplexityIsChecked() {
+        #expect(ProbeTarget.services.contains("Perplexity"))
+        #expect(ProbeTarget.all.filter { $0.service == "Perplexity" }.map(\.kind) == [.site, .api])
+    }
 }
 
 @Suite struct CheckVerdictTests {

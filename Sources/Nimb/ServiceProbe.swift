@@ -23,6 +23,8 @@ struct ProbeTarget: Hashable {
         ProbeTarget(service: "Grok", host: "api.x.ai", kind: .api, path: "/v1/models"),
         ProbeTarget(service: "ElevenLabs", host: "elevenlabs.io", kind: .site),
         ProbeTarget(service: "ElevenLabs", host: "api.elevenlabs.io", kind: .api, path: "/v1/models"),
+        ProbeTarget(service: "Perplexity", host: "www.perplexity.ai", kind: .site),
+        ProbeTarget(service: "Perplexity", host: "api.perplexity.ai", kind: .api, path: "/v1/models"),
     ]
 
     /// Service names in the order of `all`, without repeats.

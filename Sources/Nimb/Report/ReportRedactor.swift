@@ -28,7 +28,7 @@ enum ReportRedactor {
         var result = text
         // The addresses of the DNS services of Nimb stay, as names.
         for provider in DNSProvider.all {
-            for address in provider.addresses { result = result.replacingOccurrences(of: address, with: "‹\(provider.name)›") }
+            for address in provider.allAddresses { result = result.replacingOccurrences(of: address, with: "‹\(provider.name)›") }
         }
         result = result.replacingOccurrences(of: NSHomeDirectory(), with: "~")
         if NSUserName().count >= 4 { result = result.replacingOccurrences(of: NSUserName(), with: "‹user›") }

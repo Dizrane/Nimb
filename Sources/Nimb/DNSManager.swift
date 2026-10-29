@@ -66,14 +66,14 @@ enum DNSManager {
     static func activeProvider(on services: [String]) -> DNSProvider? {
         guard !services.isEmpty else { return nil }
         return DNSProvider.all.first { provider in
-            services.allSatisfy { servers(of: $0) == provider.addresses }
+            services.allSatisfy { provider.matches(servers(of: $0)) }
         }
     }
 
     /// A provider that is set on some, but not all, of the services, with the services it is missing on.
     static func partialProvider(on services: [String]) -> (provider: DNSProvider, missing: [String])? {
         for provider in DNSProvider.all {
-            let missing = services.filter { servers(of: $0) != provider.addresses }
+            let missing = services.filter { !provider.matches(servers(of: $0)) }
             if !missing.isEmpty, missing.count < services.count { return (provider, missing) }
         }
         return nil
@@ -187,7 +187,7 @@ enum DNSManager {
     static func servicesUsingProviders() -> [String] {
         physicalServices().filter { service in
             let current = servers(of: service)
-            return DNSProvider.all.contains { $0.addresses == current }
+            return DNSProvider.all.contains { $0.matches(current) }
         }
     }
 
@@ -210,8 +210,17 @@ enum DNSManager {
         var missing: [String] = []
         /// sudo also lets any DNS address through, not only Nimb's (an old Nimb rule or another sudo rule).
         var tooBroad = false
+        /// Providers the rule does not cover: it was written before they (or one of their addresses) were added, so switching to one of them
+        /// still asks for the password.
+        var uncoveredProviders: Set<String> = []
 
-        var needsUpdate: Bool { enabled && (!missing.isEmpty || tooBroad) }
+        var providersMissing: Bool { !uncoveredProviders.isEmpty }
+        var needsUpdate: Bool { enabled && (!missing.isEmpty || tooBroad || providersMissing) }
+
+        /// Whether turning DNS on with `provider` (or off, with nil) asks for the password.
+        func asksPassword(for provider: DNSProvider?) -> Bool {
+            !enabled || !missing.isEmpty || (provider.map { uncoveredProviders.contains($0.id) } ?? false)
+        }
     }
 
     /// Services the rule can name: plain characters only, so that nothing in a name can change the meaning of the rule.
@@ -268,7 +277,8 @@ enum DNSManager {
         return PasswordlessState(
             enabled: true,
             missing: named.filter { !covered.contains($0) },
-            tooBroad: sudoAcceptsAnyDNS()
+            tooBroad: sudoAcceptsAnyDNS(),
+            uncoveredProviders: Set(DNSProvider.all.filter { provider in !covered.allSatisfy { list.allows(setCommand($0, provider.addresses)) } }.map(\.id))
         )
     }
 

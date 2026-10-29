@@ -29,12 +29,25 @@ struct DNSProvider: Identifiable, Hashable {
     let name: String
     let addresses: [String]
     let region: Region
+    /// Addresses an earlier Nimb set for this provider and the provider still answers on. They are still recognised as this provider.
+    var legacy: [[String]] = []
+
+    /// Whether `servers` are this provider's: the current addresses or an earlier set.
+    func matches(_ servers: [String]) -> Bool { servers == addresses || legacy.contains(servers) }
+
+    /// Every address Nimb has ever set for this provider.
+    var allAddresses: [String] { addresses + legacy.flatMap { $0 } }
 
     /// The first provider is the default one.
     static let all: [DNSProvider] = [
         DNSProvider(id: "geohide-eu", name: "GeoHide (EU)", addresses: ["143.20.64.192", "45.13.237.213"], region: .eu),
-        DNSProvider(id: "comss", name: "Comss.one", addresses: ["83.220.169.155", "212.109.195.93"], region: .ru),
+        DNSProvider(id: "comss", name: "Comss.one", addresses: ["94.250.253.55", "212.109.195.93"], region: .ru,
+                    legacy: [["83.220.169.155", "212.109.195.93"]]),
+        DNSProvider(id: "magicdns", name: "MagicDNS", addresses: ["109.120.132.43", "94.249.177.102"], region: .eu),
         DNSProvider(id: "geohide", name: "GeoHide (RU)", addresses: ["159.194.200.33", "193.233.112.67"], region: .ru),
         DNSProvider(id: "geohide-us", name: "GeoHide (US)", addresses: ["192.255.159.241", "192.255.159.240"], region: .us),
     ]
+
+    /// The order of the list on the page: by name.
+    static let byName: [DNSProvider] = all.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
 }

@@ -52,14 +52,14 @@ enum ReportChecks {
         let name = "Нейросети (DNS)"
         let total = serviceServers.count
         guard let provider = active else {
-            let ours = serviceServers.filter { servers in DNSProvider.all.contains { $0.addresses == servers } }.count
+            let ours = serviceServers.filter { servers in DNSProvider.all.contains { $0.matches(servers) } }.count
             return ServiceCheck(
                 name: name, expected: "выключено: DNS сервисов Nimb нигде не задан",
                 seen: ours == 0 ? "DNS сервисов Nimb нигде не задан" : "DNS сервиса Nimb ещё стоит на \(ours) из \(total) подключений",
                 agrees: ours == 0)
         }
-        let set = serviceServers.filter { $0 == provider.addresses }.count
-        let asks = resolver.contains(where: provider.addresses.contains)
+        let set = serviceServers.filter(provider.matches).count
+        let asks = resolver.contains(where: provider.allAddresses.contains)
         return ServiceCheck(
             name: name, expected: "\(provider.name) на всех подключениях, и система спрашивает именно его",
             seen: "\(provider.name) задан на \(set) из \(total) подключений; система спрашивает: \(resolver.isEmpty ? "не удалось узнать" : resolver.joined(separator: ", "))",

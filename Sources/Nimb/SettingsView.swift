@@ -15,6 +15,9 @@ struct SettingsView: View {
         if !access.missing.isEmpty {
             return "Для новых подключений (\(access.missing.joined(separator: ", "))) пароль пока запрашивается. «Добавить подключения» включит их в правило (понадобится пароль)."
         }
+        if access.providersMissing {
+            return "В правиле нет новых сервисов (например MagicDNS): при переключении на них пароль пока запрашивается. «Обновить правило» добавит их (понадобится пароль)."
+        }
         return nil
     }
 
@@ -90,7 +93,7 @@ struct SettingsView: View {
                             granted: model.passwordless,
                             disabled: model.isLocked,
                             note: accessNote,
-                            extraTitle: model.access.needsUpdate ? (model.access.tooBroad ? "Сделать точным" : "Добавить подключения") : nil,
+                            extraTitle: model.access.needsUpdate ? (model.access.tooBroad ? "Сделать точным" : model.access.missing.isEmpty ? "Обновить правило" : "Добавить подключения") : nil,
                             extraAction: { model.setPasswordless(true, confirm: false) },
                             action: model.togglePasswordless
                         )

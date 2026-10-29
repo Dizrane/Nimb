@@ -40,7 +40,7 @@ final class DNSViewModel: ObservableObject {
     var passwordless: Bool { access.enabled }
 
     /// A change of DNS goes to the password prompt (there is no rule for it that covers every connection).
-    var asksPassword: Bool { !(access.enabled && access.missing.isEmpty) }
+    var asksPassword: Bool { access.asksPassword(for: active == nil ? selected : nil) }
 
     /// True while a DNS change or a service check is running; both need the network undisturbed.
     var isLocked: Bool { isBusy || isProbing || isSettingUp }
@@ -524,7 +524,7 @@ struct DNSHero: View {
         case .off: return "Включите, чтобы открывались ChatGPT, Claude, Gemini и другие нейросети"
         case .on: return ""
         case .probing: return "Спрашиваю DNS и запрашиваю сайты и API"
-        case .busy: return model.passwordless && model.access.missing.isEmpty && !model.isSettingUp ? "Меняю DNS на всех подключениях" : "Подтвердите пароль администратора"
+        case .busy: return !model.asksPassword && !model.isSettingUp ? "Меняю DNS на всех подключениях" : "Подтвердите пароль администратора"
         }
     }
 }
@@ -554,7 +554,7 @@ struct ProvidersSection: View {
                         ? [GridItem(.flexible(), alignment: .top)]
                         : [GridItem(.flexible(), spacing: Space.gap, alignment: .top), GridItem(.flexible(), spacing: Space.gap, alignment: .top)],
                       spacing: Space.gap) {
-                ForEach(DNSProvider.all) { provider in
+                ForEach(DNSProvider.byName) { provider in
                     ProviderCard(
                         provider: provider,
                         report: model.report(for: provider),
