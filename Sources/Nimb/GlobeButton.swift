@@ -200,7 +200,8 @@ private struct GlobeCanvas: View {
             let world = WorldMap.shared
             let disc = CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)
             let white = Color.white
-            let green = Theme.ok
+            // The light of the satellite on the region: it reaches the planet as the satellite comes to its station.
+            let beam = min(max((satellite - 0.6) / 0.4, 0), 1)
 
             // The halo: resting in the middle among the clouds while off, crowning the planet while on.
             let spin: Double = mode == .probing ? 3.0 : mode == .busy ? 2.0 : 1.0
@@ -244,14 +245,14 @@ private struct GlobeCanvas: View {
                     l.fill(land, with: .color(white.opacity(0.10 + 0.08 * lit)))
                     l.stroke(land, with: .color(white.opacity(0.22 + 0.12 * lit)), lineWidth: 0.5)
 
-                    // The region of the chosen provider: a faint outline before connecting, solid white after.
+                    // The region of the chosen provider: a faint outline until the satellite lights it, then white.
                     let highlighted = path(world.rings(for: region), view, screen)
                     // The glow of the region is two soft strokes under the fill: a blur filter on a big path on every frame is what
                     // made this page the most expensive one.
-                    l.stroke(highlighted, with: .color(white.opacity(0.09 * lit)), style: StrokeStyle(lineWidth: 7, lineJoin: .round))
-                    l.stroke(highlighted, with: .color(white.opacity(0.14 * lit)), style: StrokeStyle(lineWidth: 3.5, lineJoin: .round))
-                    l.fill(highlighted, with: .color(white.opacity(0.10 + 0.55 * lit)))
-                    l.stroke(highlighted, with: .color(.white.opacity(0.35 + 0.25 * lit)), lineWidth: 0.7)
+                    l.stroke(highlighted, with: .color(white.opacity(0.09 * beam)), style: StrokeStyle(lineWidth: 7, lineJoin: .round))
+                    l.stroke(highlighted, with: .color(white.opacity(0.14 * beam)), style: StrokeStyle(lineWidth: 3.5, lineJoin: .round))
+                    l.fill(highlighted, with: .color(white.opacity(0.10 + 0.55 * beam)))
+                    l.stroke(highlighted, with: .color(.white.opacity(0.35 + 0.25 * beam)), lineWidth: 0.7)
 
                     // Night side.
                     l.fill(
@@ -289,9 +290,13 @@ private struct GlobeCanvas: View {
                 }
 
                 if satellite > 0.001 {
-                    // The signal lands in a city of the lit-up region.
-                    let landing = view.project(lon: region.landing.lon, lat: region.landing.lat)
-                    let target = landing.visible ? screen(landing) : c
+                    // The satellite lights the whole region, whatever its shape: for each piece of land of the region the beam is the hull of
+                    // the satellite and of the visible outline of that piece, so it widens exactly as far as the land is wide and does not
+                    // cross the sea between the pieces (Alaska, Hawaii); the land itself is the area that lights.
+                    let rings = world.rings(for: region)
+                    let pieces = visiblePieces(rings, view, screen, limit: 240)
+                    let largest = pieces.max { bounds($0).width * bounds($0).height < bounds($1).width * bounds($1).height }
+                    let target = largest.map { CGPoint(x: bounds($0).midX, y: bounds($0).midY) } ?? c
 
                     // The satellite flies in once, slows down and then stays at its station.
                     let rx = r * 1.62, ry = r * 1.32
@@ -302,29 +307,21 @@ private struct GlobeCanvas: View {
                     sat.y += sin(t * 0.9) * 1.2 * pow(eased, 4)
                     let aim = atan2(target.y - sat.y, target.x - sat.x)
 
-                    let beam = min(max((satellite - 0.6) / 0.4, 0), 1)
-                    let dx = target.x - sat.x, dy = target.y - sat.y
-                    let length = max((dx * dx + dy * dy).squareRoot(), 1)
-                    let nx = -dy / length * 9, ny = dx / length * 9
+                    let flicker = 0.94 + 0.06 * sin(t * 1.4)
                     ctx.drawLayer { l in
-                        l.opacity = beam
-                        var cone = Path()
-                        cone.move(to: sat)
-                        cone.addLine(to: CGPoint(x: target.x + nx, y: target.y + ny))
-                        cone.addLine(to: CGPoint(x: target.x - nx, y: target.y - ny))
-                        cone.closeSubpath()
-                        l.fill(cone, with: .linearGradient(Gradient(colors: [green.opacity(0.28), green.opacity(0.02)]), startPoint: sat, endPoint: target))
-
-                        var line = Path()
-                        line.move(to: sat)
-                        line.addLine(to: target)
-                        l.stroke(line, with: .color(green.opacity(0.8)), style: StrokeStyle(lineWidth: 0.9, lineCap: .round, dash: [1.5, 4], dashPhase: -t * 8))
-                        if landing.visible {
-                            let ping = (t * 0.33).truncatingRemainder(dividingBy: 1)
-                            let pr = 2.5 + 11 * ping
-                            l.stroke(Path(ellipseIn: CGRect(x: target.x - pr, y: target.y - pr, width: pr * 2, height: pr * 2)),
-                                     with: .color(green.opacity((1 - ping) * 0.85)), lineWidth: 1.1)
-                            l.fill(Path(ellipseIn: CGRect(x: target.x - 2.2, y: target.y - 2.2, width: 4.4, height: 4.4)), with: .color(green))
+                        l.opacity = beam * flicker
+                        if !pieces.isEmpty {
+                            var cone = Path()
+                            for piece in pieces {
+                                cone.addLines(convexHull(piece + [sat]))
+                                cone.closeSubpath()
+                            }
+                            l.fill(cone, with: .linearGradient(Gradient(colors: [white.opacity(0.03), white.opacity(0.17)]), startPoint: sat, endPoint: target))
+                        }
+                        // The light on the ground: the area of the country itself, over the shading of the night side, not over the edge of the disc.
+                        l.drawLayer { ground in
+                            ground.clip(to: Path(ellipseIn: disc))
+                            ground.fill(path(rings, view, screen), with: .color(white.opacity(0.14)))
                         }
                     }
 
@@ -337,6 +334,47 @@ private struct GlobeCanvas: View {
                 }
             }
         }
+    }
+
+    /// The outline of each piece of land of the rings that faces us, on the screen, about `limit` points in all; the pieces that
+    /// are hardly seen (an island a few points wide) get no beam of their own; they light up with the region all the same.
+    private func visiblePieces(_ rings: [[Double]], _ view: Orthographic, _ screen: ((x: Double, y: Double, visible: Bool)) -> CGPoint, limit: Int) -> [[CGPoint]] {
+        let total = rings.reduce(0) { $0 + $1.count / 2 }
+        let step = max(total / limit, 1)
+        var pieces: [[CGPoint]] = []
+        for ring in rings {
+            var points: [CGPoint] = []
+            for i in stride(from: 0, to: ring.count - 1, by: 2 * step) {
+                let p = view.project(lon: ring[i], lat: ring[i + 1])
+                if p.visible { points.append(screen(p)) }
+            }
+            if points.count > 2, max(bounds(points).width, bounds(points).height) >= 8 { pieces.append(points) }
+        }
+        return pieces
+    }
+
+    private func bounds(_ points: [CGPoint]) -> CGRect {
+        let xs = points.map(\.x), ys = points.map(\.y)
+        guard let x0 = xs.min(), let x1 = xs.max(), let y0 = ys.min(), let y1 = ys.max() else { return .zero }
+        return CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)
+    }
+
+    /// The smallest convex polygon around the points (Andrew's monotone chain).
+    private func convexHull(_ input: [CGPoint]) -> [CGPoint] {
+        let points = input.sorted { $0.x == $1.x ? $0.y < $1.y : $0.x < $1.x }
+        guard points.count > 2 else { return points }
+        func cross(_ o: CGPoint, _ a: CGPoint, _ b: CGPoint) -> CGFloat { (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x) }
+        var lower: [CGPoint] = []
+        for p in points {
+            while lower.count >= 2 && cross(lower[lower.count - 2], lower[lower.count - 1], p) <= 0 { lower.removeLast() }
+            lower.append(p)
+        }
+        var upper: [CGPoint] = []
+        for p in points.reversed() {
+            while upper.count >= 2 && cross(upper[upper.count - 2], upper[upper.count - 1], p) <= 0 { upper.removeLast() }
+            upper.append(p)
+        }
+        return Array(lower.dropLast()) + Array(upper.dropLast())
     }
 
     /// Where the halo sits and how large it is. The images were drawn for a ring of 80 pt; it is larger when it rests among the clouds.
