@@ -15,9 +15,9 @@ final class MascotMotion: ObservableObject {
             let u = min(max(date.timeIntervalSince(started) / 1.0, 0), 1)
             return from + (target - from) * (u * u * (3 - 2 * u))
         }
-        mutating func set(_ newTarget: Double, now: Date) {
+        mutating func set(_ newTarget: Double, now: Date, delay: Double = 0) {
             guard newTarget != target else { return }
-            from = value(at: now); target = newTarget; started = now
+            from = value(at: now); target = newTarget; started = now.addingTimeInterval(delay)
         }
     }
 
@@ -34,11 +34,13 @@ final class MascotMotion: ObservableObject {
     func lit(at date: Date) -> Double { light.value(at: date) }
     func ring(_ i: Int, at date: Date) -> Double { rings[i].value(at: date) }
 
+    /// The figure comes up while the button is on its way (`PowerButton`), and goes at once when it is switched off.
     func set(on: Bool) {
         let now = Date()
-        light.set(on ? 1 : 0, now: now)
-        if on { turnedOn = now; turnedOff = nil } else { turnedOff = now }
-        keepMoving(for: on ? 3.0 : 1.2)
+        let delay = on ? 0.5 : 0
+        light.set(on ? 1 : 0, now: now, delay: delay)
+        if on { turnedOn = now.addingTimeInterval(delay); turnedOff = nil } else { turnedOff = now }
+        keepMoving(for: on ? 3.5 : 1.4)
     }
 
     /// The home page: one ring for each service that is on.

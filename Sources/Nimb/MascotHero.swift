@@ -30,7 +30,7 @@ struct MascotHero: View {
     @StateObject private var hover = Flag()
     @StateObject private var motion = MascotMotion()
 
-    private let stageHeight: CGFloat = 218
+    private let stageHeight = HeroLayout.stageHeight
 
     var body: some View {
         let h: Double = hover.value ? 1 : 0
@@ -44,13 +44,15 @@ struct MascotHero: View {
                     TimelineView(.animation(minimumInterval: motion.moving ? 1.0 / 30 : 1.0 / 20, paused: !running)) { context in
                         stage(hover: h, date: running ? context.date : Date())
                     }
-                    badge(hover: h).offset(y: 90)
+                    .frame(width: 360, height: stageHeight)
+                    // The glow fades out before the edges of the stage, so that it never reaches the tab bar or the title.
+                    .mask(LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.10),
+                                                 .init(color: .black, location: 0.9), .init(color: .clear, location: 1)],
+                                         startPoint: .top, endPoint: .bottom))
+                    PowerButton(progress: isOn ? 1 : 0, hover: h, busy: isBusy, restY: PowerButton.restY, settledY: PowerButton.settledY)
+                        .powerButtonAnimation(on: isOn, hovering: hover.value)
                 }
                 .frame(width: 360, height: stageHeight)
-                // The glow fades out before the edges of the stage, so that it never reaches the tab bar or the title.
-                .mask(LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.10),
-                                             .init(color: .black, location: 0.9), .init(color: .clear, location: 1)],
-                                     startPoint: .top, endPoint: .bottom))
                 .contentShape(Rectangle())
             }
             .buttonStyle(PressableStyle())
@@ -75,7 +77,7 @@ struct MascotHero: View {
                 .foregroundStyle(Theme.textSecondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: 320, minHeight: 38, alignment: .top)
+                .frame(maxWidth: 320, minHeight: HeroLayout.subtitleHeight, alignment: .top)
         }
         .padding(.top, -6)
         .padding(.bottom, 6)
@@ -203,7 +205,7 @@ struct MascotHero: View {
 
     // MARK: Figure
 
-    /// The picture of the page, off and on cross-fading; it floats and, for the dog, sways a little.
+    /// The picture of the page, which comes up as the service goes on (with it off the page is the button alone); it floats and, for the dog, sways a little.
     private func drawFigure(_ ctx: inout GraphicsContext, figure: CGPoint, lit: Double, sway: Double) {
         let folder: String, size: CGSize
         switch art {
@@ -215,10 +217,6 @@ struct MascotHero: View {
         ctx.drawLayer { layer in
             layer.translateBy(x: figure.x, y: figure.y)
             layer.rotate(by: .degrees(sway))
-            if let off = ArtLibrary.shared.image(folder, "off.png"), lit < 0.999 {
-                layer.opacity = 1
-                layer.draw(Image(decorative: off, scale: 2), in: rect)
-            }
             if let on = ArtLibrary.shared.image(folder, "on.png"), lit > 0.003 {
                 layer.opacity = lit
                 layer.draw(Image(decorative: on, scale: 2), in: rect)
@@ -256,25 +254,6 @@ struct MascotHero: View {
                     upper.opacity = mix
                     upper.draw(Image(decorative: frames[lower + 1], scale: 2), in: rect)
                 }
-            }
-        }
-    }
-
-    // MARK: Button
-
-    /// The small power button under the figure.
-    private func badge(hover: Double) -> some View {
-        ZStack {
-            Circle()
-                .fill(Color.black.opacity(0.6))
-                .overlay(Circle().strokeBorder((isOn ? Theme.ok : Color.white).opacity(isOn ? 0.7 : 0.30 + 0.25 * hover), lineWidth: 1))
-                .frame(width: 40, height: 40)
-            if isBusy {
-                ProgressView().controlSize(.small).tint(.white)
-            } else {
-                Image(systemName: "power")
-                    .font(.system(size: 17, weight: .regular))
-                    .foregroundStyle(isOn ? Theme.ok : Color.white.opacity(0.85))
             }
         }
     }

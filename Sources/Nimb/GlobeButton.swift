@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The main button. Off: one large, bright button among the clouds. On: the planet with a glowing halo over it,
-/// the region of the chosen provider lit up in green and a satellite sending it a signal.
+/// The main button. Off: the page is the large button alone. On: the button settles under the planet, which comes up with a glowing
+/// halo over it, the region of the chosen provider lit up and a satellite sending it a signal.
 struct HeroButton: View {
     let mode: AppMode
     let lit: Bool
@@ -38,19 +38,12 @@ struct HeroButton: View {
                 TimelineView(.animation(minimumInterval: 1.0 / 15, paused: !signalRuns)) { context in
                     canvas(.signal, signalRuns ? context.date : Date())
                 }
-                bigButton
-                    .opacity(lit ? 0 : 1)
-                    .scaleEffect(lit ? 0.5 : 1)
-                    .offset(y: 8)
-                    .animation(.easeInOut(duration: 0.9), value: lit)
-                badge
-                    .opacity(lit ? 1 : 0)
-                    .scaleEffect(lit ? 1 : 0.5)
-                    .offset(y: radius * 0.56 + 8)
-                    .animation(.easeInOut(duration: 1.2).delay(lit ? 0.5 : 0), value: lit)
+                // One button: it lights up where it is, then settles under the planet as the small button of the lit state.
+                PowerButton(progress: lit ? 1 : 0, hover: hover.value ? 1 : 0, busy: mode == .busy, restY: PowerButton.restY, settledY: PowerButton.settledY)
+                    .powerButtonAnimation(on: lit, hovering: hover.value)
             }
-            .frame(width: 320, height: 214)
-            .contentShape(Path(ellipseIn: CGRect(x: 70, y: 34, width: 180, height: 150)))
+            .frame(width: 320, height: HeroLayout.stageHeight)
+            .contentShape(Path(ellipseIn: CGRect(x: 70, y: 30, width: 180, height: 176)))
         }
         .buttonStyle(PressableStyle())
         .onHover { hover.value = $0; state.setHover($0) }
@@ -70,53 +63,6 @@ struct HeroButton: View {
             hover: state.hover(at: date),
             radius: radius
         )
-    }
-
-    /// The button while DNS is off: a graphite disc with a fine light rim inside a hairline ring. It is large and
-    /// clear without glowing; hovering only brightens the rim, slowly.
-    private var bigButton: some View {
-        let h: Double = hover.value ? 1 : 0
-        return ZStack {
-            Circle()
-                .strokeBorder(Color.white.opacity(0.12 + 0.16 * h), lineWidth: 1)
-                .frame(width: 146, height: 146)
-            Circle()
-                .fill(LinearGradient(colors: [Color(white: 0.30), Color(white: 0.12)], startPoint: .top, endPoint: .bottom))
-                .overlay(
-                    Circle().strokeBorder(
-                        LinearGradient(colors: [Color.white.opacity(0.55 + 0.3 * h), Color.white.opacity(0.10 + 0.1 * h)], startPoint: .top, endPoint: .bottom),
-                        lineWidth: 1.2
-                    )
-                )
-                .frame(width: 120, height: 120)
-                .shadow(color: .black.opacity(0.6), radius: 16, y: 9)
-            if mode == .busy {
-                ProgressView().controlSize(.regular).tint(.white)
-            } else {
-                Image(systemName: "power")
-                    .font(.system(size: 46, weight: .light))
-                    .foregroundStyle(Color.white.opacity(0.9 + 0.1 * h))
-            }
-        }
-        .frame(width: 146, height: 146)
-        .animation(.easeInOut(duration: 0.45), value: hover.value)
-    }
-
-    /// The small button under the planet while DNS is on.
-    private var badge: some View {
-        ZStack {
-            Circle()
-                .fill(Color.black.opacity(0.6))
-                .overlay(Circle().strokeBorder(Theme.ok.opacity(0.7), lineWidth: 1))
-                .frame(width: 40, height: 40)
-            if mode == .busy {
-                ProgressView().controlSize(.small).tint(.white)
-            } else {
-                Image(systemName: "power")
-                    .font(.system(size: 17, weight: .regular))
-                    .foregroundStyle(Theme.ok)
-            }
-        }
     }
 }
 
@@ -207,9 +153,11 @@ final class HeroState: ObservableObject {
         satelliteFrom = satellite(at: now)
         litFrom = current
         litTarget = on ? 1 : 0
-        litStarted = now
-        satelliteStarted = now
-        keepMoving(for: on ? 0.25 + satelliteInTime + 0.2 : litDuration + 0.2)
+        // The planet comes up while the button is on its way (`PowerButton`); switching off it goes at once.
+        let delay = on ? 0.5 : 0
+        litStarted = now.addingTimeInterval(delay)
+        satelliteStarted = now.addingTimeInterval(delay)
+        keepMoving(for: delay + (on ? 0.25 + satelliteInTime + 0.2 : litDuration + 0.2))
     }
 
     private var movingUntil = Date.distantPast
@@ -245,7 +193,8 @@ private struct GlobeCanvas: View {
 
     var body: some View {
         Canvas { ctx, size in
-            let c = CGPoint(x: size.width / 2, y: size.height / 2 + 8)
+            // The same height as the figure of the other pages (`HeroLayout`).
+            let c = CGPoint(x: size.width / 2, y: size.height / 2 + 2)
             let r = radius * (0.88 + 0.12 * lit)
             let view = Orthographic(lon0: center.lon + sin(t * 0.15) * 8, lat0: center.lat + sin(t * 0.1) * 3)
             let world = WorldMap.shared

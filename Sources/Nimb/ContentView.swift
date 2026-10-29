@@ -477,7 +477,6 @@ struct DNSHero: View {
         VStack(spacing: 6) {
             HeroButton(mode: model.mode, lit: model.active != nil, region: model.active?.region ?? model.selected.region, action: model.toggle)
                 .disabled(model.isLocked)
-                .padding(.vertical, -22)
                 .accessibilityLabel(model.active == nil ? "Включить Smart DNS" : "Выключить Smart DNS")
 
             Text(title)
@@ -504,10 +503,10 @@ struct DNSHero: View {
                         .frame(maxWidth: 320)
                 }
             }
-            .frame(height: 38, alignment: .top)
+            .frame(height: HeroLayout.subtitleHeight, alignment: .top)
         }
-        .padding(.top, 20)
-        .padding(.bottom, 4)
+        .padding(.top, -6)
+        .padding(.bottom, 6)
         .animation(.easeInOut(duration: 0.45), value: model.mode)
     }
 
