@@ -607,6 +607,13 @@ import Testing
         #expect(WarpPaths.unsafeFolder(attributes: { fine[$0] }) == nil, "the folder of the helper is not there yet: the installation makes it as root")
     }
 
+    @Test func aFailedInstallationOfAnUpdateHasItsOwnCauseNamedByTheStage() {
+        let trigger = AutoTrigger.updateInstall("Проверка подписи")
+        #expect(trigger.key == "update-install")
+        #expect(trigger.title == "установка обновления не удалась на этапе «Проверка подписи»")
+        #expect(!trigger.ignoresHourLimit)
+    }
+
     @Test func theRulesOfAgreement() {
         #expect(AutoReportRules.tunnelAgrees(on: true, routes: 5, viaTunnel: true))
         #expect(!AutoReportRules.tunnelAgrees(on: true, routes: 0, viaTunnel: false))

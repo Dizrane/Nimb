@@ -156,7 +156,14 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     /// A click on the banner opens the window.
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        await MainActor.run { AppDelegate.showMainWindow() }
+        await MainActor.run {
+            // The banner of an update opens the window of the update; any other banner opens the main window.
+            if response.notification.request.identifier == "nimb-update", case .available = UpdateViewModel.shared.state {
+                UpdateWindowController.shared.show()
+            } else {
+                AppDelegate.showMainWindow()
+            }
+        }
     }
 }
 

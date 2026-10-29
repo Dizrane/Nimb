@@ -283,14 +283,9 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
     @objc private func showWindow() { AppDelegate.showMainWindow() }
 
-    /// The line at the top of the menu: downloads and installs the new version, the same as the button at the bottom of the window. After a
-    /// failure it opens the window, where the reason is written.
+    /// The line at the top of the menu: opens the window of the update, the same as the button at the bottom of the window.
     @objc private func installUpdate() {
-        let updates = UpdateViewModel.shared
-        if case .available(let release) = updates.state, let dns, !dns.isLocked {
-            updates.install(release)
-        } else {
-            showWindow()
-        }
+        // The window of the update shows what is new, and the installation step by step; after a failure it says where it stopped.
+        UpdateWindowController.shared.show()
     }
 }

@@ -11,6 +11,52 @@ struct Release: Equatable {
     /// The signature of the zip, an asset next to it (`<zip name>.sig`). The hash in the notes only shows that the file came whole: it lives
     /// where the zip lives, and whoever can change the one can change the other. The signature cannot be made without the private key.
     var signatureURL: URL? = nil
+    /// The description of the release as GitHub gives it (when the page and not the list of releases was read, there is none).
+    var notes: String? = nil
+}
+
+/// The steps of an installation, in order. The window shows each with a mark, and a failure says at which of them it stopped.
+enum UpdateStage: Int, CaseIterable, Equatable {
+    case prepare, download, signature, files, install
+
+    var title: String {
+        switch self {
+        case .prepare: "Подготовка"
+        case .download: "Загрузка"
+        case .signature: "Проверка подписи"
+        case .files: "Проверка файлов"
+        case .install: "Установка"
+        }
+    }
+
+    /// A failure here is not the network's or the person's: it is worth a report that goes by itself.
+    var isOurs: Bool { self == .signature || self == .files || self == .install }
+}
+
+enum UpdateStageState: Equatable {
+    case pending, running, done, failed
+}
+
+/// An installation stopped at a stage, with the words that the person (and a report) can read.
+struct UpdateFailure: LocalizedError, Equatable {
+    let stage: UpdateStage
+    let message: String
+    var errorDescription: String? { message }
+}
+
+/// Where an installation is: the state of every stage, and where it stopped.
+struct UpdateProgress: Equatable {
+    private(set) var states: [UpdateStage: UpdateStageState] = [:]
+    private(set) var failure: UpdateFailure?
+
+    func state(of stage: UpdateStage) -> UpdateStageState { states[stage] ?? .pending }
+
+    mutating func apply(_ stage: UpdateStage, _ state: UpdateStageState) { states[stage] = state }
+
+    mutating func fail(_ failure: UpdateFailure) {
+        states[failure.stage] = .failed
+        self.failure = failure
+    }
 }
 
 struct UpdateError: LocalizedError {
@@ -105,7 +151,8 @@ enum Updater {
             zipURL: asset.browser_download_url,
             sha256: sha256(for: asset.name, in: body) ?? firstSHA256(in: body),
             pageURL: best.html_url,
-            signatureURL: best.assets.first(where: { $0.name == asset.name + ".sig" })?.browser_download_url
+            signatureURL: best.assets.first(where: { $0.name == asset.name + ".sig" })?.browser_download_url,
+            notes: best.body
         )
     }
 
@@ -202,48 +249,87 @@ enum Updater {
         }
     }
 
-    /// Downloads and verifies the release, then starts a helper that swaps the app after this process exits.
-    /// The caller must quit the app once this returns.
-    static func install(_ release: Release, status: @escaping @Sendable (String) -> Void) async throws {
+    /// The points of the description of a release that say what is new: its bullet lines, up to the lines about how to run it and the hashes.
+    static func whatsNew(in notes: String?) -> [String] {
+        guard let notes else { return [] }
+        var items: [String] = []
+        for raw in notes.split(separator: "\n", omittingEmptySubsequences: true) {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("Остальное") || line.hasPrefix("**Как запустить") || line.hasPrefix("**SHA") { break }
+            if line.hasPrefix("- ") || line.hasPrefix("* ") {
+                items.append(String(line.dropFirst(2)))
+            } else if let marker = line.range(of: #"^\d+\.\s+"#, options: .regularExpression) {
+                items.append(String(line[marker.upperBound...]))
+            }
+        }
+        return items
+    }
+
+    /// Runs one stage: tells that it began, tells that it ended, and turns any error into a failure that names the stage.
+    static func runStage<T>(_ stage: UpdateStage, progress: @Sendable (UpdateStage, UpdateStageState) -> Void,
+                            _ body: () async throws -> T) async throws -> T {
+        progress(stage, .running)
+        do {
+            let value = try await body()
+            progress(stage, .done)
+            return value
+        } catch {
+            throw UpdateFailure(stage: stage, message: error.localizedDescription)
+        }
+    }
+
+    /// Downloads and verifies the release, then starts a helper that swaps the app after this process exits. `progress` hears of every
+    /// stage; an error comes out as an `UpdateFailure` of the stage that stopped. The caller must quit the app once this returns.
+    static func install(_ release: Release, progress: @escaping @Sendable (UpdateStage, UpdateStageState) -> Void) async throws {
         let target = Bundle.main.bundleURL
-        guard target.pathExtension == "app" else {
-            throw UpdateError("Обновление работает только из собранного приложения Nimb.")
-        }
-        guard !target.path.contains("/AppTranslocation/") else {
-            throw UpdateError("macOS запустил приложение из временной копии. Переместите Nimb в «Программы» и откройте оттуда.")
-        }
-        guard FileManager.default.isWritableFile(atPath: target.deletingLastPathComponent().path) else {
-            throw UpdateError("Нет прав на запись в «\(target.deletingLastPathComponent().path)». Переместите приложение в «Программы» или обновите вручную.")
-        }
-        guard let expected = release.sha256 else {
-            throw UpdateError("В описании релиза нет SHA-256, установка отменена.")
-        }
-
-        status("Загрузка…")
-        let (downloaded, response) = try await URLSession.shared.download(from: release.zipURL)
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-            throw UpdateError("Не удалось скачать \(release.zipURL.lastPathComponent).")
-        }
-        let stage = FileManager.default.temporaryDirectory.appendingPathComponent("Nimb-update-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: stage, withIntermediateDirectories: true)
-        let zip = stage.appendingPathComponent("Nimb.zip")
-        try FileManager.default.moveItem(at: downloaded, to: zip)
-
-        status("Проверка подписи…")
-        guard let signatureURL = release.signatureURL else {
-            throw UpdateError("У этого релиза нет подписи, установка отменена. Скачайте обновление вручную со страницы релиза.")
-        }
-        let (signatureData, signatureResponse) = try await URLSession.shared.data(from: signatureURL)
-        guard (signatureResponse as? HTTPURLResponse)?.statusCode == 200,
-              isSigned(try Data(contentsOf: zip), signature: String(decoding: signatureData, as: UTF8.self)) else {
-            throw UpdateError("Подпись не подошла: это обновление сделано не автором Nimb. Установка отменена.")
+        let expected: String = try await runStage(.prepare, progress: progress) {
+            guard target.pathExtension == "app" else {
+                throw UpdateError("Обновление работает только из собранного приложения Nimb.")
+            }
+            guard !target.path.contains("/AppTranslocation/") else {
+                throw UpdateError("macOS запустил приложение из временной копии. Переместите Nimb в «Программы» и откройте оттуда.")
+            }
+            guard FileManager.default.isWritableFile(atPath: target.deletingLastPathComponent().path) else {
+                throw UpdateError("Нет прав на запись в «\(target.deletingLastPathComponent().path)». Переместите приложение в «Программы» или обновите вручную.")
+            }
+            guard let expected = release.sha256 else {
+                throw UpdateError("В описании релиза нет SHA-256, установка отменена.")
+            }
+            return expected
         }
 
-        status("Проверка…")
-        let newApp = try verifyAndUnpack(zip: zip, expectedSHA256: expected, version: release.version, into: stage)
+        let (stage, zip): (URL, URL) = try await runStage(.download, progress: progress) {
+            let (downloaded, response) = try await URLSession.shared.download(from: release.zipURL)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+                throw UpdateError("Не удалось скачать \(release.zipURL.lastPathComponent) (ответ \((response as? HTTPURLResponse)?.statusCode ?? 0)).")
+            }
+            let stage = FileManager.default.temporaryDirectory.appendingPathComponent("Nimb-update-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: stage, withIntermediateDirectories: true)
+            let zip = stage.appendingPathComponent("Nimb.zip")
+            try FileManager.default.moveItem(at: downloaded, to: zip)
+            return (stage, zip)
+        }
 
-        status("Установка…")
-        try launchInstaller(newApp: newApp, target: target, stage: stage)
+        try await runStage(.signature, progress: progress) {
+            guard let signatureURL = release.signatureURL else {
+                throw UpdateError("У этого релиза нет подписи, установка отменена. Скачайте обновление вручную со страницы релиза.")
+            }
+            let (signatureData, signatureResponse) = try await URLSession.shared.data(from: signatureURL)
+            guard (signatureResponse as? HTTPURLResponse)?.statusCode == 200 else {
+                throw UpdateError("Не удалось скачать подпись (ответ \((signatureResponse as? HTTPURLResponse)?.statusCode ?? 0)).")
+            }
+            guard isSigned(try Data(contentsOf: zip), signature: String(decoding: signatureData, as: UTF8.self)) else {
+                throw UpdateError("Подпись не подошла: это обновление сделано не автором Nimb. Установка отменена.")
+            }
+        }
+
+        let newApp: URL = try await runStage(.files, progress: progress) {
+            try verifyAndUnpack(zip: zip, expectedSHA256: expected, version: release.version, into: stage)
+        }
+
+        try await runStage(.install, progress: progress) {
+            try launchInstaller(newApp: newApp, target: target, stage: stage)
+        }
     }
 
     /// Checks the hash and the bundle itself; returns the unpacked app.

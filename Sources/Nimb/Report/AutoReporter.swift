@@ -56,6 +56,8 @@ enum AutoTrigger: Equatable {
     case mismatch(AutoService)
     case error(AutoService)
     case updateCheck
+    /// The installation of an update stopped at a stage that is not the network's (the signature, the files, the replacement).
+    case updateInstall(String)
     case tunnelSilent
     case newKeysFailed
     case dailyDigest
@@ -69,6 +71,7 @@ enum AutoTrigger: Equatable {
         case .mismatch(let service): "mismatch-\(service.rawValue)"
         case .error(let service): "error-\(service.rawValue)"
         case .updateCheck: "update-check"
+        case .updateInstall: "update-install"
         case .tunnelSilent: "tunnel-silent"
         case .newKeysFailed: "keys-failed"
         case .dailyDigest: "daily"
@@ -84,6 +87,7 @@ enum AutoTrigger: Equatable {
         case .mismatch(let service): "«\(service.name)» работает не так, как должен, больше 10 минут"
         case .error(let service): "ошибка при работе с «\(service.name)»"
         case .updateCheck: "проверка обновлений не удаётся несколько раз подряд"
+        case .updateInstall(let stage): "установка обновления не удалась на этапе «\(stage)»"
         case .tunnelSilent: "туннель включён, но сервер не отвечает больше 10 минут"
         case .newKeysFailed: "новые ключи туннеля не помогли: туннель по-прежнему не включается"
         case .dailyDigest: "ежедневная сводка"

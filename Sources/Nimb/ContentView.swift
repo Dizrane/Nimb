@@ -320,6 +320,7 @@ final class UpdateViewModel: ObservableObject {
                 let newer = Updater.isNewer(release.version, than: Updater.currentVersion)
                 AppLog.shared.add("update", newer ? "есть новая версия \(release.version)" : "версия \(Updater.currentVersion) актуальна")
                 state = newer ? .available(release) : .upToDate
+                if newer { offered = release }
                 if newer { Notifier.shared.updateAvailable(release.version) }
             } catch {
                 AppLog.shared.add("update", "проверка обновлений не удалась: \(error.localizedDescription)")
@@ -333,20 +334,33 @@ final class UpdateViewModel: ObservableObject {
         }
     }
 
+    /// The release that is offered or being installed, and how far its installation has got (for the window of the update).
+    @Published private(set) var offered: Release?
+    @Published private(set) var progress = UpdateProgress()
+
     func install(_ release: Release) {
-        state = .installing("Загрузка…")
+        if case .installing = state { return }
+        offered = release
+        progress = UpdateProgress()
+        state = .installing("Подготовка…")
         AppLog.shared.add("update", "устанавливаю версию \(release.version)")
         Task {
             do {
-                try await Updater.install(release) { text in
-                    AppLog.shared.add("update", "установка: \(text)")
-                    Task { @MainActor in self.state = .installing(text) }
+                try await Updater.install(release) { stage, stageState in
+                    AppLog.shared.add("update", "этап «\(stage.title)»: \(stageState == .running ? "начат" : "готов")")
+                    Task { @MainActor in
+                        self.progress.apply(stage, stageState)
+                        if stageState == .running { self.state = .installing(stage.title + "…") }
+                    }
                 }
                 AppLog.shared.add("update", "версия \(release.version) установлена, перезапускаю")
                 AppDelegate.quit(stoppingServices: false)
             } catch {
-                AppLog.shared.add("update", "установка не удалась: \(error.localizedDescription)")
-                state = .failed(error.localizedDescription)
+                let failure = (error as? UpdateFailure) ?? UpdateFailure(stage: .prepare, message: error.localizedDescription)
+                AppLog.shared.add("update", "установка не удалась на этапе «\(failure.stage.title)»: \(failure.message)")
+                progress.fail(failure)
+                state = .failed(failure.message)
+                if failure.stage.isOurs { AutoReporter.shared.notify(.updateInstall(failure.stage.title)) }
             }
         }
     }
@@ -409,6 +423,7 @@ struct ContentView: View {
         .onAppear {
             telegram.openMainWindow = { openWindow(id: "main") }
             StatusMenuController.shared.configure(dns: model, telegram: telegram, warp: warp)
+            UpdateWindowController.shared.dns = model
             BlackBox.shared.configure(dns: model, telegram: telegram, warp: warp)
             AutoReporter.shared.configure(dns: model, telegram: telegram, warp: warp)
             AppDelegate.openMainWindow = { openWindow(id: "main") }
@@ -1015,7 +1030,7 @@ private struct FooterBar: View {
                 Text("Версия \(Updater.currentVersion)")
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.textSecondary)
-                Button { updates.install(release) } label: {
+                Button { UpdateWindowController.shared.show() } label: {
                     Label("Обновить до \(release.version)", systemImage: "arrow.down.circle.fill")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(Color.black.opacity(0.85))

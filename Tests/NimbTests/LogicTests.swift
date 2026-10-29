@@ -576,6 +576,58 @@ import Testing
         #expect(!Updater.trustedKeys.isEmpty && Data(base64Encoded: Updater.trustedKeys[0])?.count == 32, "the key built into the app is a key")
     }
 
+    @Test func theBulletsOfTheNotesAreWhatIsNew() {
+        let notes = """
+        - **Обновления подписаны.** С этой версии Nimb ставит новое обновление, только если оно подписано автором.
+        - **Честно про туннель.** Туннель нужен для доступа.
+
+        Остальное, как в 0.9.19. Пароль при обновлении не нужен.
+
+        **Как запустить.** Откройте `Nimb-0.9.20.dmg`.
+        - это пункт после «Как запустить»: его в списке быть не должно
+        """
+        let items = Updater.whatsNew(in: notes)
+        #expect(items.count == 2)
+        #expect(items.first?.hasPrefix("**Обновления подписаны.**") == true)
+        #expect(Updater.whatsNew(in: nil).isEmpty)
+        #expect(Updater.whatsNew(in: "1. **Первое.** Раз\n2. **Второе.** Два") == ["**Первое.** Раз", "**Второе.** Два"])
+    }
+
+    @Test func aStageTellsThatItBeganAndEndedAndAFailureNamesIt() async {
+        final class Heard: @unchecked Sendable {
+            private let lock = NSLock()
+            private var items: [String] = []
+            func add(_ item: String) { lock.lock(); items.append(item); lock.unlock() }
+            var all: [String] { lock.lock(); defer { lock.unlock() }; return items }
+        }
+        let heard = Heard()
+        let value = try? await Updater.runStage(.download, progress: { heard.add("\($0.title) \($1)") }) { 41 + 1 }
+        #expect(value == 42)
+        #expect(heard.all == ["Загрузка running", "Загрузка done"])
+        do {
+            _ = try await Updater.runStage(.signature, progress: { heard.add("\($0.title) \($1)") }) { throw UpdateError("Подпись не подошла") }
+            Issue.record("must fail")
+        } catch {
+            #expect(error as? UpdateFailure == UpdateFailure(stage: .signature, message: "Подпись не подошла"))
+        }
+        #expect(heard.all.last == "Проверка подписи running", "a failed stage is not told to be done")
+    }
+
+    @Test func theProgressOfAnInstallationKnowsWhereItStopped() {
+        var progress = UpdateProgress()
+        #expect(progress.state(of: .download) == .pending)
+        progress.apply(.prepare, .done)
+        progress.apply(.download, .running)
+        #expect(progress.state(of: .download) == .running)
+        progress.fail(UpdateFailure(stage: .download, message: "нет сети"))
+        #expect(progress.state(of: .download) == .failed)
+        #expect(progress.failure?.message == "нет сети")
+        #expect(progress.state(of: .install) == .pending)
+        #expect(UpdateStage.allCases.map(\.title) == ["Подготовка", "Загрузка", "Проверка подписи", "Проверка файлов", "Установка"])
+        #expect(UpdateStage.signature.isOurs && UpdateStage.files.isOurs && UpdateStage.install.isOurs, "these are worth a report")
+        #expect(!UpdateStage.download.isOurs && !UpdateStage.prepare.isOurs, "the network and the place of the app are not ours")
+    }
+
     @Test func theFeedGivesTheNewestTagOfTheMac() {
         let feed = """
         <entry><link rel="alternate" type="text/html" href="https://github.com/Dizrane/Nimb/releases/tag/windows-v0.2.0"/></entry>
