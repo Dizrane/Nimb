@@ -30,7 +30,6 @@ struct CheckDetails: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(14)
-        .frame(width: 320)
+        .infoPanel(width: 320)
     }
 }

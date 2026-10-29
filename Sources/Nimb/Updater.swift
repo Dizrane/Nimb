@@ -31,6 +31,17 @@ enum UpdateStage: Int, CaseIterable, Equatable {
 
     /// A failure here is not the network's or the person's: it is worth a report that goes by itself.
     var isOurs: Bool { self == .signature || self == .files || self == .install }
+
+    /// The share of the whole installation that this stage is (the download is the long one); they add up to 1.
+    var weight: Double {
+        switch self {
+        case .prepare: 0.02
+        case .download: 0.70
+        case .signature: 0.06
+        case .files: 0.17
+        case .install: 0.05
+        }
+    }
 }
 
 enum UpdateStageState: Equatable {
@@ -48,10 +59,34 @@ struct UpdateFailure: LocalizedError, Equatable {
 struct UpdateProgress: Equatable {
     private(set) var states: [UpdateStage: UpdateStageState] = [:]
     private(set) var failure: UpdateFailure?
+    /// Every stage is done and the program is about to start again.
+    private(set) var isRestarting = false
+    /// How much of the archive has come, and how much there is in all (0 while it is not known).
+    private(set) var downloaded: Int64 = 0
+    private(set) var total: Int64 = 0
+
+    /// How far the whole installation has got, 0 to 1: the stages that are done count in full, the download by the bytes that have come.
+    var fraction: Double {
+        if isRestarting { return 1 }
+        return UpdateStage.allCases.reduce(0) { sum, stage in
+            switch state(of: stage) {
+            case .done: sum + stage.weight
+            case .running where stage == .download && total > 0: sum + stage.weight * min(1, Double(downloaded) / Double(total))
+            default: sum
+            }
+        }
+    }
+
+    mutating func setDownload(done: Int64, total: Int64) {
+        downloaded = done
+        self.total = total
+    }
 
     func state(of stage: UpdateStage) -> UpdateStageState { states[stage] ?? .pending }
 
     mutating func apply(_ stage: UpdateStage, _ state: UpdateStageState) { states[stage] = state }
+
+    mutating func finish() { isRestarting = true }
 
     mutating func fail(_ failure: UpdateFailure) {
         states[failure.stage] = .failed
@@ -249,6 +284,52 @@ enum Updater {
         }
     }
 
+    /// Downloads a file and tells how many bytes of it have come as it goes (`didWriteData` of a download task, which the plain async call
+    /// does not give). The file is moved to a place of its own before the system takes it back.
+    final class Downloader: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+        private let report: @Sendable (Int64, Int64) -> Void
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<(URL, HTTPURLResponse?), Error>?
+        private var moved: URL?
+        private var session: URLSession?
+
+        init(report: @escaping @Sendable (Int64, Int64) -> Void) { self.report = report }
+
+        func download(_ url: URL) async throws -> (URL, HTTPURLResponse?) {
+            try await withCheckedThrowingContinuation { continuation in
+                lock.lock()
+                self.continuation = continuation
+                let session = URLSession(configuration: .ephemeral, delegate: self, delegateQueue: nil)
+                self.session = session
+                lock.unlock()
+                session.downloadTask(with: url).resume()
+            }
+        }
+
+        func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
+                        totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
+            report(totalBytesWritten, max(totalBytesExpectedToWrite, 0))
+        }
+
+        func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
+            let place = FileManager.default.temporaryDirectory.appendingPathComponent("Nimb-download-\(UUID().uuidString)")
+            try? FileManager.default.moveItem(at: location, to: place)
+            lock.lock(); moved = place; lock.unlock()
+        }
+
+        func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+            lock.lock()
+            let continuation = self.continuation
+            self.continuation = nil
+            let file = moved
+            lock.unlock()
+            session.finishTasksAndInvalidate()
+            if let error { continuation?.resume(throwing: error) }
+            else if let file { continuation?.resume(returning: (file, task.response as? HTTPURLResponse)) }
+            else { continuation?.resume(throwing: UpdateError("Скачанный файл не найден.")) }
+        }
+    }
+
     /// The points of the description of a release that say what is new: its bullet lines, up to the lines about how to run it and the hashes.
     static func whatsNew(in notes: String?) -> [String] {
         guard let notes else { return [] }
@@ -280,7 +361,8 @@ enum Updater {
 
     /// Downloads and verifies the release, then starts a helper that swaps the app after this process exits. `progress` hears of every
     /// stage; an error comes out as an `UpdateFailure` of the stage that stopped. The caller must quit the app once this returns.
-    static func install(_ release: Release, progress: @escaping @Sendable (UpdateStage, UpdateStageState) -> Void) async throws {
+    static func install(_ release: Release, progress: @escaping @Sendable (UpdateStage, UpdateStageState) -> Void,
+                        downloaded: @escaping @Sendable (Int64, Int64) -> Void = { _, _ in }) async throws {
         let target = Bundle.main.bundleURL
         let expected: String = try await runStage(.prepare, progress: progress) {
             guard target.pathExtension == "app" else {
@@ -299,14 +381,14 @@ enum Updater {
         }
 
         let (stage, zip): (URL, URL) = try await runStage(.download, progress: progress) {
-            let (downloaded, response) = try await URLSession.shared.download(from: release.zipURL)
-            guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-                throw UpdateError("Не удалось скачать \(release.zipURL.lastPathComponent) (ответ \((response as? HTTPURLResponse)?.statusCode ?? 0)).")
+            let (file, response) = try await Downloader(report: downloaded).download(release.zipURL)
+            guard response?.statusCode == 200 else {
+                throw UpdateError("Не удалось скачать \(release.zipURL.lastPathComponent) (ответ \(response?.statusCode ?? 0)).")
             }
             let stage = FileManager.default.temporaryDirectory.appendingPathComponent("Nimb-update-\(UUID().uuidString)")
             try FileManager.default.createDirectory(at: stage, withIntermediateDirectories: true)
             let zip = stage.appendingPathComponent("Nimb.zip")
-            try FileManager.default.moveItem(at: downloaded, to: zip)
+            try FileManager.default.moveItem(at: file, to: zip)
             return (stage, zip)
         }
 

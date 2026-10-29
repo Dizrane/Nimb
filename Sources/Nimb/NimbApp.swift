@@ -59,6 +59,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// In background mode, Command-Q (and Quit in the Dock menu) only hides the window. A shutdown, restart or log out
     /// carries a reason in its Apple event and always goes through.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // The update is being installed: a quit now would stop it half-way. The update's own quit (it keeps the services) and a shutdown go through.
+        if case .installing = UpdateViewModel.shared.state, !Self.keepServices, !Self.isSystemQuit {
+            NSApp.activate(ignoringOtherApps: true)
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Идёт обновление"
+            alert.informativeText = "Если выйти сейчас, оно прервётся и начнётся заново при следующей попытке. Обычно оно занимает около минуты."
+            alert.addButton(withTitle: "Подождать")
+            alert.addButton(withTitle: "Всё равно выйти")
+            if alert.runModal() == .alertFirstButtonReturn {
+                Self.reallyQuit = false
+                return .terminateCancel
+            }
+        }
         if !Self.reallyQuit && BackgroundMode.shared.enabled && !Self.isSystemQuit {
             sender.windows.filter { $0.canBecomeMain }.forEach { $0.close() }
             return .terminateCancel
@@ -131,10 +145,5 @@ struct NimbApp: App {
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1100, height: 660)
         .windowResizability(.contentMinSize)
-
-        Window("Что открывает туннель", id: TunnelSitesWindow.windowID) {
-            TunnelSitesWindow()
-        }
-        .windowResizability(.contentSize)
     }
 }

@@ -101,6 +101,12 @@ extension View {
             .glassCard(tint: tint, tintOpacity: 0.02 + 0.02 * strength, borderOpacity: 0.16 + 0.14 * strength, radius: 14)
     }
 
+    /// A card of its own (the settings), or a row of a card that holds several of them (the first set-up): then only a little room above and below.
+    @ViewBuilder
+    func framedCard(_ framed: Bool) -> some View {
+        if framed { card(.neutral) } else { padding(.vertical, 8) }
+    }
+
     func glassCard(tint: Color = .white, tintOpacity: Double = 0, borderOpacity: Double = 0.11, radius: CGFloat = 12) -> some View {
         modifier(GlassCard(tint: tint, tintOpacity: tintOpacity, borderOpacity: borderOpacity, radius: radius))
     }

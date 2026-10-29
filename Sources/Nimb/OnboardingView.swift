@@ -26,27 +26,32 @@ struct OnboardingView: View {
             .padding(.top, 40)
             .frame(height: 70)
 
-            // The step sits in the middle of the free height; a long step scrolls.
-            GeometryReader { proxy in
-                ScrollView {
-                    VStack(spacing: 14) {
-                        Dots(count: Onboarding.lastStep + 1, current: onboarding.step)
-                            .padding(.bottom, 6)
-                        content
-                            .id(onboarding.step)
-                            .transition(.opacity)
-                    }
-                    .padding(.horizontal, 28)
-                    .padding(.vertical, 8)
-                    .frame(maxWidth: .infinity, minHeight: proxy.size.height - 28, alignment: .center)
-                }
-                .scrollIndicators(.hidden)
+            // The step sits in the middle of the free height. It is tried in its usual size, then compact (a smaller picture, closer lines), and
+            // only a step that does not fit even so scrolls (a large system text, a long message of an error).
+            ViewThatFits(in: .vertical) {
+                column(compact: false)
+                column(compact: true)
+                ScrollView { column(compact: true) }.scrollIndicators(.hidden)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
+    func column(compact: Bool) -> some View {
+        VStack(spacing: compact ? 10 : 14) {
+            Dots(count: Onboarding.lastStep + 1, current: onboarding.step)
+                .padding(.bottom, compact ? 2 : 6)
+            content
+                .id(onboarding.step)
+                .transition(.opacity)
+        }
+        .padding(.horizontal, 28)
+        .padding(.vertical, 8)
+        .environment(\.compactStep, compact)
+    }
+
     @ViewBuilder
-    private var content: some View {
+    var content: some View {
         switch onboarding.step {
         case 0: welcome
         case 1: aiStep
@@ -157,9 +162,15 @@ struct OnboardingView: View {
             title: "Чтобы работало само",
             text: "Рекомендуем включить всё: Nimb запустится с Mac, будет работать при закрытом окне и скажет о новой версии."
         ) {
-            BackgroundCard()
-            LaunchAtLoginCard()
-            NotificationsCard()
+            // The three switches are one card with three rows, not three cards: the step has to fit the smallest window.
+            VStack(spacing: 0) {
+                BackgroundCard(framed: false)
+                Divider().overlay(Color.white.opacity(0.08))
+                LaunchAtLoginCard(framed: false)
+                Divider().overlay(Color.white.opacity(0.08))
+                NotificationsCard(framed: false, showsTest: false)
+            }
+            .card(.neutral)
             PrimaryButton(title: "Готово", action: onboarding.finish)
             Text("Пройти настройку заново можно в «Настройках» (внизу слева).")
                 .font(Typo.small)
@@ -171,16 +182,27 @@ struct OnboardingView: View {
 
 // MARK: - Pieces
 
+private struct CompactStepKey: EnvironmentKey { static let defaultValue = false }
+
+extension EnvironmentValues {
+    /// True when a step of the first set-up is drawn smaller to fit a low window.
+    fileprivate var compactStep: Bool {
+        get { self[CompactStepKey.self] }
+        set { self[CompactStepKey.self] = newValue }
+    }
+}
+
 private struct StepFrame<Content: View>: View {
+    @Environment(\.compactStep) private var compact
     let kind: StepIconKind
     let title: String
     let text: String
     @ViewBuilder let content: Content
 
     var body: some View {
-        VStack(spacing: 14) {
-            StepIcon(player: StepIconPlayers.shared.player(kind), size: 80, halo: true)
-                .padding(.top, 4)
+        VStack(spacing: compact ? 10 : 14) {
+            StepIcon(player: StepIconPlayers.shared.player(kind), size: compact ? 56 : 80, halo: true)
+                .padding(.top, compact ? 0 : 4)
             Text(title)
                 .font(Typo.status)
                 .foregroundStyle(Theme.textPrimary)

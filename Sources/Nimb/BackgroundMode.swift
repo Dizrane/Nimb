@@ -17,6 +17,8 @@ final class BackgroundMode: ObservableObject {
 /// The switch for it, shown in the settings and on the Telegram page.
 struct BackgroundCard: View {
     @ObservedObject private var background = BackgroundMode.shared
+    /// False when it is a row of a card that holds several (see `framedCard`).
+    var framed = true
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -32,6 +34,6 @@ struct BackgroundCard: View {
             Spacer(minLength: 8)
             PillSwitch(label: "Работать в фоне", isOn: background.enabled) { background.enabled.toggle() }
         }
-        .card(.neutral)
+        .framedCard(framed)
     }
 }

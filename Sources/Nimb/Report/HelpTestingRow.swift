@@ -39,46 +39,62 @@ struct HelpTestingRow: View {
     }
 }
 
-/// What the switch does, in words, and a report as it would go now.
+/// What the switch does, in a few short points; the report as it would go now is on the same popover, in place of the points (one thing to
+/// read at a time, and only one place that scrolls: the report itself).
 private struct HelpTestingInfo: View {
     @StateObject private var preview = PreviewText()
+    @StateObject private var showsExample = Flag()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Помогать тестированию")
-                .font(.system(size: 17, weight: .regular, design: .serif))
-                .foregroundStyle(Theme.textPrimary)
-            point("Когда", "Сразу уходит отчёт, если сломалось что-то серьёзное: программа закрылась неожиданно, туннель остановился сам или включён, но сервер не отвечает больше 10 минут, новые ключи туннеля не помогли, сервис работает не так, как должен, больше 10 минут, включение или выключение закончилось ошибкой, проверка обновлений не удаётся несколько раз подряд. Если сайт или сервис просто не открылся, это не причина: такое бывает у всех.")
-            point("Как часто", "О сбоях: не чаще одного отчёта в час и пяти в сутки, одно и то же не чаще раза в 6 часов. И раз в сутки одна сводка: цифры за день, чтобы видеть мелочи, которые не стоят отдельного отчёта. Отчёт, который не удалось отправить (сети нет), ждёт в файле на этом Mac не дольше суток и уходит, когда сеть вернётся.")
-            point("Что внутри", "То же, что в «Сообщить о проблеме»: версии, состояние сервисов, журнал и состояние раз в 5 минут за сутки. Паролей, ключей и ваших личных данных (адрес, адреса вашей сети, имя компьютера) нет. Адреса серверов провайдеров и сервера туннеля (они принадлежат Cloudflare) есть: они помогают найти ошибку.")
-            point("Номер установки", "Случайный. По нему отчёты с одного компьютера связываются между собой (видно, что это один и тот же Mac), но не с вами лично. Когда вы выключаете переключатель, он стирается.")
-            Divider().overlay(Color.white.opacity(0.1))
-            if let text = preview.text {
-                Text("Так выглядит отчёт сейчас")
-                    .font(Typo.small).foregroundStyle(Theme.textSecondary)
-                ScrollView {
-                    Text(text)
-                        .font(.system(size: 10.5, design: .monospaced))
-                        .foregroundStyle(Theme.textPrimary)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(height: 160)
-            } else {
-                OutlineButton(title: preview.loading ? "Собираю…" : "Показать пример отчёта", color: Theme.textPrimary) { preview.load() }
-                    .disabled(preview.loading)
+        VStack(alignment: .leading, spacing: 8) {
+            if showsExample.value { example } else { explanation }
+        }
+        .infoPanel(width: 440)
+    }
+
+    private var explanation: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Помогать тестированию").font(Typo.name)
+            point("Когда", "Сразу, если что-то серьёзно сломалось: программа закрылась неожиданно, туннель остановился сам или молчит больше 10 минут, сервис не работает как надо больше 10 минут, обновление не проверяется или не ставится. Если сайт просто не открылся, это не причина: такое бывает у всех.")
+            point("Как часто", "О сбоях не чаще одного отчёта в час и пяти в сутки. Раз в сутки приходит одна сводка с цифрами за день. Если сети нет, отчёт ждёт до суток и уходит сам.")
+            point("Что внутри", "То же, что в «Сообщить о проблеме»: версии, состояние сервисов, журнал. Паролей, ключей и личных данных (адрес, имя компьютера, адреса вашей сети) нет. Адреса серверов DNS и туннеля есть: они помогают найти ошибку.")
+            point("Номер установки", "Случайный. По нему отчёты с одного Mac связываются между собой, но не с вами лично. Когда вы выключаете переключатель, он стирается.")
+            Divider()
+            OutlineButton(title: "Показать пример отчёта", color: Theme.textPrimary) {
+                if preview.text == nil { preview.load() }
+                showsExample.value = true
             }
         }
-        .padding(16)
-        .frame(width: 440)
-        .background(Theme.base)
-        .preferredColorScheme(.dark)
+    }
+
+    private var example: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Button { showsExample.value = false } label: {
+                    Label("Назад", systemImage: "chevron.left")
+                        .font(.system(size: 11.5, weight: .medium))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                Spacer()
+                Text("Так выглядит отчёт сейчас").font(.system(size: 11)).foregroundStyle(.secondary)
+            }
+            ScrollView {
+                Text(preview.text ?? "Собираю…")
+                    .font(.system(size: 10.5, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+            }
+            .frame(height: 300)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.06)))
+        }
     }
 
     private func point(_ title: String, _ text: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(Theme.textPrimary)
-            Text(text).font(Typo.small).foregroundStyle(Theme.textSecondary).fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title).font(.system(size: 12, weight: .medium))
+            Text(text).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }
 }

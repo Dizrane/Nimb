@@ -1,5 +1,7 @@
+import AppKit
 import CryptoKit
 import Foundation
+import SwiftUI
 import Testing
 @testable import Nimb
 
@@ -626,6 +628,52 @@ import Testing
         #expect(UpdateStage.allCases.map(\.title) == ["Подготовка", "Загрузка", "Проверка подписи", "Проверка файлов", "Установка"])
         #expect(UpdateStage.signature.isOurs && UpdateStage.files.isOurs && UpdateStage.install.isOurs, "these are worth a report")
         #expect(!UpdateStage.download.isOurs && !UpdateStage.prepare.isOurs, "the network and the place of the app are not ours")
+    }
+
+    @Test func thePretendInstallationGoesThroughTheStagesAndFailsWhereItIsToldTo() async {
+        final class Heard: @unchecked Sendable {
+            private let lock = NSLock()
+            private var items: [String] = []
+            func add(_ item: String) { lock.lock(); items.append(item); lock.unlock() }
+            var all: [String] { lock.lock(); defer { lock.unlock() }; return items }
+        }
+        let ok = Heard()
+        try? await UpdatePreview.simulate(mode: "ok", pause: 0, progress: { ok.add("\($0.rawValue):\($1)") })
+        #expect(ok.all.count == 10 && ok.all.last == "4:done")
+        let failed = Heard()
+        do {
+            try await UpdatePreview.simulate(mode: "signature", pause: 0, progress: { failed.add("\($0.rawValue):\($1)") })
+            Issue.record("must fail")
+        } catch {
+            #expect((error as? UpdateFailure)?.stage == .signature)
+        }
+        #expect(failed.all.last == "2:running", "nothing after the failed stage")
+        #expect(UpdatePreview.failingStage("ok") == nil)
+        #expect(UpdatePreview.failingStage("install") == .install)
+        #expect(Updater.whatsNew(in: UpdatePreview.release.notes).count == 3)
+        #expect(Updater.whatsNew(in: UpdatePreview.offered(for: "long").notes).count == 9, "a long list to see the window with")
+        #expect(Updater.whatsNew(in: UpdatePreview.offered(for: "ok").notes).count == 3)
+    }
+
+    @Test func aPopoverIsHeldToAPartOfTheSmallestScreen() {
+        #expect(FitsScreen.limit(0.72, screens: [840, 1300]) == 604.8, "a popover may open on any screen: the smallest counts")
+        #expect(FitsScreen.limit(0.72, screens: []) == 504, "no screens known: a laptop is taken")
+        #expect(FitsScreen.limit(0.72, screens: [300]) == 260, "never smaller than it can be read")
+    }
+
+    /// The smallest window is 1100×660; the first set-up has 70 pt of its own on top and the bar of the version (42 pt) below. Every step, drawn
+    /// compact, must stand in what is left without a scroll (the usual size is tried first, and the compact one when that does not fit).
+    @MainActor @Test func everyStepOfTheFirstSetUpFitsTheSmallestWindow() {
+        _ = NSApplication.shared
+        let onboarding = Onboarding.shared
+        let view = OnboardingView(model: DNSViewModel(), telegram: TelegramProxyModel(), warp: WarpTunnelModel(), onboarding: onboarding)
+        let room: CGFloat = 660 - 70 - 42
+        defer { onboarding.step = 0 }
+        for step in 0...Onboarding.lastStep {
+            onboarding.step = step
+            let compact = NSHostingView(rootView: view.column(compact: true).frame(width: 460).environment(\.colorScheme, .dark)).fittingSize.height
+            #expect(compact <= room - 8, "step \(step) is \(Int(compact)) pt high and does not fit \(Int(room)) pt")
+        }
     }
 
     @Test func theFeedGivesTheNewestTagOfTheMac() {

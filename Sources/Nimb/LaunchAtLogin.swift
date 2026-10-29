@@ -27,6 +27,8 @@ final class LaunchAtLogin: ObservableObject {
 /// The switch for it, in the settings.
 struct LaunchAtLoginCard: View {
     @ObservedObject private var launch = LaunchAtLogin.shared
+    /// False when it is a row of a card that holds several (see `framedCard`).
+    var framed = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -56,7 +58,7 @@ struct LaunchAtLoginCard: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .card(.neutral)
+        .framedCard(framed)
         .onAppear { launch.refresh() }
     }
 }

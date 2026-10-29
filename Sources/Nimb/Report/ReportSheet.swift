@@ -111,7 +111,7 @@ struct ReportSheet: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(12)
                     }
-                    .frame(width: 460, height: 340)
+                    .frame(width: 460, height: min(340, FitsScreen.limit(0.72)))
                 }
                 Text("Версия, состояние сервисов и последние строки журнала. Паролей, ключей и ваших личных данных (адрес, адреса вашей сети, имя компьютера) в отчёте нет; адреса серверов провайдеров есть, они помогают найти ошибку.")
                     .font(Typo.small)

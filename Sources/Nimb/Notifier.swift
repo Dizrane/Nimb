@@ -170,6 +170,9 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
 /// The switch for it, in the first set-up and in the settings.
 struct NotificationsCard: View {
     @ObservedObject private var notifier = Notifier.shared
+    /// False when it is a row of a card that holds several (see `framedCard`), and `showsTest` is off there: the button is in the settings.
+    var framed = true
+    var showsTest = true
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -183,7 +186,7 @@ struct NotificationsCard: View {
                     .font(Typo.small)
                     .foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
-                if notifier.isOn {
+                if notifier.isOn && showsTest {
                     OutlineButton(title: notifier.testJustSent ? "Отправлено" : "Отправить тестовое уведомление", color: Theme.textPrimary) { notifier.sendTest() }
                         .disabled(notifier.testJustSent)
                         .padding(.top, 5)
@@ -193,6 +196,6 @@ struct NotificationsCard: View {
             Spacer(minLength: 8)
             PillSwitch(label: "Уведомления об обновлениях", isOn: notifier.isOn) { notifier.setOn(!notifier.isOn) }
         }
-        .card(.neutral)
+        .framedCard(framed)
     }
 }

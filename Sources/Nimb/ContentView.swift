@@ -281,6 +281,15 @@ final class UpdateViewModel: ObservableObject {
     /// whether or not its window is open or in front, and one at once when it comes to the front after a long time.
     func start() {
         guard timer == nil else { return }
+        if UpdatePreview.mode != nil {
+            // To look at the window of the update: an offered update that does not exist, and no real checks to take it away.
+            let fake = UpdatePreview.offered(for: UpdatePreview.mode ?? "ok")
+            offered = fake
+            state = .available(fake)
+            timer = Timer()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { UpdateWindowController.shared.show() }
+            return
+        }
         checkIfDue()
         let tick = min(60, max(1, UpdateSchedule.interval / 4))
         let created = Timer.scheduledTimer(withTimeInterval: tick, repeats: true) { [weak self] _ in
@@ -344,23 +353,41 @@ final class UpdateViewModel: ObservableObject {
         progress = UpdateProgress()
         state = .installing("Подготовка…")
         AppLog.shared.add("update", "устанавливаю версию \(release.version)")
+        // While it goes the Mac must not fall asleep, and the program must not be put to sleep by the system.
+        let activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .idleSystemSleepDisabled], reason: "Обновление Nimb")
         Task {
+            defer { ProcessInfo.processInfo.endActivity(activity) }
             do {
-                try await Updater.install(release) { stage, stageState in
+                let report: @Sendable (UpdateStage, UpdateStageState) -> Void = { stage, stageState in
                     AppLog.shared.add("update", "этап «\(stage.title)»: \(stageState == .running ? "начат" : "готов")")
                     Task { @MainActor in
                         self.progress.apply(stage, stageState)
                         if stageState == .running { self.state = .installing(stage.title + "…") }
                     }
                 }
+                let bytes: @Sendable (Int64, Int64) -> Void = { done, total in
+                    Task { @MainActor in self.progress.setDownload(done: done, total: total) }
+                }
+                if let mode = UpdatePreview.mode {
+                    try await UpdatePreview.simulate(mode: mode, pause: 1.3, progress: report, downloaded: bytes)
+                    progress.finish()
+                    try? await Task.sleep(nanoseconds: 2_500_000_000)
+                    progress = UpdateProgress()
+                    state = .available(release)
+                    return
+                }
+                try await Updater.install(release, progress: report, downloaded: bytes)
                 AppLog.shared.add("update", "версия \(release.version) установлена, перезапускаю")
+                progress.finish()
                 AppDelegate.quit(stoppingServices: false)
             } catch {
                 let failure = (error as? UpdateFailure) ?? UpdateFailure(stage: .prepare, message: error.localizedDescription)
                 AppLog.shared.add("update", "установка не удалась на этапе «\(failure.stage.title)»: \(failure.message)")
                 progress.fail(failure)
                 state = .failed(failure.message)
-                if failure.stage.isOurs { AutoReporter.shared.notify(.updateInstall(failure.stage.title)) }
+                // The person may have closed the window while it went: a failure must not be missed.
+                UpdateWindowController.shared.show()
+                if failure.stage.isOurs && UpdatePreview.mode == nil { AutoReporter.shared.notify(.updateInstall(failure.stage.title)) }
             }
         }
     }
@@ -883,8 +910,7 @@ private struct DetailsView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(14)
-        .frame(width: 290)
+        .infoPanel(width: 290)
     }
 
     private func count(_ service: String, _ kind: ProbeTarget.Kind) -> String {
