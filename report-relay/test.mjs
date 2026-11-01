@@ -7,7 +7,7 @@ globalThis.fetch = async (url, init) => {
   sent.push({ url: String(url), form: init.body });
   return new Response(JSON.stringify({ ok: true }), { status: 200 });
 };
-const env = { BOT_TOKEN: "123:abc", CHAT_ID: "42", LATEST_MAC: "off" };
+const env = { BOT_TOKEN: "123:abc", CHAT_ID: "42", LATEST_MAC: "off", LATEST_WINDOWS: "off" };
 const good = { v: 1, id: "AB12CD", app: "0.9.3", platform: "macos", text: "Отчёт № AB12CD\n\nЧто случилось:\nНе включается туннель\n\n— Программа —\nNimb 0.9.3" };
 const pending = [];
 const ctx = { waitUntil: (promise) => void pending.push(promise) };
@@ -189,7 +189,25 @@ assert.deepEqual(await (await find(kept, "secret-export-key")).json(), { ok: tru
   assert.equal((await post({ ...old, app: "0.8.30" }, strict)).status, 200);
   assert.equal((await post({ ...old, app: "0.9.23" }, strict)).status, 403);
   assert.equal((await post(old, { ...strict, UNSIGNED_UP_TO: "0.0.0" })).status, 403, "closed when the testers have moved on");
-  assert.equal((await post({ ...good, id: "WIN001", platform: "windows", app: "0.2.3" }, strict)).status, 200, "the Windows build signs nothing yet");
+  assert.equal((await post({ ...good, id: "WIN001", platform: "windows", app: "0.2.3" }, strict)).status, 200, "Windows 0.3.0 and older sign nothing");
+  assert.equal((await post({ ...good, id: "WIN002", platform: "windows", app: "0.3.0" }, strict)).status, 200);
+
+  // Windows 0.3.1 and later sign too, with a key of their own: "nimb-key|windows|<version>" under the same master key (windows/tools/reportkey makes it).
+  const winKey = (master, version) => crypto.createHmac("sha256", master).update(`nimb-key|windows|${version}`).digest("hex");
+  assert.equal(winKey("test-master", "0.3.1"), "12ad25ee11e2ced7a9b902fad614968a53b9f74257a7b1f4c2e4c970120599e8", "the same key as the Go test of the Windows program");
+  assert.equal(signWith({ id: "AB12CD", app: "0.3.1", platform: "windows", install: "K7M2XQ9P", text: "текст" }, winKey("test-master", "0.3.1")), "842ff94108897eb459084b6ac33669b876978bc8aae6b033fd146665e89b92aa");
+  const win = { ...good, id: "WIN003", platform: "windows", app: "0.3.1", text: "текст" };
+  const winSign = (data, master = "test-key") => signWith(data, winKey(master, data.app));
+  kv.clear(); told.length = 0; asked = 0;
+  assert.equal((await post({ ...win, sig: winSign(win) }, strict)).status, 200, "a signed report of Windows 0.3.1 is taken");
+  assert.equal(told.length, 1);
+  assert.equal((await post(win, strict)).status, 403, "Windows 0.3.1 with no signature");
+  assert.equal((await post({ ...win, sig: sign(win) }, strict)).status, 403, "a key of the Mac signs nothing of Windows");
+  assert.equal((await post({ ...win, platform: "macos", app: "0.9.23", sig: winSign({ ...win, app: "0.9.23" }) }, strict)).status, 403, "and a key of Windows signs nothing of the Mac");
+  assert.equal((await post({ ...win, text: "другой текст", sig: winSign(win) }, strict)).status, 403, "the text was changed after it was signed");
+  assert.equal((await post({ ...win, sig: winSign(win, "other-key") }, strict)).status, 403, "a key that is not ours");
+  assert.equal((await post({ ...win, app: "0.3.0", sig: undefined }, { ...strict, UNSIGNED_UP_TO_WINDOWS: "0.0.0" })).status, 403, "closed when the testers have moved on");
+  assert.equal(told.length, 1, "nothing turned away reaches Telegram");
   kv.clear();
 }
 
@@ -205,7 +223,7 @@ assert.deepEqual(await (await find(kept, "secret-export-key")).json(), { ok: tru
     return new Response("{}", { status: 200 });
   };
   let asked = 0;
-  const open = { ...env, LATEST_MAC: undefined, UNSIGNED_UP_TO: "99.0.0", REPORTS, LIMITER: { limit: async () => { asked++; return { success: true }; } } };
+  const open = { ...env, LATEST_MAC: undefined, LATEST_WINDOWS: undefined, UNSIGNED_UP_TO: "99.0.0", UNSIGNED_UP_TO_WINDOWS: "99.0.0", REPORTS, LIMITER: { limit: async () => { asked++; return { success: true }; } } };
   const report = { ...good, id: "FR01AA", app: "0.9.22" };
   kv.clear();
 
@@ -220,7 +238,7 @@ assert.deepEqual(await (await find(kept, "secret-export-key")).json(), { ok: tru
 
   assert.equal((await post({ ...report, app: "0.9.23" }, open)).status, 200, "the latest one is taken");
   assert.equal((await post({ ...report, id: "FR02BB", app: "0.9.24" }, open)).status, 200, "and one that is ahead of the latest (a build before its release)");
-  assert.equal((await post({ ...report, id: "FR03CC", platform: "windows", app: "0.1.0" }, open)).status, 200, "the Windows build has its own versions");
+  assert.equal((await post({ ...report, id: "FR03CC", platform: "windows", app: "0.3.0" }, open)).status, 200, "the Windows build has its own versions: 0.3.0 is the latest Windows release here");
   assert.equal((await post({ ...report, app: "0.9.9" }, open)).status, 403, "ten is more than nine: 0.9.9 is older than 0.9.23");
 
   for (const [name, fetcher] of [
@@ -233,6 +251,22 @@ assert.deepEqual(await (await find(kept, "secret-export-key")).json(), { ok: tru
     globalThis.fetch = fetcher;
     assert.equal((await post({ ...report, id: "FR04DD" }, open)).status, 200, `${name}: no minimum, the report is taken`);
   }
+
+  // Only the latest Windows version reports (the releases `windows-vX.Y.Z` are all pre-releases and count, a draft does not).
+  globalThis.fetch = github([rel("v0.9.23"), rel("windows-v0.3.1", { prerelease: true, assets: [] }), rel("windows-v0.4.0", { draft: true, prerelease: true }), rel("windows-v0.3.0", { prerelease: true })]);
+  const winReport = { ...report, id: "FR06FF", platform: "windows", app: "0.3.0" };
+  answer = await post(winReport, open);
+  assert.equal(answer.status, 403, "an older Windows is not taken");
+  assert.deepEqual(await answer.json(), { ok: false, error: "outdated", latest: "0.3.1" });
+  assert.equal((await post({ ...winReport, app: "0.3.1" }, open)).status, 200, "the latest one is taken");
+  assert.equal((await post({ ...winReport, app: "0.3.2" }, open)).status, 200, "and one ahead of it");
+  assert.equal((await post({ ...report, id: "FR07GG" }, open)).status, 403, "the Mac is judged by its own releases: 0.9.22 is older than 0.9.23");
+  assert.equal((await post({ ...winReport, app: "0.3.0" }, { ...open, LATEST_WINDOWS: "off" })).status, 200, "the check of Windows can be turned off");
+  assert.equal((await post({ ...winReport, app: "0.3.0" }, { ...open, LATEST_WINDOWS: "0.3.2" })).status, 403, "or set by hand");
+  globalThis.fetch = github([rel("v0.9.23")]);
+  assert.equal((await post(winReport, open)).status, 200, "no Windows release in the list: no minimum");
+  globalThis.fetch = () => { throw new Error("offline"); };
+  assert.equal((await post(winReport, open)).status, 200, "GitHub does not answer: no minimum");
 
   // The Windows release is made the latest one, newer than the Mac ones, and a Mac one is not mistaken for it. Drafts, pre-releases and a
   // release without the archive are not the latest; the highest version is, wherever it stands in the list.

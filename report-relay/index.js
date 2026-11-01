@@ -4,8 +4,8 @@
 // person is marked ✍️. `GET /export` with the header `Authorization: Bearer EXPORT_KEY` gives all the kept reports as one text file (`?clear=1` removes them after). The key is
 // in a header and not in the address: an address stays in the history of a browser and in logs.
 // The bot token, the chat and the export key live in the secrets of this Worker; nothing secret is in the app.
-// A report of a Mac is signed by the build of a release (see `signatureOk`): what has no signature is turned away before it is counted,
-// kept or sent anywhere.
+// A report of a Mac or of a Windows is signed by the build of a release (see `signatureOk`): what has no signature is turned away before it
+// is counted, kept or sent anywhere.
 
 const MAX_BODY = 100_000;
 const PLATFORMS = ["macos", "windows"];
@@ -14,6 +14,8 @@ const EXPORT_LIMIT = 200;
 // The last version of the Mac program that signs nothing (0.9.22 and older). When the testers have all moved on, set the variable
 // UNSIGNED_UP_TO to 0.0.0 and nothing unsigned is taken from a Mac any more.
 const UNSIGNED_UP_TO = "0.9.22";
+// The same for Windows: 0.3.0 and older sign nothing (the variable UNSIGNED_UP_TO_WINDOWS closes them later).
+const UNSIGNED_UP_TO_WINDOWS = "0.3.0";
 const RELEASES = "https://api.github.com/repos/Dizrane/Nimb/releases?per_page=20";
 
 const reply = (body, status = 200) =>
@@ -44,8 +46,8 @@ export default {
       typeof data.text === "string" && data.text.length > 0;
     if (!valid) return reply({ ok: false, error: "bad report" }, 400);
     if (!(await signatureOk(data, env))) return reply({ ok: false, error: "unsigned" }, 403);
-    // A report of the Mac is taken only from the latest version: what an older one says is mended already, and the program tells its person to update.
-    const latest = data.platform === "macos" ? await latestMac(env) : null;
+    // A report is taken only from the latest version of its program: what an older one says is mended already, and the program tells its person to update.
+    const latest = await latestVersion(env, data.platform);
     if (latest && isOlder(data.app, latest)) return reply({ ok: false, error: "outdated", latest }, 403);
     // What an automatic report says about itself: the cause and the random number of the installation, both in a plain form.
     const auto = data.auto === true;
@@ -100,13 +102,15 @@ function isOlder(app, limit) {
   return false;
 }
 
-// The latest version of the Mac program: the highest of the releases for the Mac among the last twenty of the repository, picked the way the
+// The latest version of the program of a platform: the highest of the releases for it among the last twenty of the repository. For the Mac, picked the way the
 // program picks it (Updater.newestForMac): published, not a pre-release, a tag `vX.Y.Z` (the Windows ones are `windows-v…`) and the archive
 // Nimb-*.zip in it. GitHub answers once in ten minutes to a place of Cloudflare, the rest comes from its cache. Whatever goes wrong (no
 // answer, no such release) means no minimum: a report is better kept than turned away for a fault of the check. The variable LATEST_MAC sets
-// the version by hand ("off" turns the check off).
-async function latestMac(env) {
-  if (env.LATEST_MAC) return versionParts(env.LATEST_MAC) ? env.LATEST_MAC : null;
+// the version by hand ("off" turns the check off); LATEST_WINDOWS does the same for Windows.
+async function latestVersion(env, platform) {
+  const windows = platform === "windows";
+  const forced = windows ? env.LATEST_WINDOWS : env.LATEST_MAC;
+  if (forced) return versionParts(forced) ? forced : null;
   try {
     const response = await fetch(RELEASES, {
       headers: { "user-agent": "nimb-report-relay", accept: "application/vnd.github+json" },
@@ -118,9 +122,10 @@ async function latestMac(env) {
     if (!Array.isArray(releases)) return null;
     let best = null;
     for (const release of releases) {
-      const match = /^v(\d+\.\d+\.\d+)$/.exec(String(release?.tag_name));
-      const archive = Array.isArray(release?.assets) && release.assets.some((asset) => /^Nimb.*\.zip$/.test(String(asset?.name)));
-      if (!match || !archive || release.draft === true || release.prerelease === true) continue;
+      // Windows: a tag `windows-vX.Y.Z`, always a pre-release, so pre-releases count and no archive is asked for.
+      const match = (windows ? /^windows-v(\d+\.\d+\.\d+)$/ : /^v(\d+\.\d+\.\d+)$/).exec(String(release?.tag_name));
+      const archive = windows || (Array.isArray(release?.assets) && release.assets.some((asset) => /^Nimb.*\.zip$/.test(String(asset?.name))));
+      if (!match || !archive || release.draft === true || (!windows && release.prerelease === true)) continue;
       if (!best || isOlder(best, match[1])) best = match[1];
     }
     return best;
@@ -135,23 +140,24 @@ async function sha256Hex(text) {
   return hex(await crypto.subtle.digest("SHA-256", encode(text)));
 }
 
-// The key of one version: HMAC-SHA256 of "nimb-key|<version>" under the master key, in hex letters (scripts/report_key.py makes the same one
-// for the build). The master key is in the secrets only; the program has the key of its own version, so what is taken out of a release signs
+// The key of one version: HMAC-SHA256 of "nimb-key|<version>" (for Windows "nimb-key|windows|<version>", so that a key taken out of one program
+// signs nothing of the other) under the master key, in hex letters (scripts/report_key.py makes the same one for the Mac build, windows/tools/reportkey
+// for the Windows one). The master key is in the secrets only; the program has the key of its own version, so what is taken out of a release signs
 // that version's reports and no other.
-async function versionKey(master, version) {
+async function versionKey(master, version, platform = "macos") {
   const imported = await crypto.subtle.importKey("raw", encode(master), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  return hex(await crypto.subtle.sign("HMAC", imported, encode(`nimb-key|${version}`)));
+  return hex(await crypto.subtle.sign("HMAC", imported, encode(`nimb-key|${platform === "windows" ? "windows|" : ""}${version}`)));
 }
 
 // The Mac program signs "nimb1|id|app|platform|install|sha256(text)" with HMAC-SHA256 (the key of its version, which only the build of a
 // release has, in hex letters, as they are). The secret REPORT_KEY holds the master key that the keys of the versions come from;
 // REPORT_KEY_PREV holds the one before, for the time when the master key is changed.
-// The Windows build signs nothing yet, and the Mac versions of the time before the signature (UNSIGNED_UP_TO) are taken as they were.
+// The versions of the time before the signature (UNSIGNED_UP_TO for the Mac, UNSIGNED_UP_TO_WINDOWS for Windows) are taken as they were.
 // With no key in the secrets a signed report cannot be checked, and it is turned away: a door that opens by a mistake is worse than a failure
 // that is seen.
 async function signatureOk(data, env) {
-  if (data.platform !== "macos") return true;
-  if (isUnsignedTime(data.app, env.UNSIGNED_UP_TO ?? UNSIGNED_UP_TO)) return true;
+  const windows = data.platform === "windows";
+  if (isUnsignedTime(data.app, windows ? env.UNSIGNED_UP_TO_WINDOWS ?? UNSIGNED_UP_TO_WINDOWS : env.UNSIGNED_UP_TO ?? UNSIGNED_UP_TO)) return true;
   if (typeof data.sig !== "string" || !/^[0-9a-f]{64}$/.test(data.sig)) return false;
   const keys = [env.REPORT_KEY, env.REPORT_KEY_PREV].filter(Boolean);
   if (!keys.length) {
@@ -161,7 +167,7 @@ async function signatureOk(data, env) {
   const message = encode(["nimb1", data.id, data.app, data.platform, typeof data.install === "string" ? data.install : "", await sha256Hex(data.text)].join("|"));
   const signature = Uint8Array.from(data.sig.match(/../g), (pair) => parseInt(pair, 16));
   for (const master of keys) {
-    const imported = await crypto.subtle.importKey("raw", encode(await versionKey(master, data.app)), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
+    const imported = await crypto.subtle.importKey("raw", encode(await versionKey(master, data.app, data.platform)), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
     if (await crypto.subtle.verify("HMAC", imported, signature, message)) return true;
   }
   return false;
