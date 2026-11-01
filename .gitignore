@@ -15,3 +15,6 @@ windows/cmd/nimb/frontend/wailsjs/
 # Reports of people (saved by hand or taken with report-relay/export.sh): never in the repository
 nimb-report-*.txt
 nimb-reports-*.txt
+
+# The key that signs reports: written by scripts/build_app.sh for the time of a build, never stored
+Sources/Nimb/Report/ReportKey.official.swift

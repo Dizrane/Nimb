@@ -99,7 +99,6 @@ import Testing
         let url = try #require(ReportConfig.endpoint)
         #expect(url.scheme == "https")
         #expect(url.host?.hasSuffix(".workers.dev") == true)
-        #expect(ReportConfig.canSend)
     }
 
     @Test func aMessageToTheDeveloperFitsInOneTelegramMessage() {
@@ -398,19 +397,24 @@ import Testing
 @Suite struct AutoReportTests {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
-    @Test func theFirstReportGoesAndTheSameCauseWaitsSixHours() {
-        #expect(AutoReportPolicy.allows(key: "crash", now: now, history: []))
-        let sent = [AutoReportPolicy.Sent(key: "crash", at: now.addingTimeInterval(-2 * 3600))]
-        #expect(!AutoReportPolicy.allows(key: "crash", now: now, history: sent), "the same cause is not told again within six hours")
-        #expect(AutoReportPolicy.allows(key: "crash", now: now.addingTimeInterval(5 * 3600), history: sent))
+    @Test func aCauseIsWrittenDownOnceWithACount() {
+        var causes = DayCauses.recorded([], key: "crash", title: "прошлый запуск закончился неожиданно", at: now)
+        causes = DayCauses.recorded(causes, key: "update-check", title: "проверка обновлений не удаётся", at: now.addingTimeInterval(60))
+        causes = DayCauses.recorded(causes, key: "crash", title: "прошлый запуск закончился неожиданно", at: now.addingTimeInterval(3600))
+        #expect(causes.map(\.key) == ["crash", "update-check"], "the same cause is one line")
+        #expect(causes.first?.count == 2)
+        #expect(causes.first?.first == now, "the time is of the first one")
+        let lines = DayCauses.lines(causes)
+        #expect(lines[0].hasSuffix("прошлый запуск закончился неожиданно (раз: 2)"))
+        #expect(lines[1].hasSuffix("проверка обновлений не удаётся"), "no count for a cause that came once")
     }
 
-    @Test func notMoreThanOneAnHourAndFiveADay() {
-        let hourAgo = [AutoReportPolicy.Sent(key: "a", at: now.addingTimeInterval(-30 * 60))]
-        #expect(!AutoReportPolicy.allows(key: "b", now: now, history: hourAgo), "a second cause within the hour waits")
-        let five = (1...5).map { AutoReportPolicy.Sent(key: "k\($0)", at: now.addingTimeInterval(-Double($0) * 3 * 3600)) }
-        #expect(!AutoReportPolicy.allows(key: "new", now: now, history: five), "five in a day is the limit")
-        #expect(AutoReportPolicy.pruned(five + [AutoReportPolicy.Sent(key: "old", at: now.addingTimeInterval(-30 * 3600))], now: now).count == 5)
+    @Test func theSnapshotOfTheFirstFaultHasItsWordsInTheReport() throws {
+        let snapshot = FaultSnapshot(title: "туннель молчит", at: now, text: "— Программа —\nNimb 0.9.23")
+        #expect(snapshot.section.hasPrefix("— Снимок первого сбоя ("))
+        #expect(snapshot.section.contains("туннель молчит"))
+        #expect(snapshot.section.hasSuffix("Nimb 0.9.23"))
+        #expect(try JSONDecoder().decode(FaultSnapshot.self, from: JSONEncoder().encode(snapshot)) == snapshot)
     }
 
     @Test func aDisagreementMustLastTwoLooksAndIsToldOnce() {
@@ -437,15 +441,17 @@ import Testing
             "2026-10-23 10:05:00 | работает=1ч05м | dns=Comss совпало=НЕТ | telegram=выкл совпало=да | туннель=вкл:utun4 совпало=НЕТ маршрутов=0 | трафик_через=en0 | память=180МБ",
             "2026-10-23 10:10:00 | работает=1ч10м | dns=выкл совпало=да | telegram=выкл совпало=да | туннель=выкл совпало=да маршрутов=0 | трафик_через=en0 | память=150МБ",
         ]
-        let summary = DailyDigest.summary(lines: lines, sentKeys: ["tunnel-restarted"])
+        let summary = DailyDigest.summary(lines: lines, causes: DayCauses.recorded([], key: "tunnel-restarted", title: "программа туннеля остановилась сама", at: now))
         #expect(summary.contains("Записей чёрного ящика: 3 из 288"))
         #expect(summary.contains("Период записей: с 2026-10-23 10:00:00 по 2026-10-23 10:10:00; работы по записям около 15 мин"))
         #expect(summary.contains("dns: не совпало в 1 записях"))
         #expect(summary.contains("telegram: не совпало в 0 записях"))
         #expect(summary.contains("туннель: не совпало в 1 записях"))
         #expect(summary.contains("до 180 МБ, в последней записи 150 МБ"))
-        #expect(summary.contains("Отчётов по сбоям за это время: 1 (tunnel-restarted)"))
-        #expect(DailyDigest.summary(lines: [], sentKeys: []).contains("Записей чёрного ящика: 0"))
+        #expect(summary.contains("Сбои за это время:\n  "))
+        #expect(summary.contains("программа туннеля остановилась сама"))
+        #expect(DailyDigest.summary(lines: [], causes: []).contains("Записей чёрного ящика: 0"))
+        #expect(DailyDigest.summary(lines: [], causes: []).contains("Сбоев за это время не было"))
     }
 
     @Test func theDnsOfNimbAgreesByItsSettingsAndNotByWhomTheSystemAsks() throws {
@@ -488,9 +494,9 @@ import Testing
     @Test func theDigestCountsTheLooksWhenTheServerOfTheTunnelWasSilent() {
         let quiet = "2026-10-23 10:00:00 | работает=1ч00м | туннель=вкл:utun4 совпало=да маршрутов=5 рукопожатие=95с | память=120МБ"
         let silent = "2026-10-23 10:05:00 | работает=1ч05м | туннель=вкл:utun4 совпало=да маршрутов=5 рукопожатие=640с | память=120МБ"
-        let summary = DailyDigest.summary(lines: [quiet, silent, silent], sentKeys: [])
+        let summary = DailyDigest.summary(lines: [quiet, silent, silent], causes: [])
         #expect(summary.contains("сервер не отвечал: в 2 записях"))
-        #expect(!DailyDigest.summary(lines: [quiet], sentKeys: []).contains("сервер не отвечал"))
+        #expect(!DailyDigest.summary(lines: [quiet], causes: []).contains("сервер не отвечал"))
     }
 
     @Test func theLineOfTheBlackBoxCarriesTheAgeOfTheAnswerOnlyWhenKnown() {
@@ -501,13 +507,7 @@ import Testing
         #expect(!BlackBoxLine.line(now: now, uptime: 60, facts: facts, memoryMegabytes: 100).contains("рукопожатие"))
     }
 
-    @Test func theReportThatNewKeysDidNotHelpIsNotHeldBackByTheHourLimit() {
-        let hourAgo = [AutoReportPolicy.Sent(key: "error-tunnel", at: now.addingTimeInterval(-10 * 60))]
-        #expect(!AutoReportPolicy.allows(key: "keys-failed", now: now, history: hourAgo), "an ordinary cause waits")
-        #expect(AutoReportPolicy.allows(key: "keys-failed", now: now, history: hourAgo, ignoresHourLimit: AutoTrigger.newKeysFailed.ignoresHourLimit))
-        #expect(!AutoTrigger.tunnelDropped.ignoresHourLimit)
-        let same = hourAgo + [AutoReportPolicy.Sent(key: "keys-failed", at: now.addingTimeInterval(-3600))]
-        #expect(!AutoReportPolicy.allows(key: "keys-failed", now: now, history: same, ignoresHourLimit: true), "the same cause is still told once in six hours")
+    @Test func theCauseThatNewKeysDidNotHelpHasItsWords() {
         #expect(AutoTrigger.newKeysFailed.key == "keys-failed")
         #expect(AutoTrigger.newKeysFailed.title.contains("новые ключи"))
     }
@@ -590,10 +590,58 @@ import Testing
         #expect(!WarpTunnelModel.helperNeedsReplacing(installed: 18, bundled: 18))
     }
 
-    @Test func aLimitOfGitHubIsNotAFailedCheckOfUpdates() {
+    @Test func aHelperOfAnotherBuildMakesTheBuildNotOurs() {
+        #expect(BuildCheck.helperIsForeign(installed: 27, bundled: 19, sameContent: false), "a number the app does not have")
+        #expect(BuildCheck.helperIsForeign(installed: 19, bundled: 19, sameContent: false), "our number, other content")
+        #expect(!BuildCheck.helperIsForeign(installed: 19, bundled: 19, sameContent: true))
+        #expect(!BuildCheck.helperIsForeign(installed: 18, bundled: 19, sameContent: false), "ours from before an update")
+        #expect(!BuildCheck.helperIsForeign(installed: nil, bundled: 19, sameContent: false), "no helper yet")
+        #expect(!BuildCheck.helperIsForeign(installed: 19, bundled: nil, sameContent: false), "a build without a helper is not judged")
+    }
+
+    @Test func onlyASignatureThatIsBrokenMakesTheBuildNotOurs() {
+        #expect(BuildCheck.signatureHolds(errSecSuccess))
+        #expect(BuildCheck.signatureHolds(errSecCSUnsigned), "a run from the sources")
+        #expect(!BuildCheck.signatureHolds(errSecCSSignatureFailed))
+        #expect(!BuildCheck.signatureHolds(errSecCSResourcesInvalid))
+    }
+
+    @Test func theSignatureOfAReportIsTheSameAsTheRelaysOwn() {
+        // The same line and the same key are checked in report-relay/test.mjs: the two sides must give the same letters.
+        let message = ReportSigner.message(id: "AB12CD", app: "0.9.23", platform: "macos", install: "ABCD2345", text: "текст")
+        #expect(message == "nimb1|AB12CD|0.9.23|macos|ABCD2345|ab15d5ab166623795265154b6c5aea0d7385b6c1c77fe8e5a0b27b7c46bf943e")
+        #expect(ReportSigner.signature(of: message, key: Data("test-key".utf8)) == "8d7d8304a9c38885b81822903a8d789248e7b4333623ae5aafadc6d7ceb580e1")
+    }
+
+    @Test func theKeyIsMixedWithTheVersionAndComesBackWithIt() {
+        let key = Array("0123456789abcdef0123456789abcdef".utf8)
+        let mixed = ReportKey.unmixed(key, withVersion: "0.9.23")
+        #expect(mixed != key, "the line of the key is not there as it is")
+        #expect(ReportKey.unmixed(mixed, withVersion: "0.9.23") == key)
+        #expect(ReportKey.unmixed(mixed, withVersion: "0.9.24") != key, "another version does not open it")
+        #expect(ReportKey.unmixed(key, withVersion: "").isEmpty)
+    }
+
+    @Test func aBuildWithoutTheKeyOfAReleaseSendsNothing() async {
+        #expect(ReportKey.data == nil, "the tests are built from the sources")
+        #expect(BuildCheck.problem == "собрано не из официального выпуска")
+        #expect(!ReportConfig.canSend)
+        do {
+            try await ReportSender.send(id: "AB12CD", text: "text")
+            Issue.record("a build without the key must not send")
+        } catch let failure as ReportSender.Failure {
+            #expect(failure.refused, "not kept for another try")
+        } catch {
+            Issue.record("unexpected \(error)")
+        }
+    }
+
+    @Test func aLimitOfGitHubOrNoNetworkIsNotAFailedCheckOfUpdates() {
         #expect(!UpdateError.countsAsFailedCheck(UpdateError("GitHub ограничил число запросов", isRateLimit: true)))
         #expect(UpdateError.countsAsFailedCheck(UpdateError("GitHub не отдал информацию о релизе.")))
-        #expect(UpdateError.countsAsFailedCheck(URLError(.notConnectedToInternet)))
+        #expect(!UpdateError.countsAsFailedCheck(URLError(.notConnectedToInternet)))
+        #expect(!UpdateError.countsAsFailedCheck(URLError(.networkConnectionLost)))
+        #expect(UpdateError.countsAsFailedCheck(URLError(.cannotFindHost)), "GitHub itself unreachable is still worth a report")
     }
 
     @Test func thePasswordlessRuleNeedsEveryFolderToTheHelperToBeRootsAlone() {
@@ -611,7 +659,6 @@ import Testing
         let trigger = AutoTrigger.updateInstall("Проверка подписи")
         #expect(trigger.key == "update-install")
         #expect(trigger.title == "установка обновления не удалась на этапе «Проверка подписи»")
-        #expect(!trigger.ignoresHourLimit)
     }
 
     @Test func theRulesOfAgreement() {

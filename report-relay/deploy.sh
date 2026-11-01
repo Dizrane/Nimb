@@ -57,6 +57,14 @@ URL=$(echo "$OUT" | grep -o 'https://[A-Za-z0-9._-]*\.workers\.dev' | head -1)
 printf '%s' "$TOKEN" | npx wrangler secret put BOT_TOKEN >/dev/null
 EXPORT_KEY=$(openssl rand -hex 16)
 printf '%s' "$EXPORT_KEY" | npx wrangler secret put EXPORT_KEY >/dev/null
+# The key that the official builds of the Mac program sign their reports with. Without it the Worker takes nothing signed.
+REPORT_KEY_FILE="$HOME/.config/nimb/report.key"
+if [ -f "$REPORT_KEY_FILE" ]; then
+    tr -d '\n' < "$REPORT_KEY_FILE" | npx wrangler secret put REPORT_KEY >/dev/null
+else
+    echo "   Нет ключа отчётов ($REPORT_KEY_FILE): Worker не примет отчёты Mac новых версий."
+    echo "   Создайте его командой: mkdir -p ~/.config/nimb && openssl rand -hex 32 > $REPORT_KEY_FILE && chmod 600 $REPORT_KEY_FILE"
+fi
 
 # Your chat is found by the Worker itself: from this Mac Telegram may not answer at all.
 CHAT=""
@@ -78,8 +86,19 @@ printf '%s' "$CHAT" | npx wrangler secret put CHAT_ID >/dev/null
 echo
 echo "4/4. Проверка"
 sleep 3
-CODE=$(curl -s -m 20 -o /dev/null -w '%{http_code}' -X POST "$URL/" -H 'content-type: application/json' \
-    -d '{"v":1,"id":"SETUP1","app":"setup","platform":"macos","text":"Отчёт № SETUP1\n\nЧто случилось:\nПроверочный отчёт: ретранслятор работает."}')
+# The check is signed the way the program signs its reports (when the key is there), so it goes the way a real one goes.
+BODY=$(python3 - "$REPORT_KEY_FILE" <<'PY'
+import hashlib, hmac, json, os, sys
+text = "Отчёт № SETUP1\n\nЧто случилось:\nПроверочный отчёт: ретранслятор работает."
+data = {"v": 1, "id": "SETUP1", "app": "setup", "platform": "macos", "text": text}
+if os.path.exists(sys.argv[1]):
+    key = open(sys.argv[1]).read().strip().encode()
+    message = "|".join(["nimb1", data["id"], data["app"], data["platform"], "", hashlib.sha256(text.encode()).hexdigest()])
+    data["sig"] = hmac.new(key, message.encode(), hashlib.sha256).hexdigest()
+print(json.dumps(data, ensure_ascii=False))
+PY
+)
+CODE=$(curl -s -m 20 -o /dev/null -w '%{http_code}' -X POST "$URL/" -H 'content-type: application/json' -d "$BODY")
 if [ "$CODE" = "200" ]; then
     echo "   Готово: проверочный отчёт ушёл, посмотрите в Telegram."
 else

@@ -9,7 +9,9 @@ enum ReportConfig {
         return URL(string: "https://nimb-report.nimb-app.workers.dev/")
     }
 
-    static var canSend: Bool { endpoint != nil }
+    static var canSend: Bool { endpoint != nil && BuildCheck.isOurs }
+    /// The words for a window of a build that sends nothing.
+    static let pausedWords = "Приложение изменено или собрано не из официального выпуска, поэтому тестирование приостановлено. Разработчик не отвечает за изменённые сборки."
 
     /// Where a person can write by hand when the report cannot be sent: the developer in Telegram.
     static let developerHandle = "i17th"
@@ -20,7 +22,9 @@ enum ReportConfig {
 enum ReportSender {
     struct Failure: LocalizedError {
         let errorDescription: String?
-        init(_ message: String) { errorDescription = message }
+        /// The relay will never take this report (it is not signed as a release's): trying again later is no use.
+        let refused: Bool
+        init(_ message: String, refused: Bool = false) { errorDescription = message; self.refused = refused }
     }
 
     /// The relay takes at most 100 KB; a longer report loses the middle of the diary, not its head or its end.
@@ -28,10 +32,12 @@ enum ReportSender {
 
     /// `auto` is for a report that the program sends by itself («Помогать тестированию»): the cause and the random number of the installation.
     static func send(id: String, text: String, auto: (trigger: String, install: String)? = nil) async throws {
+        guard BuildCheck.isOurs, let key = ReportKey.data else { throw Failure(ReportConfig.pausedWords, refused: true) }
         guard let endpoint = ReportConfig.endpoint else { throw Failure("Отправка из приложения пока не настроена.") }
         var body = text
         if body.count > limit { body = String(body.prefix(limit / 2)) + "\n…\n" + String(body.suffix(limit / 2)) }
         var payload: [String: Any] = ["v": 1, "id": id, "app": Updater.currentVersion, "platform": "macos", "text": body]
+        payload["sig"] = ReportSigner.signature(of: ReportSigner.message(id: id, app: Updater.currentVersion, platform: "macos", install: auto?.install ?? "", text: body), key: key)
         if let auto {
             payload["auto"] = true
             payload["trigger"] = auto.trigger
@@ -54,6 +60,7 @@ enum ReportSender {
         guard let http = response as? HTTPURLResponse else { throw Failure("Сервер отчётов ответил непонятно.") }
         switch http.statusCode {
         case 200..<300: return
+        case 403: throw Failure(ReportConfig.pausedWords, refused: true)
         case 429: throw Failure("Отчётов слишком много, попробуйте через несколько минут.")
         default: throw Failure("Сервер отчётов отказал (код \(http.statusCode)).")
         }

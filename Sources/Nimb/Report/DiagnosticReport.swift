@@ -5,8 +5,9 @@ import Foundation
 /// a few facts about the network and the end of the diary. No keys, no passwords, no addresses of the person (`ReportRedactor`).
 @MainActor
 enum DiagnosticReport {
-    /// Everything but what the person typed. It takes a few seconds (it asks Cloudflare which country the traffic leaves from).
-    static func collect(dns: DNSViewModel, telegram: TelegramProxyModel, warp: WarpTunnelModel) async -> String {
+    /// Everything but what the person typed. It takes a few seconds (it asks Cloudflare which country the traffic leaves from). `brief` leaves
+    /// out the diary and the black box: the snapshot of a fault that waits for the report of the day, which carries both itself.
+    static func collect(dns: DNSViewModel, telegram: TelegramProxyModel, warp: WarpTunnelModel, brief: Bool = false) async -> String {
         var out: [String] = []
 
         let system = await Task.detached(priority: .utility) { snapshot() }.value
@@ -19,6 +20,7 @@ enum DiagnosticReport {
             "Окно: \(Int(NSApp.windows.first { $0.canBecomeMain }?.frame.width ?? 0))×\(Int(NSApp.windows.first { $0.canBecomeMain }?.frame.height ?? 0))",
             "Прошлый запуск закончился неожиданно: \(yes(SessionMarker.previousEndedBadly))",
             "Работа в фоне: \(yes(BackgroundMode.shared.enabled)), автозапуск: \(yes(LaunchAtLogin.shared.isOn))",
+            "Сборка: \(BuildCheck.problem.map { "изменена (\($0))" } ?? "наша")",
             "Помощник туннеля: стоит версия \(helper.installed.map(String.init) ?? "нет"), в приложении \(helper.bundled.map(String.init) ?? "нет")",
         ]))
 
@@ -61,14 +63,16 @@ enum DiagnosticReport {
         out.append(section("Что могло помешать", ReportChecks.interference(system)))
         if !system.daemonLog.isEmpty { out.append(section("Процесс туннеля (последние строки его журнала)", system.daemonLog)) }
 
-        // The diary: first the events of the last day (what was switched on and off, and every error), then its last lines as they are.
-        let diary = AppLog.shared.recent(500)
-        out.append(section("Хронология (последние сутки)", ReportChronology.events(from: diary, now: Date())))
-        let tail = Array(diary.suffix(30))
-        out.append(section("Журнал (последние строки)", tail.isEmpty ? ["пусто"] : tail))
-        // The black box: what was going on before, every five minutes (the key says whether the facts agreed with what was expected).
-        let box = BlackBox.lastLines()
-        if !box.isEmpty { out.append(section("Чёрный ящик (состояние раз в 5 минут)", box)) }
+        if !brief {
+            // The diary: first the events of the last day (what was switched on and off, and every error), then its last lines as they are.
+            let diary = AppLog.shared.recent(500)
+            out.append(section("Хронология (последние сутки)", ReportChronology.events(from: diary, now: Date())))
+            let tail = Array(diary.suffix(30))
+            out.append(section("Журнал (последние строки)", tail.isEmpty ? ["пусто"] : tail))
+            // The black box: what was going on before, every five minutes (the key says whether the facts agreed with what was expected).
+            let box = BlackBox.lastLines()
+            if !box.isEmpty { out.append(section("Чёрный ящик (состояние раз в 5 минут)", box)) }
+        }
 
         let services = await Task.detached(priority: .utility) { DNSManager.physicalServices() }.value
         // The server of the tunnel is Cloudflare's, not the person's: which one it is tells the city the traffic leaves from.

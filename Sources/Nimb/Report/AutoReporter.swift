@@ -95,31 +95,47 @@ enum AutoTrigger: Equatable {
     }
 }
 
-extension AutoTrigger {
-    /// A cause that is told even when another report went within the hour: the one that matters most (what a person's last way out came to).
-    var ignoresHourLimit: Bool { self == .newKeysFailed }
+/// A cause that came up during the day. A report goes by itself once a day, and it lists what happened; the same cause is one line with a count.
+struct DayCause: Codable, Equatable {
+    let key: String
+    let title: String
+    let first: Date
+    var count: Int
 }
 
-/// How often a report may go. A report that was sent is written down with its key and its time.
-enum AutoReportPolicy {
-    struct Sent: Codable, Equatable {
-        let key: String
-        let at: Date
+enum DayCauses {
+    /// The list after the cause `key` came up at `at`: a new line, or one more for the line that is there.
+    static func recorded(_ causes: [DayCause], key: String, title: String, at: Date) -> [DayCause] {
+        var list = causes
+        if let index = list.firstIndex(where: { $0.key == key }) {
+            list[index].count += 1
+        } else {
+            list.append(DayCause(key: key, title: title, first: at, count: 1))
+        }
+        return list
     }
 
-    /// The same cause is told once in this time.
-    static let samePause: TimeInterval = 6 * 3600
-    static let perHour = 1
-    static let perDay = 5
-
-    static func allows(key: String, now: Date, history: [Sent], ignoresHourLimit: Bool = false) -> Bool {
-        if history.contains(where: { $0.key == key && now.timeIntervalSince($0.at) < samePause }) { return false }
-        if !ignoresHourLimit && history.filter({ now.timeIntervalSince($0.at) < 3600 }).count >= perHour { return false }
-        return history.filter { now.timeIntervalSince($0.at) < 24 * 3600 }.count < perDay
+    /// «14:54 · обновления не проверяются (раз: 3)»: the lines for the report.
+    static func lines(_ causes: [DayCause]) -> [String] {
+        causes.map { "\(clock($0.first)) · \($0.title)" + ($0.count > 1 ? " (раз: \($0.count))" : "") }
     }
 
-    /// Only the last day is kept.
-    static func pruned(_ history: [Sent], now: Date) -> [Sent] { history.filter { now.timeIntervalSince($0.at) < 24 * 3600 } }
+    static func clock(_ date: Date) -> String {
+        let format = DateFormatter()
+        format.locale = Locale(identifier: "en_US_POSIX")
+        format.dateFormat = "HH:mm"
+        return format.string(from: date)
+    }
+}
+
+/// The state at the moment of the first fault of the day, kept until the report of the day takes it (a report that goes at once is not sent:
+/// one a day, and the moment of a fault is what is lost by waiting).
+struct FaultSnapshot: Codable, Equatable {
+    let title: String
+    let at: Date
+    let text: String
+
+    var section: String { "— Снимок первого сбоя (\(DayCauses.clock(at)) · \(title)) —\n\(text)" }
 }
 
 /// How long ago the server of the tunnel last answered: the daemon writes «Received handshake response» into its log with the time, a
@@ -172,8 +188,8 @@ enum PendingReports {
     }
 }
 
-/// The report of the day: once in 24 hours, with the small things that are not worth a report of their own. It does not count in the limits
-/// above (it is one a day by its own clock), and it carries the numbers of the black box and the causes that were told that day.
+/// The only report that goes by itself: once in 24 hours. It carries the numbers of the black box, the causes of the day and the snapshot of
+/// the first fault.
 enum DailyDigest {
     static let every: TimeInterval = 24 * 3600
 
@@ -188,8 +204,8 @@ enum DailyDigest {
         return all.filter { line in format.date(from: String(line.prefix(19))).map { $0 > since } ?? false }
     }
 
-    /// The time since the last digest in numbers, from the lines of the black box (see `BlackBoxLine.line`) and the keys of the reports sent in the day.
-    static func summary(lines: [String], sentKeys: [String]) -> String {
+    /// The time since the last digest in numbers, from the lines of the black box (see `BlackBoxLine.line`), and the causes of the day.
+    static func summary(lines: [String], causes: [DayCause]) -> String {
         var disagreements = ["dns": 0, "telegram": 0, "туннель": 0]
         var memory: [Int] = []
         for line in lines {
@@ -210,7 +226,8 @@ enum DailyDigest {
         }.count
         if silent > 0 { out.append("туннель включён, но сервер не отвечал: в \(silent) записях") }
         if let top = memory.max(), let now = memory.last { out.append("Память: до \(top) МБ, в последней записи \(now) МБ") }
-        out.append("Отчётов по сбоям за это время: \(sentKeys.count)" + (sentKeys.isEmpty ? "" : " (\(sentKeys.joined(separator: ", ")))"))
+        out.append(causes.isEmpty ? "Сбоев за это время не было" : "Сбои за это время:")
+        out += DayCauses.lines(causes).map { "  " + $0 }
         return out.joined(separator: "\n")
     }
 }
@@ -228,24 +245,26 @@ struct MismatchTracker {
     }
 }
 
-/// «Помогать тестированию» (off until the person turns it on): when something goes wrong the program sends a report to the developer by
-/// itself, the same one that «Сообщить о проблеме» makes, with what the black box has kept. Not on a clock: on a cause, and not oftener
-/// than `AutoReportPolicy` allows. The random number of the installation tells repeated reports of one Mac from those of many; turning the
-/// switch off wipes it.
+/// «Помогать тестированию» (off until the person turns it on): once a day the program sends the developer a report by itself, the same one
+/// that «Сообщить о проблеме» makes, with what the black box has kept, the causes of the day and the snapshot of the first fault. A fault does
+/// not send anything at once: it is written down. The random number of the installation tells the reports of one Mac from those of many;
+/// turning the switch off wipes it.
 @MainActor
 final class AutoReporter: ObservableObject {
     static let shared = AutoReporter()
 
     private static let enabledKey = "helpTesting"
     private static let installKey = "helpTestingInstall"
-    private static let historyKey = "helpTestingHistory"
+    private static let causesKey = "helpTestingCauses"
     private static let countKey = "helpTestingCount"
     private static let lastKey = "helpTestingLast"
     private static let digestKey = "helpTestingDigest"
-    private static let pendingURL: URL = {
+    private static let folder: URL = {
         let base = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first ?? URL(fileURLWithPath: NSHomeDirectory())
-        return base.appendingPathComponent("Logs/Nimb/pending-reports.json")
+        return base.appendingPathComponent("Logs/Nimb", isDirectory: true)
     }()
+    private static let pendingURL = folder.appendingPathComponent("pending-reports.json")
+    private static let snapshotURL = folder.appendingPathComponent("first-fault.json")
 
     @Published private(set) var enabled: Bool
     @Published private(set) var sentCount: Int
@@ -273,6 +292,12 @@ final class AutoReporter: ObservableObject {
         telegram.$errorMessage.compactMap { $0 }.sink { [weak self] _ in self?.notify(.error(.telegram)) }.store(in: &cancellables)
         warp.$errorMessage.compactMap { $0 }.filter(AutoReportRules.tunnelErrorIsOurs)
             .sink { [weak self] _ in self?.notify(.error(.tunnel)) }.store(in: &cancellables)
+        // A build that is not ours sends nothing by itself (see `BuildCheck`): the diary says so once.
+        Task {
+            if let problem = await Task.detached(operation: { BuildCheck.problem }).value {
+                AppLog.shared.add("тестирование", "сборка изменена (\(problem)): отчёты сами не отправляются")
+            }
+        }
         // The last run ended badly: told a little after the start, when the network is there.
         if SessionMarker.previousEndedBadly {
             DispatchQueue.main.asyncAfter(deadline: .now() + 60) { [weak self] in self?.notify(.previousEndedBadly) }
@@ -290,10 +315,10 @@ final class AutoReporter: ObservableObject {
             defaults.set(Self.newInstallID(), forKey: Self.installKey)
             // The first digest comes in a day, not at once.
             defaults.set(Date().timeIntervalSince1970, forKey: Self.digestKey)
-            AppLog.shared.add("тестирование", "включено: отчёты при сбоях отправляются сами, сводка раз в сутки")
+            AppLog.shared.add("тестирование", "включено: одна сводка раз в сутки отправляется сама")
         } else {
-            for key in [Self.installKey, Self.historyKey, Self.countKey, Self.lastKey, Self.digestKey] { defaults.removeObject(forKey: key) }
-            try? FileManager.default.removeItem(at: Self.pendingURL)
+            for key in [Self.installKey, Self.causesKey, Self.countKey, Self.lastKey, Self.digestKey] { defaults.removeObject(forKey: key) }
+            for url in [Self.pendingURL, Self.snapshotURL] { try? FileManager.default.removeItem(at: url) }
             sentCount = 0
             lastSent = nil
             AppLog.shared.add("тестирование", "выключено: номер установки стёрт")
@@ -310,7 +335,7 @@ final class AutoReporter: ObservableObject {
 
     /// A look of the black box: a service that disagrees with what it should be, for long enough, is a cause.
     func observe(_ facts: BlackBoxLine.Facts) {
-        guard enabled else { return }
+        guard enabled, BuildCheck.isOurs else { return }
         observeDNS(agrees: facts.dnsAgrees)
         if tracker.observe("telegram", agrees: facts.telegramAgrees) { notify(.mismatch(.telegram)) }
         if tracker.observe("tunnel", agrees: facts.tunnelAgrees) { notify(.mismatch(.tunnel)) }
@@ -336,6 +361,10 @@ final class AutoReporter: ObservableObject {
                     left.removeAll { $0 == item }
                     recordSent()
                     AppLog.shared.add("тестирование", "отчёт \(item.id) отправлен позже, когда сеть вернулась")
+                } catch let failure as ReportSender.Failure where failure.refused {
+                    // The relay will never take it (or this build sends nothing): it is dropped, not kept for the next look.
+                    left.removeAll { $0 == item }
+                    AppLog.shared.add("тестирование", "отчёт \(item.id) не принят и убран из очереди")
                 } catch {
                     break
                 }
@@ -352,9 +381,13 @@ final class AutoReporter: ObservableObject {
         UserDefaults.standard.set(lastSent?.timeIntervalSince1970 ?? 0, forKey: Self.lastKey)
     }
 
-    private func history(now: Date) -> [AutoReportPolicy.Sent] {
-        let stored = (try? JSONDecoder().decode([AutoReportPolicy.Sent].self, from: UserDefaults.standard.data(forKey: Self.historyKey) ?? Data())) ?? []
-        return AutoReportPolicy.pruned(stored, now: now)
+    private func causes() -> [DayCause] {
+        (try? JSONDecoder().decode([DayCause].self, from: UserDefaults.standard.data(forKey: Self.causesKey) ?? Data())) ?? []
+    }
+
+    private func takeSnapshot() -> FaultSnapshot? {
+        defer { try? FileManager.default.removeItem(at: Self.snapshotURL) }
+        return (try? Data(contentsOf: Self.snapshotURL)).flatMap { try? JSONDecoder().decode(FaultSnapshot.self, from: $0) }
     }
 
     /// The report of the day goes when a day has passed since the last one (or since the switch was turned on). A Mac that was asleep sends it
@@ -368,8 +401,10 @@ final class AutoReporter: ObservableObject {
         guard DailyDigest.isDue(now: now, last: Date(timeIntervalSince1970: stamp)) else { return }
         defaults.set(now.timeIntervalSince1970, forKey: Self.digestKey)
         let lines = DailyDigest.lines(BlackBox.lastLines(BlackBoxLine.keepLines), since: Date(timeIntervalSince1970: stamp))
-        let summary = DailyDigest.summary(lines: lines, sentKeys: history(now: now).map(\.key))
-        deliver(.dailyDigest, summary: summary)
+        let summary = DailyDigest.summary(lines: lines, causes: causes())
+        // The causes and the snapshot go into this report; a report that fails to go waits whole in the queue.
+        defaults.removeObject(forKey: Self.causesKey)
+        sendDigest(summary: summary, snapshot: takeSnapshot())
     }
 
     /// A disagreement of the DNS is counted only while Cloudflare answers (one small request, and only while there is a disagreement).
@@ -381,33 +416,46 @@ final class AutoReporter: ObservableObject {
         }
     }
 
+    /// A fault is written down for the report of the day; the first of the day also leaves a snapshot of the state, which the report would
+    /// not see any more when it goes.
     func notify(_ trigger: AutoTrigger) {
-        guard enabled else { return }
-        let defaults = UserDefaults.standard
+        guard enabled, BuildCheck.isOurs else { return }
         let now = Date()
-        var history = history(now: now)
-        guard AutoReportPolicy.allows(key: trigger.key, now: now, history: history, ignoresHourLimit: trigger.ignoresHourLimit) else { return }
-        // Written down before the sending: a second cause in the same moment does not make a second report, and a failed sending is not repeated.
-        history.append(AutoReportPolicy.Sent(key: trigger.key, at: now))
-        defaults.set(try? JSONEncoder().encode(history), forKey: Self.historyKey)
-        deliver(trigger, summary: nil)
+        let kept = DayCauses.recorded(causes(), key: trigger.key, title: trigger.title, at: now)
+        UserDefaults.standard.set(try? JSONEncoder().encode(kept), forKey: Self.causesKey)
+        keepSnapshot(title: trigger.title, at: now)
     }
 
-    private func deliver(_ trigger: AutoTrigger, summary: String?) {
+    private var takingSnapshot = false
+
+    private func keepSnapshot(title: String, at: Date) {
+        guard !takingSnapshot, !FileManager.default.fileExists(atPath: Self.snapshotURL.path), let dns, let telegram, let warp else { return }
+        takingSnapshot = true
+        Task {
+            let text = await DiagnosticReport.collect(dns: dns, telegram: telegram, warp: warp, brief: true)
+            try? FileManager.default.createDirectory(at: Self.folder, withIntermediateDirectories: true)
+            try? JSONEncoder().encode(FaultSnapshot(title: title, at: at, text: text)).write(to: Self.snapshotURL)
+            takingSnapshot = false
+        }
+    }
+
+    private func sendDigest(summary: String, snapshot: FaultSnapshot?) {
         guard let dns, let telegram, let warp else { return }
-        let defaults = UserDefaults.standard
-        let install = defaults.string(forKey: Self.installKey) ?? Self.newInstallID()
+        let install = UserDefaults.standard.string(forKey: Self.installKey) ?? Self.newInstallID()
         Task {
             let facts = await DiagnosticReport.collect(dns: dns, telegram: telegram, warp: warp)
             let id = DiagnosticReport.newID()
-            let text = DiagnosticReport.head(id: id, description: "авто: \(trigger.title) (установка \(install))", contact: "") + "\n\n" + (summary.map { $0 + "\n\n" } ?? "") + facts
+            let text = DiagnosticReport.head(id: id, description: "авто: \(AutoTrigger.dailyDigest.title) (установка \(install))", contact: "") + "\n\n" + summary
+                + "\n\n" + (snapshot.map { $0.section + "\n\n" } ?? "") + facts
             do {
-                try await ReportSender.send(id: id, text: text, auto: (trigger: trigger.key, install: install))
+                try await ReportSender.send(id: id, text: text, auto: (trigger: AutoTrigger.dailyDigest.key, install: install))
                 recordSent()
-                AppLog.shared.add("тестирование", "отчёт \(id) отправлен: \(trigger.title)")
+                AppLog.shared.add("тестирование", "отчёт \(id) отправлен: \(AutoTrigger.dailyDigest.title)")
+            } catch let failure as ReportSender.Failure where failure.refused {
+                AppLog.shared.add("тестирование", "отчёт \(id) не отправлен: \(failure.localizedDescription)")
             } catch {
-                // Kept for the next looks: the net may be down just because of the fault that is being told.
-                let item = PendingReports.Item(id: id, trigger: trigger.key, install: install, text: text, at: Date())
+                // Kept for the next looks: the net may be down.
+                let item = PendingReports.Item(id: id, trigger: AutoTrigger.dailyDigest.key, install: install, text: text, at: Date())
                 let kept = PendingReports.fresh(PendingReports.decode(try? Data(contentsOf: Self.pendingURL)) + [item], now: Date())
                 try? JSONEncoder().encode(kept).write(to: Self.pendingURL)
                 AppLog.shared.add("тестирование", "отчёт \(id) не отправлен, будет ещё попытка: \(error.localizedDescription)")
@@ -419,7 +467,7 @@ final class AutoReporter: ObservableObject {
     func preview() async -> String {
         guard let dns, let telegram, let warp else { return "" }
         let facts = await DiagnosticReport.collect(dns: dns, telegram: telegram, warp: warp)
-        return DiagnosticReport.head(id: "XXXXXX", description: "авто: <причина> (установка \(UserDefaults.standard.string(forKey: Self.installKey) ?? "…"))", contact: "") + "\n\n" + facts
+        return DiagnosticReport.head(id: "XXXXXX", description: "авто: \(AutoTrigger.dailyDigest.title) (установка \(UserDefaults.standard.string(forKey: Self.installKey) ?? "…"))", contact: "") + "\n\n" + facts
     }
 
     /// «сегодня в 14:20», «23 октября в 14:20»: when the last one went.

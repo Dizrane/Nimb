@@ -130,7 +130,7 @@ struct ReportSheet: View {
                     .foregroundStyle(Theme.bad)
                     .fixedSize(horizontal: false, vertical: true)
             } else if !ReportConfig.canSend {
-                Text("Отправка из приложения не настроена. Нажмите «Написать разработчику»: откроется личный чат с разработчиком, отчёт будет скопирован.")
+                Text(BuildCheck.isOurs ? "Отправка из приложения не настроена. Нажмите «Написать разработчику»: откроется личный чат с разработчиком, отчёт будет скопирован." : ReportConfig.pausedWords)
                     .font(Typo.small)
                     .foregroundStyle(Theme.warn)
                     .fixedSize(horizontal: false, vertical: true)
@@ -141,24 +141,26 @@ struct ReportSheet: View {
                 OutlineButton(title: "Отмена", color: Theme.textSecondary) { close() }
                 OutlineButton(title: "Скопировать", color: Theme.textPrimary, action: copy)
                     .disabled(facts.isEmpty)
-                if !ReportConfig.canSend || failed {
+                if BuildCheck.isOurs && (!ReportConfig.canSend || failed) {
                     OutlineButton(title: "Написать разработчику", color: Theme.textPrimary, action: writeToDeveloper)
                         .disabled(facts.isEmpty)
                 }
-                Button(action: send) {
-                    HStack(spacing: 7) {
-                        if stage == .sending { ProgressView().controlSize(.small).tint(.black) }
-                        Text(stage == .sending ? "Отправляю…" : "Отправить")
-                            .font(.system(size: 13, weight: .semibold))
+                if BuildCheck.isOurs {
+                    Button(action: send) {
+                        HStack(spacing: 7) {
+                            if stage == .sending { ProgressView().controlSize(.small).tint(.black) }
+                            Text(stage == .sending ? "Отправляю…" : "Отправить")
+                                .font(.system(size: 13, weight: .semibold))
+                        }
+                        .foregroundStyle(Color.black.opacity(0.88))
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 7)
+                        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.white.opacity(0.92)))
                     }
-                    .foregroundStyle(Color.black.opacity(0.88))
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 7)
-                    .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.white.opacity(0.92)))
+                    .buttonStyle(PressableStyle())
+                    .disabled(facts.isEmpty || stage == .sending || !ReportConfig.canSend)
+                    .opacity(facts.isEmpty || !ReportConfig.canSend ? 0.5 : 1)
                 }
-                .buttonStyle(PressableStyle())
-                .disabled(facts.isEmpty || stage == .sending || !ReportConfig.canSend)
-                .opacity(facts.isEmpty || !ReportConfig.canSend ? 0.5 : 1)
             }
         }
     }

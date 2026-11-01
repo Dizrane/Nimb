@@ -4,11 +4,16 @@
 // person is marked ✍️. `GET /export` with the header `Authorization: Bearer EXPORT_KEY` gives all the kept reports as one text file (`?clear=1` removes them after). The key is
 // in a header and not in the address: an address stays in the history of a browser and in logs.
 // The bot token, the chat and the export key live in the secrets of this Worker; nothing secret is in the app.
+// A report of a Mac is signed by the build of a release (see `signatureOk`): what has no signature is turned away before it is counted,
+// kept or sent anywhere.
 
 const MAX_BODY = 100_000;
 const PLATFORMS = ["macos", "windows"];
 const KEEP_SECONDS = 90 * 24 * 3600;
 const EXPORT_LIMIT = 200;
+// The last version of the Mac program that signs nothing (0.9.22 and older). When the testers have all moved on, set the variable
+// UNSIGNED_UP_TO to 0.0.0 and nothing unsigned is taken from a Mac any more.
+const UNSIGNED_UP_TO = "0.9.22";
 
 const reply = (body, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -37,6 +42,7 @@ export default {
       PLATFORMS.includes(data.platform) &&
       typeof data.text === "string" && data.text.length > 0;
     if (!valid) return reply({ ok: false, error: "bad report" }, 400);
+    if (!(await signatureOk(data, env))) return reply({ ok: false, error: "unsigned" }, 403);
     // What an automatic report says about itself: the cause and the random number of the installation, both in a plain form.
     const auto = data.auto === true;
     data.trigger = auto && typeof data.trigger === "string" && /^[A-Za-z0-9:\-]{1,40}$/.test(data.trigger) ? data.trigger : "";
@@ -65,6 +71,50 @@ export default {
     return reply({ ok: true });
   },
 };
+
+const encode = (text) => new TextEncoder().encode(text);
+
+function versionParts(text) {
+  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(String(text));
+  return match ? match.slice(1).map(Number) : null;
+}
+
+// A version of the Mac program that is not newer than `limit`: it is from the time when reports were not signed.
+function isUnsignedTime(app, limit) {
+  const have = versionParts(app);
+  const last = versionParts(limit);
+  if (!have || !last) return false;
+  for (let i = 0; i < 3; i++) if (have[i] !== last[i]) return have[i] < last[i];
+  return true;
+}
+
+async function sha256Hex(text) {
+  const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", encode(text)));
+  return [...hash].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+// The Mac program signs "nimb1|id|app|platform|install|sha256(text)" with HMAC-SHA256 (a key that only the build of a release has, in hex
+// letters, as they are). The secret REPORT_KEY holds it; REPORT_KEY_PREV holds the one before, for the time when the key is changed.
+// The Windows build signs nothing yet, and the Mac versions of the time before the signature (UNSIGNED_UP_TO) are taken as they were.
+// With no key in the secrets a signed report cannot be checked, and it is turned away: a door that opens by a mistake is worse than a failure
+// that is seen.
+async function signatureOk(data, env) {
+  if (data.platform !== "macos") return true;
+  if (isUnsignedTime(data.app, env.UNSIGNED_UP_TO ?? UNSIGNED_UP_TO)) return true;
+  if (typeof data.sig !== "string" || !/^[0-9a-f]{64}$/.test(data.sig)) return false;
+  const keys = [env.REPORT_KEY, env.REPORT_KEY_PREV].filter(Boolean);
+  if (!keys.length) {
+    console.log("REPORT_KEY is not set: signed reports cannot be checked");
+    return false;
+  }
+  const message = encode(["nimb1", data.id, data.app, data.platform, typeof data.install === "string" ? data.install : "", await sha256Hex(data.text)].join("|"));
+  const signature = Uint8Array.from(data.sig.match(/../g), (pair) => parseInt(pair, 16));
+  for (const key of keys) {
+    const imported = await crypto.subtle.importKey("raw", encode(key), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
+    if (await crypto.subtle.verify("HMAC", imported, signature, message)) return true;
+  }
+  return false;
+}
 
 // The report goes to KV under a key that sorts by time. A failure here must not lose the report: Telegram may still have it.
 async function save(env, data) {

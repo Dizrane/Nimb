@@ -133,4 +133,55 @@ assert.deepEqual(await (await find(kept, "secret-export-key")).json(), { ok: tru
 globalThis.fetch = async () => new Response(JSON.stringify({ ok: true, result: [] }), { status: 200 });
 assert.deepEqual(await (await find(kept, "secret-export-key")).json(), { ok: true, chat: null });
 
+// The signature of a Mac report: checked before the limit, the keeping and Telegram.
+{
+  const told = [];
+  globalThis.fetch = async (url, init) => { told.push(String(url)); return new Response("{}", { status: 200 }); };
+  const crypto = await import("node:crypto");
+  const sign = (data, key = "test-key") => {
+    const hash = crypto.createHash("sha256").update(data.text, "utf8").digest("hex");
+    const message = ["nimb1", data.id, data.app, data.platform, data.install ?? "", hash].join("|");
+    return crypto.createHmac("sha256", key).update(message).digest("hex");
+  };
+  let asked = 0;
+  const strict = { ...env, REPORTS, REPORT_KEY: "test-key", LIMITER: { limit: async () => { asked++; return { success: true }; } } };
+  const fresh = { ...good, id: "SG01AA", app: "0.9.23", text: "текст" };
+
+  // The same line and key as the test of the program (Tests/NimbTests/ReportTests.swift): the two sides must give the same letters.
+  assert.equal(sign({ id: "AB12CD", app: "0.9.23", platform: "macos", install: "ABCD2345", text: "текст" }), "8d7d8304a9c38885b81822903a8d789248e7b4333623ae5aafadc6d7ceb580e1");
+
+  kv.clear();
+  assert.equal((await post({ ...fresh, sig: sign(fresh) }, strict)).status, 200, "a signed report of a new version is taken");
+  assert.equal(told.length, 1);
+  assert.equal(kv.size, 1);
+  const auto = { ...fresh, id: "SG02BB", auto: true, trigger: "daily", install: "K7M2X9QP" };
+  assert.equal((await post({ ...auto, sig: sign(auto) }, strict)).status, 200, "so is an automatic one, with the number of the installation in the line");
+
+  told.length = 0; kv.clear(); asked = 0;
+  assert.equal((await post(fresh, strict)).status, 403, "no signature");
+  assert.equal((await post({ ...fresh, sig: "0".repeat(64) }, strict)).status, 403, "a wrong one");
+  assert.equal((await post({ ...fresh, sig: "zz" }, strict)).status, 403, "not letters of a signature");
+  assert.equal((await post({ ...fresh, text: "другой текст", sig: sign(fresh) }, strict)).status, 403, "the text was changed after it was signed");
+  assert.equal((await post({ ...fresh, app: "0.9.24", sig: sign(fresh) }, strict)).status, 403, "so was the version");
+  assert.equal((await post({ ...auto, install: "OTHER123", sig: sign(auto) }, strict)).status, 403, "and the installation");
+  assert.equal((await post({ ...fresh, sig: sign(fresh, "other-key") }, strict)).status, 403, "a key that is not ours");
+  assert.equal((await post({ ...fresh, app: "setup", sig: undefined }, strict)).status, 403, "a version that is no version needs a signature too");
+  assert.equal((await post({ ...fresh, sig: sign(fresh) }, { ...strict, REPORT_KEY: undefined })).status, 403, "no key in the secrets: nothing signed is taken");
+  assert.equal(told.length, 0, "nothing turned away reaches Telegram");
+  assert.equal(kv.size, 0, "nor the storage");
+  assert.equal(asked, 0, "nor the count of the address");
+
+  const changing = { ...strict, REPORT_KEY: "new-key", REPORT_KEY_PREV: "test-key" };
+  assert.equal((await post({ ...fresh, sig: sign(fresh) }, changing)).status, 200, "the key before it still works while the key is being changed");
+  assert.equal((await post({ ...fresh, id: "SG03CC", sig: sign({ ...fresh, id: "SG03CC" }, "new-key") }, changing)).status, 200, "and the new one");
+
+  const old = { ...good, id: "OLD001", app: "0.9.22" };
+  assert.equal((await post(old, strict)).status, 200, "a version from before the signature, as before");
+  assert.equal((await post({ ...old, app: "0.8.30" }, strict)).status, 200);
+  assert.equal((await post({ ...old, app: "0.9.23" }, strict)).status, 403);
+  assert.equal((await post(old, { ...strict, UNSIGNED_UP_TO: "0.0.0" })).status, 403, "closed when the testers have moved on");
+  assert.equal((await post({ ...good, id: "WIN001", platform: "windows", app: "0.2.3" }, strict)).status, 200, "the Windows build signs nothing yet");
+  kv.clear();
+}
+
 console.log("relay: all checks passed");

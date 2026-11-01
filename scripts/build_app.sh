@@ -5,7 +5,27 @@ cd "$(dirname "$0")/.."
 
 VERSION="${VERSION:-0.9.22}"
 
-swift build -c release --arch arm64 --arch x86_64
+# The key that signs reports (see Sources/Nimb/Report/ReportSigner.swift) is kept outside the repository. With it the build is an official
+# one; without it (a build from the sources) the program sends no reports. The key is written into a source file for the time of the build only.
+REPORT_KEY_FILE="$HOME/.config/nimb/report.key"
+KEY_SOURCE=Sources/Nimb/Report/ReportKey.official.swift
+rm -f "$KEY_SOURCE"
+trap 'rm -f "$KEY_SOURCE"' EXIT
+OFFICIAL=()
+if [ -f "$REPORT_KEY_FILE" ]; then
+    # Mixed with the version of the build (see `ReportKey.unmixed`): the key is not a line of text in the program.
+    python3 - "$REPORT_KEY_FILE" "$VERSION" "$KEY_SOURCE" <<'PY'
+import sys
+key, pad = open(sys.argv[1]).read().strip().encode(), sys.argv[2].encode()
+mixed = [byte ^ pad[index % len(pad)] for index, byte in enumerate(key)]
+open(sys.argv[3], "w").write("#if OFFICIAL_BUILD\nlet officialReportKey: [UInt8] = [%s]\n#endif\n" % ", ".join(map(str, mixed)))
+PY
+    OFFICIAL=(-Xswiftc -DOFFICIAL_BUILD)
+else
+    echo "Note: no $REPORT_KEY_FILE: this build is not an official one and sends no reports." >&2
+fi
+
+swift build -c release --arch arm64 --arch x86_64 ${OFFICIAL[@]+"${OFFICIAL[@]}"}
 BIN="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/Nimb"
 
 make_bundle() {

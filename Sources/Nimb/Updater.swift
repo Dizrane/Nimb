@@ -101,8 +101,13 @@ struct UpdateError: LocalizedError {
     init(_ message: String, isRateLimit: Bool = false) { self.message = message; self.isRateLimit = isRateLimit }
     var errorDescription: String? { message }
 
-    /// Whether a failed check counts towards the automatic report «updates cannot be checked»: a limit of GitHub is not Nimb's to mend.
-    static func countsAsFailedCheck(_ error: Error) -> Bool { !((error as? UpdateError)?.isRateLimit ?? false) }
+    /// Whether a failed check counts towards the automatic report «updates cannot be checked»: a limit of GitHub, or a Mac that has no network
+    /// (just woken up, Wi-Fi not yet back), is not Nimb's to mend.
+    static func countsAsFailedCheck(_ error: Error) -> Bool {
+        if (error as? UpdateError)?.isRateLimit ?? false { return false }
+        if let url = error as? URLError, url.code == .notConnectedToInternet || url.code == .networkConnectionLost { return false }
+        return true
+    }
 }
 
 /// Checks GitHub for a newer release and replaces the running app with it.
