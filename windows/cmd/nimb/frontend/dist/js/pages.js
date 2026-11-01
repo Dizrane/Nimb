@@ -152,7 +152,7 @@ export class TelegramPage {
       subtitle: t.on ? 'Прокси работает на этом компьютере. Telegram ходит через него.' : 'Включите, чтобы Telegram открывался и грузил файлы быстрее.',
       label: t.on ? 'Остановить прокси для Telegram' : 'Включить прокси для Telegram',
     });
-    if (same(this, 'rj', [t.on, t.error, t.wrongKeyRecently])) return;
+    if (same(this, 'rj', [t.on, t.error, t.wrongKeyRecently, t.tunnelAdvice, S.media.busy])) return;
     const body = t.on
       ? `<div class="card stack8"><div class="nm">Подключить Telegram</div>
           <div class="sm">Откроется окно «Добавить прокси» в Telegram Desktop: подтвердите его.</div>
@@ -163,7 +163,10 @@ export class TelegramPage {
       : `<div class="card"><div class="nm">Как это работает</div><div class="sm">Включите прокси и подтвердите окно «Добавить прокси» в Telegram.</div></div>`;
     // As on the Mac: only while it goes on; it goes away by itself ten seconds after the last connection with another key.
     const wrongKey = t.on && t.wrongKeyRecently ? notice('Telegram подключается с чужим ключом: в нём, похоже, указан другой прокси на этом порту. Нажмите «Открыть в Telegram» и подтвердите, а старый прокси удалите.', 'warn') : '';
-    setHTML(this.right, body + wrongKey + notice(t.error));
+    // Advice only (the routing does not change): with the tunnel off, a network that does not let Telegram through is told to turn it on.
+    const advice = t.on && t.tunnelAdvice ? `<div class="card" style="display:flex;align-items:flex-start;gap:10px"><div class="sm" style="flex:1">${esc(t.tunnelAdvice)}</div>
+        <button class="btn" data-a="sw" data-v="media" data-f="advice" id="advice" ${S.media.busy ? 'disabled' : ''}>Включить туннель</button></div>` : '';
+    setHTML(this.right, body + advice + wrongKey + notice(t.error));
   }
   destroy() { this.hero.destroy(); }
 }

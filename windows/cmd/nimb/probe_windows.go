@@ -106,11 +106,30 @@ func (a *App) runProbe(enable bool) {
 	a.SetAI(true)
 }
 
-// runProbeOnce asks every provider; the whole check is cut off after two minutes.
+// runProbeOnce asks every provider; the whole check is cut off after two minutes. It is not run while the tunnel is being started or stopped
+// (the network is down for a moment, and a provider that works was reported as «0 из 5»): it waits for that to end, and a check during which
+// the tunnel was switched is run again (twice at most, then what it saw is taken as it is).
 func (a *App) runProbeOnce(ctx context.Context, progress func(done, total int)) []probe.ProviderReport {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
-	return (&probe.Prober{}).Run(ctx, dnsx.Providers, progress)
+	var reports []probe.ProviderReport
+	for attempt := 0; attempt < 3; attempt++ {
+		for wait := 0; wait < 120; wait++ { // up to a minute
+			if switching, _ := a.tunnelState(); !switching {
+				break
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		_, before := a.tunnelState()
+		func() {
+			ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+			defer cancel()
+			reports = (&probe.Prober{}).Run(ctx, dnsx.Providers, progress)
+		}()
+		if _, after := a.tunnelState(); after == before {
+			break
+		}
+		logLine("проверка DNS: пока шла проверка, включался или выключался туннель; проверяю заново")
+	}
+	return reports
 }
 
 // reportsForReport are the results of a check that is not older than probeKeep, or a new one (for a report about a problem the

@@ -193,3 +193,19 @@ func TestSame6ReadsTheSameAddressInAnotherSpelling(t *testing.T) {
 		t.Error("should differ")
 	}
 }
+
+// The network hands out its own IPv6 servers again after Smart DNS went on: they are taken over, but never over the hand of the person.
+func TestIPv6ServersOfTheNetworkThatReturnAreTakenOver(t *testing.T) {
+	b := &Backup{}
+	b.Apply(eu(), []Adapter{{GUID: "{A}", Name: "Wi-Fi"}, {GUID: "{B}", Name: "Dock"}, {GUID: "{C}", Name: "Lan"}})
+	now := []Adapter{
+		{GUID: "{A}", Name: "Wi-Fi", NameServer: eu().Servers(), V6: true},                            // fe80::1 from the network
+		{GUID: "{B}", Name: "Dock", NameServer: eu().Servers(), NameServer6: "2001:db8::1", V6: true}, // set by the person
+		{GUID: "{C}", Name: "Lan", NameServer: "10.0.0.1", V6: true},                                  // IPv4 set by the person
+		{GUID: "{D}", Name: "New", NameServer: eu().Servers(), V6: true},                              // not known to the backup
+	}
+	write := b.Refresh6(eu(), now)
+	if len(write) != 1 || write[0].GUID != "{A}" || !write[0].Set6 || !b.Adapters[0].V6 {
+		t.Fatalf("write=%+v backup=%+v", write, b.Adapters)
+	}
+}

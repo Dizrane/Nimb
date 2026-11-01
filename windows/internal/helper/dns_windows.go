@@ -214,7 +214,10 @@ func (h *Helper) startWatching() {
 	}
 	w.cb = cb
 	h.watch = w
+	// Once a minute as well: a network can hand out its own IPv6 servers again at any moment (they are asked before ours).
+	tick := time.NewTicker(time.Minute)
 	go func() {
+		defer tick.Stop()
 		for {
 			select {
 			case <-w.stop:
@@ -222,6 +225,8 @@ func (h *Helper) startWatching() {
 			case <-kick:
 				// A new adapter takes a moment to get its address, and changes come in bursts.
 				time.Sleep(3 * time.Second)
+				h.dnsFresh()
+			case <-tick.C:
 				h.dnsFresh()
 			}
 		}
@@ -251,15 +256,22 @@ func (h *Helper) dnsFresh() {
 	if err != nil {
 		return
 	}
-	write := h.backup.Fresh(provider, now)
-	if len(write) == 0 {
+	// The ones the backup knows go first: Fresh adds the new ones to it, and they are written below anyway.
+	again := h.backup.Refresh6(provider, now)
+	fresh := h.backup.Fresh(provider, now)
+	if len(again)+len(fresh) == 0 {
 		return
 	}
 	if err := h.saveBackup(); err != nil {
 		h.logf("DNS: %v", err)
 		return
 	}
-	h.logf("DNS: %s (%s) задан на %d новых подключениях", provider.Name, provider.ID, len(write))
-	h.writeAll(write, provider)
+	if len(fresh) > 0 {
+		h.logf("DNS: %s (%s) задан на %d новых подключениях", provider.Name, provider.ID, len(fresh))
+	}
+	if len(again) > 0 {
+		h.logf("DNS: на %d подключениях серверы IPv6 снова от сети, беру их под %s", len(again), provider.Name)
+	}
+	h.writeAll(append(fresh, again...), provider)
 	dnsx.Flush()
 }

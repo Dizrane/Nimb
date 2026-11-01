@@ -107,8 +107,10 @@ const (
 	RetryPause       = 3 * time.Second
 )
 
-// AttemptTimeouts are how long each of the two attempts waits for the handshake.
-var AttemptTimeouts = []time.Duration{10 * time.Second, 16 * time.Second}
+// AttemptTimeouts are how long each of the two attempts waits for the handshake. A handshake that is going to come comes in a second or two
+// (the packet is sent again every two seconds), and the first one lost right after a stop is answered by the second attempt a few seconds later
+// (seen in reports: 10 s of waiting, then a start in 1 s), so the first attempt is short and the second one is long.
+var AttemptTimeouts = []time.Duration{6 * time.Second, 16 * time.Second}
 
 // SettleWait is how much longer to wait before starting, when the old tunnel was closed sinceClosed ago (zero: it was never closed).
 func SettleWait(sinceClosed time.Duration, closedBefore bool) time.Duration {

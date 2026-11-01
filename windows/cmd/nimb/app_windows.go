@@ -40,7 +40,10 @@ type App struct {
 
 	mu   sync.Mutex // one switch at a time
 	busy map[string]bool
-	errs map[string]string
+	// tunnelEpoch grows each time the tunnel starts or stops being switched (under mu): a check of the providers that saw it change is not
+	// to be believed.
+	tunnelEpoch int
+	errs        map[string]string
 
 	// for a report about a problem
 	reportID, reportFacts string
@@ -54,6 +57,7 @@ type App struct {
 
 	wrongKeyMu sync.Mutex
 	wrongKey   tgproxy.RecentCount // the connections of Telegram that came with another key
+	failures   tgproxy.RecentCount // the connections that did not get to Telegram
 
 	probe probeState  // the check of the providers
 	upd   updateState // the look for a new version
@@ -161,6 +165,9 @@ type State struct {
 		// WrongKeyRecently: Telegram came with another key a moment ago (a proxy of an older install is still saved in it). True only while
 		// that goes on: ten seconds without such a connection and it is false again.
 		WrongKeyRecently bool `json:"wrongKeyRecently"`
+		// TunnelAdvice is the words that advise the tunnel when nothing or almost nothing reaches Telegram and the tunnel is off (empty
+		// otherwise); see tgproxy.AdviceFor.
+		TunnelAdvice string `json:"tunnelAdvice,omitempty"`
 	} `json:"telegram"`
 	Media struct {
 		On           bool    `json:"on"`
@@ -251,8 +258,11 @@ func (a *App) GetState() State {
 		st.Telegram.Link = telegramLink(tg)
 		st.Telegram.Stats = tg.Stats
 		st.Telegram.WrongKeyRecently = a.watchWrongKey(tg.Stats.WrongSecret)
+		failing := a.watchFailures(tg.Stats.Failures)
+		st.Telegram.TunnelAdvice = tgproxy.AdviceFor(tg.Stats.Failures, tg.Stats.WebSocket+tg.Stats.DirectTCP, failing, !st.Media.On && !st.Media.Busy).Words()
 	} else {
 		a.watchWrongKey(0, true)
+		a.watchFailures(0, true)
 		if tg != nil && tg.Error != "" && st.Telegram.Error == "" {
 			st.Telegram.Error = tg.Error
 		}
@@ -271,6 +281,18 @@ func (a *App) watchWrongKey(count int, reset ...bool) bool {
 		return false
 	}
 	return a.wrongKey.Observe(count, time.Now())
+}
+
+// watchFailures is watchWrongKey for the connections that did not get to Telegram (ten minutes without a new one and it is past).
+func (a *App) watchFailures(count int, reset ...bool) bool {
+	a.wrongKeyMu.Lock()
+	defer a.wrongKeyMu.Unlock()
+	a.failures.Quiet = tgproxy.AdviceQuiet
+	if len(reset) > 0 && reset[0] {
+		a.failures.Reset()
+		return false
+	}
+	return a.failures.Observe(count, time.Now())
 }
 
 // noteService writes to the log, once each, the moment the service stops answering (with the words of the error as they came) and the moment
@@ -386,13 +408,49 @@ type Result struct {
 
 func (a *App) begin(name string) {
 	a.mu.Lock()
+	a.noteSwitch(name)
 	a.busy[name] = true
 	delete(a.errs, name)
 	a.mu.Unlock()
 }
 
+// noteSwitch is called (with mu held) when a service starts or stops being switched.
+func (a *App) noteSwitch(name string) {
+	if name == "media" {
+		a.tunnelEpoch++
+	}
+}
+
+// tunnelState says whether the tunnel is being switched now and a number that changes whenever that starts or ends.
+func (a *App) tunnelState() (switching bool, epoch int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.busy["media"], a.tunnelEpoch
+}
+
+// enter is begin that refuses when the service is still being switched: a click that comes while the same service is busy is ignored (a
+// switch pressed many times in a second rewrote the DNS of every connection each time).
+func (a *App) enter(name string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.busy[name] {
+		return false
+	}
+	a.noteSwitch(name)
+	a.busy[name] = true
+	delete(a.errs, name)
+	return true
+}
+
+// ignored is the answer to a switch pressed while the service is still being switched.
+func (a *App) ignored(name string) Result {
+	logLine(serviceName(name) + ": переключатель нажат, пока прошлое переключение не закончилось, нажатие пропущено")
+	return Result{OK: true}
+}
+
 func (a *App) end(name string, err error) Result {
 	a.mu.Lock()
+	a.noteSwitch(name)
 	delete(a.busy, name)
 	if err != nil {
 		a.errs[name] = err.Error()
@@ -421,7 +479,14 @@ func serviceName(key string) string {
 
 // SetAI turns Smart DNS on or off.
 func (a *App) SetAI(on bool) Result {
-	a.begin("ai")
+	if !a.enter("ai") {
+		return a.ignored("ai")
+	}
+	return a.applyAI(on)
+}
+
+// applyAI does the work of SetAI; the service is already marked as busy.
+func (a *App) applyAI(on bool) Result {
 	var err error
 	if on {
 		logLine("нейросети: включаю, провайдер " + providerName(a.settings.get().Provider))
@@ -451,7 +516,14 @@ func (a *App) SetProvider(id string) Result {
 
 // SetMedia turns the tunnel on or off.
 func (a *App) SetMedia(on bool) Result {
-	a.begin("media")
+	if !a.enter("media") {
+		return a.ignored("media")
+	}
+	return a.applyMedia(on)
+}
+
+// applyMedia does the work of SetMedia; the service is already marked as busy.
+func (a *App) applyMedia(on bool) Result {
 	if on {
 		logLine("туннель: включаю")
 	} else {
@@ -469,7 +541,14 @@ func (a *App) SetMedia(on bool) Result {
 
 // SetTelegram turns the proxy on or off.
 func (a *App) SetTelegram(on bool) Result {
-	a.begin("telegram")
+	if !a.enter("telegram") {
+		return a.ignored("telegram")
+	}
+	return a.applyTelegram(on)
+}
+
+// applyTelegram does the work of SetTelegram; the service is already marked as busy.
+func (a *App) applyTelegram(on bool) Result {
 	if on {
 		logLine("Telegram: включаю прокси")
 	} else {
@@ -494,11 +573,20 @@ func (a *App) SetAll(on bool) Result {
 	}
 	var wg sync.WaitGroup
 	results := make([]Result, 3)
-	for i, f := range []func(bool) Result{a.SetAI, a.SetTelegram, a.SetMedia} {
+	// All three are marked as working before any of them starts, so that the page never sees one of them neither working nor done. One
+	// that is still being switched by an earlier press is left to finish.
+	for i, step := range []struct {
+		name  string
+		apply func(bool) Result
+	}{{"ai", a.applyAI}, {"telegram", a.applyTelegram}, {"media", a.applyMedia}} {
+		if !a.enter(step.name) {
+			results[i] = a.ignored(step.name)
+			continue
+		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			safely("включение службы из «Включить всё»", func() { results[i] = f(on) })
+			safely("включение службы из «Включить всё»", func() { results[i] = step.apply(on) })
 		}()
 	}
 	wg.Wait()

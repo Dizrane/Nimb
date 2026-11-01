@@ -173,7 +173,11 @@ const actions = {
   async toggleAll() {
     const on = !ORDER.every(isOn);
     ORDER.forEach((k) => { S[k].busy = true; }); render();
+    // The state is read often while the three are being switched, so that each card turns on as soon as its own part is done (the tunnel is
+    // the slow one and does not hold the others).
+    const poll = setInterval(refresh, 400);
     try { await api().SetAll(on); } catch (e) { /* see the state */ }
+    clearInterval(poll);
     await refresh();
   },
 };

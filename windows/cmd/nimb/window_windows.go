@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"strconv"
+	"sync"
 	"syscall"
 	"unsafe"
 
@@ -38,26 +39,39 @@ const wmEndSession = 0x0016
 // windowProc is the procedure that the window had before watchSessionEnd put its own in front of it.
 var windowProc uintptr
 
-// ownWindow finds the window of this program that Wails made.
-func ownWindow() uintptr {
-	var found uintptr
-	pid := uint32(os.Getpid())
-	cb := syscall.NewCallback(func(hwnd, _ uintptr) uintptr {
+// Go keeps at most 2000 callbacks made by syscall.NewCallback per program and never frees one, so a callback must be made once, not on
+// every call: the tray asks for the window every 3 seconds, and a new callback each time killed the window (and the icon at the clock)
+// after about 100 minutes. internal/callbackguard fails the tests when a callback is made anywhere but once.
+var ownWindowSearch struct {
+	sync.Mutex
+	pid   uint32
+	found uintptr
+}
+
+var enumOwnWindow = sync.OnceValue(func() uintptr {
+	return syscall.NewCallback(func(hwnd, _ uintptr) uintptr {
 		var owner uint32
 		pWindowThread.Call(hwnd, uintptr(unsafe.Pointer(&owner)))
-		if owner != pid {
+		if owner != ownWindowSearch.pid {
 			return 1
 		}
 		name := make([]uint16, 64)
 		n, _, _ := pGetClassName.Call(hwnd, uintptr(unsafe.Pointer(&name[0])), uintptr(len(name)))
 		if windows.UTF16ToString(name[:n]) == "wailsWindow" {
-			found = hwnd
+			ownWindowSearch.found = hwnd
 			return 0
 		}
 		return 1
 	})
-	pEnumWindows.Call(cb, 0)
-	return found
+})
+
+// ownWindow finds the window of this program that Wails made.
+func ownWindow() uintptr {
+	ownWindowSearch.Lock()
+	defer ownWindowSearch.Unlock()
+	ownWindowSearch.pid, ownWindowSearch.found = uint32(os.Getpid()), 0
+	pEnumWindows.Call(enumOwnWindow(), 0)
+	return ownWindowSearch.found
 }
 
 // outerSize is the size of a window (in the units of Wails: device independent pixels) whose client area is clientWidth by
@@ -100,7 +114,11 @@ func (a *App) watchSessionEnd() {
 	if hwnd == 0 {
 		return
 	}
-	cb := syscall.NewCallback(func(h, msg, wparam, lparam uintptr) uintptr {
+	windowProc, _, _ = pSetWindowLong.Call(hwnd, ^uintptr(3), sessionEndProc()) // GWLP_WNDPROC (-4)
+}
+
+var sessionEndProc = sync.OnceValue(func() uintptr {
+	return syscall.NewCallback(func(h, msg, wparam, lparam uintptr) uintptr {
 		if msg == wmEndSession && wparam != 0 {
 			endSession()
 			logExit("Windows завершает сеанс (выключение, перезагрузка или выход из учётной записи)")
@@ -108,8 +126,7 @@ func (a *App) watchSessionEnd() {
 		r, _, _ := pCallWindowProc.Call(windowProc, h, msg, wparam, lparam)
 		return r
 	})
-	windowProc, _, _ = pSetWindowLong.Call(hwnd, ^uintptr(3), cb) // GWLP_WNDPROC (-4)
-}
+})
 
 // windowFacts says, for a report, how large the page is and how the screen is scaled: a window that is too small or a scale of 150% is
 // the first thing to look at when a page looks wrong.

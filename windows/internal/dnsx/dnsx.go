@@ -162,6 +162,25 @@ func (b *Backup) Fresh(provider Provider, now []Adapter) (write []Adapter) {
 	return write
 }
 
+// Refresh6 returns the adapters that Smart DNS owns in IPv4 whose IPv6 servers are the network's again (a router that hands out its own,
+// «fe80::1 от сети», after Smart DNS went on or the connection came up again): Windows asks those first, so they are taken over too. An
+// adapter whose IPv4 servers or whose IPv6 servers the person set by hand is left alone.
+func (b *Backup) Refresh6(provider Provider, now []Adapter) (write []Adapter) {
+	for _, a := range now {
+		if !b.has(a.GUID) || !a.V6 || a.NameServer6 != "" || !Same(a.NameServer, provider.Servers()) {
+			continue
+		}
+		for i := range b.Adapters {
+			if b.Adapters[i].GUID == a.GUID && !b.Adapters[i].V6 {
+				b.Adapters[i].V6 = true
+			}
+		}
+		a.Set6 = true
+		write = append(write, a)
+	}
+	return write
+}
+
 // Restore turns Smart DNS off: it returns what to write back, per adapter. An adapter whose DNS is no longer the provider's
 // was changed by the person after Smart DNS was turned on, and what they set is theirs, so it is left alone (skipped).
 // Adapters that are gone are forgotten.

@@ -83,6 +83,12 @@ func (a *App) recordBlackBox() {
 	listening := st.Telegram.On && portListening(st.Telegram.Port)
 	routes, via, viaTunnel := netfacts.Routes("Nimb")
 	working := st.Media.Busy || st.Media.Restarting || a.restoring.Load()
+	// Right after a start the adapter may still go by a name of its own (seen: «tun0») and the routes may not be there yet: a disagreement of
+	// the tunnel is looked at once more a few seconds later before it is written down.
+	if st.Media.On && !working && !autoreport.TunnelAgrees(true, routes, viaTunnel, false) {
+		time.Sleep(5 * time.Second)
+		routes, via, viaTunnel = netfacts.Routes("Nimb")
+	}
 
 	f := autoreport.Facts{
 		DNS: "выкл", DNSAgrees: autoreport.DNSAgrees(active, adapters),
