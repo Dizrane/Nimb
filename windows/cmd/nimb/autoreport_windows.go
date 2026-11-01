@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -18,9 +19,11 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/Dizrane/Nimb/windows/internal/autoreport"
+	"github.com/Dizrane/Nimb/windows/internal/buildcheck"
 	"github.com/Dizrane/Nimb/windows/internal/dnsx"
 	"github.com/Dizrane/Nimb/windows/internal/netfacts"
 	"github.com/Dizrane/Nimb/windows/internal/report"
+	"github.com/Dizrane/Nimb/windows/internal/update"
 )
 
 // «Помогать тестированию» (the port of Sources/Nimb/Report/AutoReporter.swift and BlackBox.swift): the black box writes a line every five
@@ -31,11 +34,12 @@ import (
 
 // autoState is what the automatic reports keep between looks.
 type autoState struct {
-	mu       sync.Mutex // one decision at a time: the history is read, extended and written
-	tracker  autoreport.MismatchTracker
-	retrying bool
-	boxMu    sync.Mutex // the file of the black box
-	failed   int        // checks for updates that failed in a row (a limit of GitHub is not one)
+	mu           sync.Mutex // one decision at a time: the history is read, extended and written
+	tracker      autoreport.MismatchTracker
+	retrying     bool
+	boxMu        sync.Mutex // the file of the black box
+	snapshotting bool       // the snapshot of the first fault of the day is being taken
+	failed       int        // checks for updates that failed in a row (a limit of GitHub is not one)
 }
 
 func blackBoxPath() string { return filepath.Join(dataDir(), "blackbox.log") }
@@ -239,29 +243,80 @@ func (a *App) resetFailedChecks() {
 	a.auto.mu.Unlock()
 }
 
-// notifyAuto sends a report for a cause, if the switch is on and the limits allow it.
+// reportsPaused says why no report may go now, or "": a report goes only from the latest version of Nimb (a fault of an older one is mended
+// already), as on the Mac (ReportGate).
+func (a *App) reportsPaused() (words, short string) {
+	if buildProblem() != "" {
+		return buildcheck.PausedWords, buildcheck.PausedShort
+	}
+	if latest := a.settings.get().LatestKnown; latest != "" && update.IsNewer(latest, Version) {
+		return autoreport.OutdatedWords(latest), autoreport.OutdatedShort
+	}
+	return "", ""
+}
+
+// noteOutdated takes the answer of the relay «a newer version is out» as what the update check would have said: the testing pauses.
+func (a *App) noteOutdated(err error) {
+	var o *report.Outdated
+	if errors.As(err, &o) && o.Latest != "" && a.settings.get().LatestKnown != o.Latest {
+		a.settings.update(func(s *Settings) { s.LatestKnown = o.Latest })
+	}
+}
+
+// notifyAuto writes a cause of a fault down for the report of the day (nothing is sent at once: one report a day), and the first one of the day
+// also leaves a snapshot of the state, which the report would not see any more when it goes.
 func (a *App) notifyAuto(trigger autoreport.Trigger) {
-	set := a.settings.get()
-	if !set.HelpTesting {
+	if !a.settings.get().HelpTesting {
+		return
+	}
+	if words, _ := a.reportsPaused(); words != "" {
 		return
 	}
 	now := time.Now()
 	a.auto.mu.Lock()
-	history := autoreport.Pruned(set.HelpHistory, now)
-	if !autoreport.Allows(trigger.Key, now, history, trigger.IgnoresHourLimit) {
-		a.auto.mu.Unlock()
-		return
+	causes := autoreport.Recorded(a.settings.get().HelpCauses, trigger.Key, trigger.Title, now)
+	a.settings.update(func(s *Settings) { s.HelpCauses = causes })
+	_, haveSnapshot := os.Stat(snapshotPath())
+	take := haveSnapshot != nil && !a.auto.snapshotting
+	if take {
+		a.auto.snapshotting = true
 	}
-	// Written down before the sending: a second cause in the same moment does not make a second report, and a failed sending is not repeated.
-	history = append(history, autoreport.Sent{Key: trigger.Key, At: now})
-	a.settings.update(func(s *Settings) { s.HelpHistory = history })
 	a.auto.mu.Unlock()
-	goSafe("авто-отчёт: "+trigger.Key, func() { a.deliverAuto(trigger, "") })
+	logLine("тестирование: записал для сводки дня: " + trigger.Title)
+	if take {
+		goSafe("авто-отчёт: снимок первого сбоя", func() {
+			defer func() { a.auto.mu.Lock(); a.auto.snapshotting = false; a.auto.mu.Unlock() }()
+			snap := autoreport.FaultSnapshot{Title: trigger.Title, At: now.Unix(), Text: a.collectFacts(true)}
+			if raw, err := json.Marshal(snap); err == nil {
+				os.MkdirAll(filepath.Dir(snapshotPath()), 0o700)
+				os.WriteFile(snapshotPath(), raw, 0o600)
+			}
+		})
+	}
+}
+
+func snapshotPath() string { return filepath.Join(dataDir(), "first-fault.json") }
+
+// takeSnapshot reads the snapshot of the first fault and removes it.
+func takeSnapshot() *autoreport.FaultSnapshot {
+	raw, err := os.ReadFile(snapshotPath())
+	os.Remove(snapshotPath())
+	if err != nil {
+		return nil
+	}
+	var snap autoreport.FaultSnapshot
+	if json.Unmarshal(raw, &snap) != nil {
+		return nil
+	}
+	return &snap
 }
 
 // sendDigestIfDue: the report of the day goes when a day has passed since the last one (or since the switch was turned on). A computer that
-// was asleep sends it at the first look after waking.
+// was asleep sends it at the first look after waking. It lists the causes of the day and carries the snapshot of the first fault.
 func (a *App) sendDigestIfDue() {
+	if words, _ := a.reportsPaused(); words != "" {
+		return
+	}
 	now := time.Now()
 	stamp := a.settings.get().HelpDigest
 	if stamp <= 0 { // turned on by an older version: the day starts now
@@ -272,12 +327,13 @@ func (a *App) sendDigestIfDue() {
 	if !autoreport.DigestDue(now, since) {
 		return
 	}
-	a.settings.update(func(s *Settings) { s.HelpDigest = now.Unix() })
-	var sent []string
-	for _, h := range autoreport.Pruned(a.settings.get().HelpHistory, now) {
-		sent = append(sent, h.Key)
+	causes := a.settings.get().HelpCauses
+	// The causes and the snapshot go into this report; a report that fails to go waits whole in the queue.
+	a.settings.update(func(s *Settings) { s.HelpDigest, s.HelpCauses = now.Unix(), nil })
+	summary := autoreport.Summary(autoreport.LinesSince(blackBoxTail(autoreport.KeepLines), since), causes)
+	if snap := takeSnapshot(); snap != nil {
+		summary += "\n\n" + snap.Section()
 	}
-	summary := autoreport.Summary(autoreport.LinesSince(blackBoxTail(autoreport.KeepLines), since), sent)
 	goSafe("авто-отчёт: сводка", func() { a.deliverAuto(autoreport.DailyDigestCause, summary) })
 }
 
@@ -297,6 +353,12 @@ func (a *App) deliverAuto(trigger autoreport.Trigger, summary string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
 	if err := report.SendAuto(ctx, Version, id, text, trigger.Key, install); err != nil {
+		a.noteOutdated(err)
+		if report.IsRefused(err) {
+			// The relay will never take it: it is dropped, not kept for the next look.
+			logLine("тестирование: отчёт " + id + " не принят: " + err.Error())
+			return
+		}
 		item := autoreport.PendingItem{ID: id, Trigger: trigger.Key, Install: install, Text: text, At: time.Now()}
 		savePending(append(readPending(), item))
 		logLine("тестирование: отчёт " + id + " не отправлен, будет ещё попытка: " + err.Error())
@@ -359,6 +421,12 @@ func (a *App) retryPending() {
 			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 			err := report.SendAuto(ctx, Version, it.ID, it.Text, it.Trigger, it.Install)
 			cancel()
+			a.noteOutdated(err)
+			if report.IsRefused(err) {
+				left = left[1:]
+				logLine("тестирование: отчёт " + it.ID + " не принят и убран из очереди")
+				continue
+			}
 			if err != nil {
 				break
 			}
@@ -377,11 +445,16 @@ type HelpView struct {
 	On    bool  `json:"on"`
 	Count int   `json:"count"`
 	Last  int64 `json:"last,omitempty"`
+	// Paused says in a few words why nothing goes now (a newer version is out); the page shows it in place of the line of the switch.
+	Paused string `json:"paused,omitempty"`
+	// PausedWords is the same in full, for the report form.
+	PausedWords string `json:"pausedWords,omitempty"`
 }
 
 func (a *App) helpView() HelpView {
 	s := a.settings.get()
-	return HelpView{On: s.HelpTesting, Count: s.HelpCount, Last: s.HelpLast}
+	words, short := a.reportsPaused()
+	return HelpView{On: s.HelpTesting, Count: s.HelpCount, Last: s.HelpLast, Paused: short, PausedWords: words}
 }
 
 func newInstallID() string {
@@ -401,12 +474,13 @@ func (a *App) SetHelpTesting(on bool) Result {
 		a.settings.update(func(s *Settings) {
 			s.HelpTesting, s.HelpInstall, s.HelpDigest = true, newInstallID(), time.Now().Unix()
 		})
-		logLine("тестирование: включено: отчёты при сбоях отправляются сами, сводка раз в сутки")
+		logLine("тестирование: включено: одна сводка раз в сутки отправляется сама")
 	} else {
 		a.settings.update(func(s *Settings) {
-			s.HelpTesting, s.HelpInstall, s.HelpHistory, s.HelpCount, s.HelpLast, s.HelpDigest = false, "", nil, 0, 0, 0
+			s.HelpTesting, s.HelpInstall, s.HelpCauses, s.HelpCount, s.HelpLast, s.HelpDigest = false, "", nil, 0, 0, 0
 		})
 		os.Remove(pendingPath())
+		os.Remove(snapshotPath())
 		logLine("тестирование: выключено: номер установки стёрт")
 	}
 	return Result{OK: true}

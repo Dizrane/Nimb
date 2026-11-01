@@ -1,18 +1,18 @@
 import { Animator, Fader, makeCanvas, begin, now, smooth, clamp } from './anim.js';
 import { Gate } from './gate.js';
 import { drawHalo, drawSparkle } from './halo.js';
-import { POWER } from './stage.js';
+import { PowerButton } from './power.js';
 
 // The planet of the Smart DNS page: the globe turns to the region of the chosen provider, a halo crowns it, a satellite flies in and
-// sends a beam to a city of the region. Port of Sources/Nimb/GlobeButton.swift, WorldMap.swift and SatelliteArt.swift. The
+// lights the region with a beam (white, for any region by one rule). With DNS off the page is the power button alone (power.js). Port of Sources/Nimb/GlobeButton.swift, WorldMap.swift and SatelliteArt.swift. The
 // coastlines are Natural Earth (public domain), 110m, in art/world.json.
 export const REGIONS = {
-  ru: { view: { lon: 74, lat: 52 }, landing: { lon: 37.6, lat: 55.75 } },
-  eu: { view: { lon: 14, lat: 50 }, landing: { lon: 8.7, lat: 50.1 } },
-  us: { view: { lon: -98, lat: 40 }, landing: { lon: -78.9, lat: 42.9 } },
+  ru: { view: { lon: 74, lat: 52 } },
+  eu: { view: { lon: 14, lat: 50 } },
+  us: { view: { lon: -98, lat: 40 } },
 };
 // the region of each provider (Services.swift)
-export const PROVIDER_REGION = { 'geohide-eu': 'eu', comss: 'ru', geohide: 'ru', 'geohide-us': 'us' };
+export const PROVIDER_REGION = { 'geohide-eu': 'eu', comss: 'ru', magicdns: 'eu', malwlink: 'eu', geohide: 'ru', 'geohide-us': 'us' };
 
 let world = null;
 fetch('art/world.json').then((r) => r.json()).then((w) => { world = w; }).catch(() => {});
@@ -33,7 +33,7 @@ const RADIUS = 66;
 
 export class PlanetHero {
   constructor(onClick) {
-    this.W = 320; this.H = 214;
+    this.W = 320; this.H = 218; // the same height as the figure of the other pages
     this.on = false; this.busy = false; this.disabled = false; this.region = 'eu';
     this.from = REGIONS.eu.view; this.to = REGIONS.eu.view; this.turnStarted = -1e9; this.turnDuration = 1.6;
     this.litF = new Fader(1.2); this.hoverF = new Fader(0.5);
@@ -41,19 +41,13 @@ export class PlanetHero {
 
     this.el = document.createElement('div'); this.el.className = 'hero';
     this.btn = document.createElement('button'); this.btn.className = 'stage-btn';
-    this.btn.style.cssText = `width:${this.W}px;height:${this.H}px;margin:-22px 0`;
+    this.btn.style.cssText = `width:${this.W}px;height:${this.H}px`;
     this.btn.addEventListener('click', onClick);
     this.btn.addEventListener('mouseenter', () => this.setHover(true));
     this.btn.addEventListener('mouseleave', () => this.setHover(false));
     [this.canvas, this.ctx, this.dpr] = makeCanvas(this.W, this.H);
-    // the big button while DNS is off
-    this.big = document.createElement('div');
-    this.big.style.cssText = 'position:absolute;left:87px;top:48px;width:146px;height:146px;transition:opacity .9s ease-in-out,transform .9s ease-in-out;pointer-events:none';
-    this.big.innerHTML = `<div class="big-ring"></div><div class="big-disc"><div class="big-power">${POWER}</div></div>`;
-    this.badge = document.createElement('div'); this.badge.className = 'badge on';
-    this.badge.style.cssText = `top:${this.H / 2 + RADIUS * 0.56 + 8 - 20}px;transition:opacity 1.2s ease-in-out,transform 1.2s ease-in-out`;
-    this.badge.innerHTML = POWER;
-    this.btn.append(this.canvas, this.big, this.badge);
+    this.power = new PowerButton(this.H);
+    this.btn.append(this.canvas, this.power.el);
     this.titleEl = document.createElement('h2'); this.titleEl.style.marginTop = '6px';
     this.statusEl = document.createElement('div'); this.statusEl.className = 'status-line'; this.statusEl.style.minHeight = '38px';
     this.el.append(this.btn, this.titleEl, this.statusEl);
@@ -66,7 +60,7 @@ export class PlanetHero {
   }
   moving() { return now() < this.movingUntil; }
   keep(sec) { this.movingUntil = Math.max(this.movingUntil, now() + sec); this.anim.invalidate(); setTimeout(() => this.anim.invalidate(), (sec + 0.2) * 1000); }
-  setHover(h) { this.hoverF.set(h ? 1 : 0, now()); this.keep(0.6); }
+  setHover(h) { this.hoverF.set(h ? 1 : 0, now()); this.power.setHover(h); this.keep(0.6); }
 
   satellite(t) {
     const e = t - this.satStarted;
@@ -92,18 +86,18 @@ export class PlanetHero {
     this.btn.disabled = disabled; this.btn.setAttribute('aria-label', label);
     if (this.titleEl.textContent !== title) this.titleEl.textContent = title;
     this.statusEl.innerHTML = on && !busy ? `<span class="dot"></span><span>${providerName}</span>` : `<span style="font-size:13px;font-weight:400;color:var(--t2)">${subtitle}</span>`;
-    this.big.querySelector('.big-power').innerHTML = busy ? '<span class="spin" style="width:22px;height:22px"></span>' : POWER;
+    this.power.setBusy(busy);
     this.anim.invalidate();
   }
   applyLit(on, initial) {
     const t = now();
+    // The planet comes up while the button is on its way (power.js); switching off it goes at once.
+    const delay = on ? 0.5 : 0;
     this.satFrom = this.satellite(t);
-    this.litF.set(on ? 1 : 0, t);
-    this.satTarget = on ? 1 : 0; this.satStarted = t;
-    this.big.style.opacity = on ? 0 : 1; this.big.style.transform = on ? 'scale(.5)' : 'scale(1)';
-    this.badge.style.opacity = on ? 1 : 0; this.badge.style.transform = on ? 'scale(1)' : 'scale(.5)';
-    this.badge.style.transitionDelay = on ? '.5s' : '0s';
-    if (!initial) this.keep(on ? 0.25 + 2.6 + 0.2 : 1.4);
+    this.litF.set(on ? 1 : 0, t, delay);
+    this.satTarget = on ? 1 : 0; this.satStarted = t + delay;
+    this.power.setOn(on, initial);
+    if (!initial) this.keep(delay + (on ? 0.25 + 2.6 + 0.2 : 1.4));
   }
 
   draw(t) {
@@ -112,7 +106,9 @@ export class PlanetHero {
     const still = Gate.reducedMotion;
     const tt = still ? 0 : t;
     const lit = this.litF.value(t), hover = this.hoverF.value(t), satellite = this.satellite(t);
-    const c = { x: W / 2, y: H / 2 + 8 };
+    // The light of the satellite on the region: it reaches the planet as the satellite comes to its station.
+    const beam = clamp((satellite - 0.6) / 0.4, 0, 1);
+    const c = { x: W / 2, y: H / 2 + 2 };
     const r = RADIUS * (0.88 + 0.12 * lit);
     const cen = this.center(t);
     const project = ortho(cen.lon + Math.sin(tt * 0.15) * 8, cen.lat + Math.sin(tt * 0.1) * 3);
@@ -148,13 +144,13 @@ export class PlanetHero {
       ctx.fillStyle = `rgba(255,255,255,${0.10 + 0.08 * lit})`; ctx.fill(land);
       ctx.strokeStyle = `rgba(255,255,255,${0.22 + 0.12 * lit})`; ctx.lineWidth = 0.5; ctx.stroke(land);
 
-      // The region of the chosen provider: a faint outline before connecting, solid white after.
+      // The region of the chosen provider: a faint outline until the satellite lights it, then white.
       const hl = this.ringsPath(world.regions[this.region] || [], project, screen);
       ctx.lineJoin = 'round';
-      ctx.strokeStyle = `rgba(255,255,255,${0.09 * lit})`; ctx.lineWidth = 7; ctx.stroke(hl);
-      ctx.strokeStyle = `rgba(255,255,255,${0.14 * lit})`; ctx.lineWidth = 3.5; ctx.stroke(hl);
-      ctx.fillStyle = `rgba(255,255,255,${0.10 + 0.55 * lit})`; ctx.fill(hl);
-      ctx.strokeStyle = `rgba(255,255,255,${0.35 + 0.25 * lit})`; ctx.lineWidth = 0.7; ctx.stroke(hl);
+      ctx.strokeStyle = `rgba(255,255,255,${0.09 * beam})`; ctx.lineWidth = 7; ctx.stroke(hl);
+      ctx.strokeStyle = `rgba(255,255,255,${0.14 * beam})`; ctx.lineWidth = 3.5; ctx.stroke(hl);
+      ctx.fillStyle = `rgba(255,255,255,${0.10 + 0.55 * beam})`; ctx.fill(hl);
+      ctx.strokeStyle = `rgba(255,255,255,${0.35 + 0.25 * beam})`; ctx.lineWidth = 0.7; ctx.stroke(hl);
 
       // Night side.
       const night = ctx.createLinearGradient(c.x - r + r * 0.5, c.y - r, c.x + r, c.y + r);
@@ -174,7 +170,7 @@ export class PlanetHero {
       drawSparkle(ctx, halo.center, halo.scale, strength, tt * spin);
     }
 
-    if (satellite > 0.001 && world) this.drawSatellite(ctx, c, r, satellite, project, screen, tt);
+    if (satellite > 0.001 && world) this.drawSatellite(ctx, c, r, satellite, beam, project, screen, tt);
   }
 
   ringsPath(rings, project, screen) {
@@ -203,9 +199,16 @@ export class PlanetHero {
     return path;
   }
 
-  drawSatellite(ctx, c, r, satellite, project, screen, t) {
-    const landing = project(REGIONS[this.region].landing.lon, REGIONS[this.region].landing.lat);
-    const target = landing.visible ? screen(landing) : c;
+  /**
+   * The satellite lights the whole region, whatever its shape: for each piece of land of the region the beam is the hull of the satellite and
+   * of the visible outline of that piece, so it widens exactly as far as the land is wide and does not cross the sea between the pieces
+   * (Alaska, Hawaii); the land itself is the area that lights.
+   */
+  drawSatellite(ctx, c, r, satellite, beam, project, screen, t) {
+    const rings = world.regions[this.region] || [];
+    const pieces = visiblePieces(rings, project, screen, 240);
+    let target = c, biggest = -1;
+    for (const piece of pieces) { const b = bounds(piece); if (b.w * b.h > biggest) { biggest = b.w * b.h; target = { x: b.x + b.w / 2, y: b.y + b.h / 2 }; } }
     // The satellite flies in once, slows down and then stays at its station.
     const rx = r * 1.62, ry = r * 1.32;
     const eased = 1 - Math.pow(1 - satellite, 3);
@@ -213,23 +216,25 @@ export class PlanetHero {
     const sat = { x: c.x + rx * Math.cos(angle), y: c.y + ry * Math.sin(angle) };
     sat.y += Math.sin(t * 0.9) * 1.2 * Math.pow(eased, 4);
     const aim = Math.atan2(target.y - sat.y, target.x - sat.x);
-    const beam = clamp((satellite - 0.6) / 0.4, 0, 1);
-    const dx = target.x - sat.x, dy = target.y - sat.y, len = Math.max(Math.hypot(dx, dy), 1);
-    const nx = -dy / len * 9, ny = dx / len * 9;
-    const green = '48,209,89';
+    const flicker = 0.94 + 0.06 * Math.sin(t * 1.4);
     ctx.save();
-    ctx.globalAlpha = beam;
-    const cone = new Path2D(); cone.moveTo(sat.x, sat.y); cone.lineTo(target.x + nx, target.y + ny); cone.lineTo(target.x - nx, target.y - ny); cone.closePath();
-    const cg = ctx.createLinearGradient(sat.x, sat.y, target.x, target.y);
-    cg.addColorStop(0, `rgba(${green},0.28)`); cg.addColorStop(1, `rgba(${green},0.02)`);
-    ctx.fillStyle = cg; ctx.fill(cone);
-    ctx.strokeStyle = `rgba(${green},0.8)`; ctx.lineWidth = 0.9; ctx.lineCap = 'round'; ctx.setLineDash([1.5, 4]); ctx.lineDashOffset = t * 8;
-    ctx.beginPath(); ctx.moveTo(sat.x, sat.y); ctx.lineTo(target.x, target.y); ctx.stroke(); ctx.setLineDash([]);
-    if (landing.visible) {
-      const ping = (t * 0.33) % 1, pr = 2.5 + 11 * ping;
-      ctx.strokeStyle = `rgba(${green},${(1 - ping) * 0.85})`; ctx.lineWidth = 1.1; ctx.beginPath(); ctx.arc(target.x, target.y, pr, 0, Math.PI * 2); ctx.stroke();
-      ctx.fillStyle = `rgb(${green})`; ctx.beginPath(); ctx.arc(target.x, target.y, 2.2, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = beam * flicker;
+    if (pieces.length) {
+      const cone = new Path2D();
+      for (const piece of pieces) {
+        const hull = convexHull([...piece, sat]);
+        hull.forEach((p, i) => (i ? cone.lineTo(p.x, p.y) : cone.moveTo(p.x, p.y)));
+        cone.closePath();
+      }
+      const cg = ctx.createLinearGradient(sat.x, sat.y, target.x, target.y);
+      cg.addColorStop(0, 'rgba(255,255,255,0.03)'); cg.addColorStop(1, 'rgba(255,255,255,0.17)');
+      ctx.fillStyle = cg; ctx.fill(cone);
     }
+    // The light on the ground: the area of the country itself, over the shading of the night side, not over the edge of the disc.
+    ctx.save();
+    ctx.beginPath(); ctx.arc(c.x, c.y, r, 0, Math.PI * 2); ctx.clip();
+    ctx.fillStyle = 'rgba(255,255,255,0.14)'; ctx.fill(this.ringsPath(rings, project, screen));
+    ctx.restore();
     ctx.restore();
 
     ctx.save();
@@ -238,7 +243,7 @@ export class PlanetHero {
     drawSatelliteBody(ctx, 0.5 + 0.5 * Math.sin(t * 3));
     ctx.restore();
   }
-  destroy() { this.anim.destroy(); }
+  destroy() { this.anim.destroy(); this.power.destroy(); }
 }
 
 /** Body, two solar panels and a blinking antenna, around the origin, in grey. Port of SatelliteArt.swift. */
@@ -261,4 +266,36 @@ function drawSatelliteBody(g, pulse) {
   g.fillStyle = gl; g.beginPath(); g.arc(0, 10, 9, 0, Math.PI * 2); g.fill();
   g.fillStyle = '#fff'; g.beginPath(); g.arc(0, 10, 1.8, 0, Math.PI * 2); g.fill();
   g.beginPath(); g.moveTo(0, 5); g.lineTo(0, 8.5); g.strokeStyle = 'rgba(255,255,255,0.9)'; g.lineWidth = 1; g.stroke();
+}
+
+/** The outline of each piece of land of the rings that faces us, on the screen, about `limit` points in all; the pieces that are hardly seen
+ * (an island a few points wide) get no beam of their own; they light up with the region all the same. */
+function visiblePieces(rings, project, screen, limit) {
+  const total = rings.reduce((n, ring) => n + ring.length / 2, 0);
+  const step = Math.max(Math.floor(total / limit), 1);
+  const pieces = [];
+  for (const ring of rings) {
+    const points = [];
+    for (let i = 0; i < ring.length - 1; i += 2 * step) { const p = project(ring[i], ring[i + 1]); if (p.visible) points.push(screen(p)); }
+    if (points.length > 2) { const b = bounds(points); if (Math.max(b.w, b.h) >= 8) pieces.push(points); }
+  }
+  return pieces;
+}
+
+function bounds(points) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const p of points) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
+/** The smallest convex polygon around the points (Andrew's monotone chain). */
+function convexHull(input) {
+  const points = [...input].sort((a, b) => (a.x === b.x ? a.y - b.y : a.x - b.x));
+  if (points.length <= 2) return points;
+  const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const lower = [];
+  for (const p of points) { while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop(); lower.push(p); }
+  const upper = [];
+  for (const p of [...points].reverse()) { while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop(); upper.push(p); }
+  return [...lower.slice(0, -1), ...upper.slice(0, -1)];
 }

@@ -144,6 +144,17 @@ export class Onboarding {
       this.iconStep = step;
     }
     setHTML(this.el.querySelector('#onb-body'), this.body(S, extra));
+    this.fit();
+  }
+
+  /** The step sits in the middle of the free height. It is tried in its usual size, then compact (a smaller picture, closer lines), and only
+   * a step that does not fit even so scrolls (a long message of an error). Same order as ViewThatFits of the Mac. */
+  fit() {
+    const col = this.el.querySelector('.onb-col');
+    if (!col) return;
+    col.classList.remove('compact');
+    const free = this.el.clientHeight - 48;
+    if (col.scrollHeight > free) col.classList.add('compact');
   }
 
   body(S, extra) {
@@ -187,9 +198,10 @@ export class Onboarding {
         + banner(s.error || (S.serviceOk ? '' : S.serviceError));
     }
     return head('Чтобы работало само', 'Рекомендуем включить: Nimb запустится вместе с Windows, будет работать у часов при закрытом окне и скажет о новой версии.')
-      + `<div class="card row" style="width:100%;text-align:left"><div class="grow"><div class="nm">Запускать вместе с Windows</div></div>
-         <button class="pill ${extra.autostart ? 'on' : ''}" role="switch" aria-checked="${extra.autostart}" aria-label="Запускать вместе с Windows" data-a="autostart" data-f="autostart" id="autostart"></button></div>`
-      + `<div style="width:100%;text-align:left">${notifyCard(S, extra)}</div>`
+      // The switches are one card with a row for each, not a card for each: the step has to fit the smallest window.
+      + `<div class="card rows" style="width:100%;text-align:left"><div class="row"><div class="grow"><div class="nm">Запускать вместе с Windows</div></div>
+         <button class="pill ${extra.autostart ? 'on' : ''}" role="switch" aria-checked="${extra.autostart}" aria-label="Запускать вместе с Windows" data-a="autostart" data-f="autostart" id="autostart"></button></div>
+         <div class="hr"></div>${notifyCard(S, extra, { framed: false, showsTest: false })}</div>`
       + `<button class="btn main wide" data-a="onbfinish" data-f="onbfinish" id="onbfinish">Готово</button>
          <div class="sm" style="text-align:center;font-size:12px;color:var(--t2)">Пройти настройку заново можно в «Настройках» (внизу слева).</div>`;
   }

@@ -1,8 +1,9 @@
-import { esc, setHTML, SV, ORDER } from './common.js';
+import { esc, setHTML, SV, ORDER, api } from './common.js';
 import { HomeHero } from './home.js';
 import { Stage } from './stage.js';
 import { PlanetHero, PROVIDER_REGION } from './globe.js';
 import { SITES } from './sites.js';
+import { openPopover } from './popover.js';
 
 // A notice, as NoticeCard of the Mac: a sign, then the words in the small type on a card of the colour of its meaning.
 const NOTICE_SIGN = {
@@ -55,24 +56,16 @@ function speed(seconds) {
 }
 
 /** A card over the window (details of a check): it does not change the page under it, so nothing there has to make room for it. */
-export function modal(label, html) {
-  const wrap = document.createElement('div');
-  wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;z-index:50;animation:fade .2s ease-out;padding:16px';
-  wrap.innerHTML = `<div role="dialog" aria-label="${esc(label)}" style="width:min(400px,100%);max-height:100%;background:#000;border:1px solid rgba(255,255,255,.16);border-radius:14px;overflow:hidden">
-    <div style="padding:14px 16px 4px;display:flex;justify-content:space-between;align-items:center"><div class="nm" style="font-size:15px">${esc(label)}</div><button class="btn" id="modal-close">Закрыть</button></div>${html}</div>`;
-  const close = () => { wrap.remove(); document.removeEventListener('keydown', onKey, true); };
-  const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
-  wrap.addEventListener('click', (e) => { if (e.target === wrap || e.target.id === 'modal-close') close(); });
-  document.addEventListener('keydown', onKey, true);
-  document.body.appendChild(wrap);
-  wrap.querySelector('#modal-close').focus();
+/** The popover of an «i»: a title and what goes under it, by the button `anchor`. */
+export function info(anchor, label, html, width = 320) {
+  openPopover(anchor, { width, side: 'right', build: (el) => { el.innerHTML = `<div class="pv-title">${esc(label)}</div>${html}`; } });
 }
 
 function details(p, name) {
   const rows = p.services.map((s) => `<div class="drow"><span>${esc(s.name)}</span><span class="mono">сайт ${s.site} · API ${s.api}</span></div>`).join('');
   const refusals = p.refusals.map((l) => `<div class="dnote bad">${esc(l)}</div>`).join('');
   const dead = p.dead.length ? `<div class="dnote warn">Без нормального ответа: ${esc(p.dead.join(', '))}</div>` : '';
-  return `<div class="det" style="margin:6px 14px 14px">${rows}${refusals}${dead}
+  return `<div class="det" style="margin:0">${rows}${refusals}${dead}
     <div class="dfoot">Цифры — сколько адресов пула ответило как положено. Отказ из-за региона, страница ограничений и ответ 403 не считаются. Сервис работает, если ответило не менее 75%. Проверка не гарантирует, что откроются приложения.</div></div>`;
 }
 
@@ -86,9 +79,9 @@ export class AIPage {
     root.querySelector('#slot').appendChild(this.hero.el);
     this.right = root.querySelector('#right');
   }
-  toggleDetails(id) {
+  toggleDetails(id, anchor) {
     const r = (this.S.probe.reports || []).find((x) => x.id === id), p = this.S.providers.find((x) => x.id === id);
-    if (r && p) modal(p.name, details(r, p.name));
+    if (r && p) info(anchor, p.name, details(r, p.name), 290);
   }
   update(S) {
     this.S = S;
@@ -178,7 +171,7 @@ const MARK = { works: '<path d="M2.5 6.5l2.5 2.5 4.5-5"/>', partial: PILL_ICON.u
 function siteDetails(c) {
   const probes = c.probes.map((p) => `<div><div class="drow"><span><span class="pm ${p.answered ? 'ok' : 'bad'}">${p.answered ? '✓' : '✕'}</span>${esc(p.name)}</span><span class="mono">${esc(p.summary)}</span></div>
       <div class="mono host">${esc(p.host)}</div></div>`).join('');
-  return `<div class="det" style="margin:6px 14px 14px">${probes}
+  return `<div class="det" style="margin:0">${probes}
     <div class="dfoot">Проверка спрашивает у сайта несколько адресов: страницу, картинки, видео или файлы. Если часть ответила, а часть нет, чаще всего это случайная задержка, а не поломка: сам сайт обычно открывается. Каждый адрес при неудаче спрашивается дважды.</div></div>`;
 }
 
@@ -198,9 +191,9 @@ function checkCard(sites) {
 
 export class MediaPage {
   constructor(actions) { this.actions = actions; }
-  toggleDetails(id) {
+  toggleDetails(id, anchor) {
     const c = ((this.S || {}).sites || { checks: [] }).checks.find((x) => `site-${x.name}` === id);
-    if (c) modal(c.name, siteDetails(c));
+    if (c) info(anchor, c.name, siteDetails(c), 320);
   }
   mount(root) {
     root.innerHTML = shell('YouTube и Discord', '<div class="two"><div class="left" id="slot"></div><div class="right" id="right"></div></div>');
@@ -229,33 +222,23 @@ export class MediaPage {
   destroy() { this.hero.destroy(); }
 }
 
-/** The list of what the tunnel opens, over the window. */
-export function showSites() {
+/** The list of what the tunnel opens (TunnelSitesInfo of the Mac): a popover by the «i» of the page of the tunnel. */
+export function toggleSites(anchor) {
   const half = Math.ceil(SITES.length / 2);
-  const col = (items, from) => `<div style="flex:1;min-width:0">${items.map(([n, k], i) => `<div style="display:flex;align-items:center;gap:10px;padding:6.5px 0;${i < items.length - 1 ? 'border-bottom:1px solid rgba(255,255,255,.06)' : ''}">
-    <span class="mono" style="width:20px;text-align:right;opacity:.7">${from + i}</span><span style="font-size:13.5px;font-weight:500;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(n)}</span>
-    <span style="font-size:12px;color:var(--t2)">${esc(k)}</span></div>`).join('')}</div>`;
-  const wrap = document.createElement('div');
-  wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;z-index:50;animation:fade .2s ease-out';
-  wrap.innerHTML = `<div role="dialog" aria-label="Что открывает туннель" style="width:min(720px,92vw);background:#000;border:1px solid rgba(255,255,255,.16);border-radius:14px;overflow:hidden">
-    <div style="display:flex;justify-content:space-between;align-items:center;padding:22px 22px 12px"><h2 style="font:400 24px var(--serif);margin:0">Что открывает туннель</h2>
-    <button class="btn" id="sites-close">Закрыть</button></div>
-    <div style="display:flex;gap:28px;padding:0 22px 16px">${col(SITES.slice(0, half), 1)}${col(SITES.slice(half), half + 1)}</div>
-    <div style="padding:12px 22px;font-size:12px;color:var(--t2);background:rgba(255,255,255,.04);border-top:1px solid rgba(255,255,255,.08)">Туннель не поможет там, где сервис сам закрыт для российских IP-адресов.</div></div>`;
-  const close = () => wrap.remove();
-  wrap.addEventListener('click', (e) => { if (e.target === wrap || e.target.id === 'sites-close') close(); });
-  document.addEventListener('keydown', function onKey(e) { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey, true); } }, true);
-  document.body.appendChild(wrap);
-  wrap.querySelector('#sites-close').focus();
+  const col = (items, from) => `<div>${items.map(([n, k], i) => `<div class="pv-site"><i>${from + i}</i><b>${esc(n)}</b><span>${esc(k)}</span></div>`).join('')}</div>`;
+  openPopover(anchor, { width: 560, side: 'right', build: (el) => {
+    el.innerHTML = `<div class="pv-title">Что открывает туннель</div><div class="pv-cols">${col(SITES.slice(0, half), 1)}${col(SITES.slice(half), half + 1)}</div>
+      <div class="pv-hr"></div><div class="pv-note">Туннель не поможет там, где сервис сам закрыт для российских IP-адресов.</div>`;
+  } });
 }
 
 // ---------------------------------------------------------------------------------------------------------------- Settings
 
 /** The switch for the notifications about new versions; the test button is there only while they are on. */
-export function notifyCard(S, extra) {
+export function notifyCard(S, extra, { framed = true, showsTest = true } = {}) {
   const on = S.update.notify;
-  return `<div class="card row top"><div class="grow"><div class="nm">Уведомления об обновлениях</div><div class="sm">Nimb скажет, когда выйдет новая версия.</div>
-    ${on ? `<button class="btn" style="margin-top:5px" data-a="notifytest" data-f="notifytest" id="notifytest" aria-label="Отправить тестовое уведомление" ${extra.testSent ? 'disabled' : ''}>${extra.testSent ? 'Отправлено' : 'Отправить тестовое уведомление'}</button>` : ''}</div>
+  return `<div class="${framed ? 'card ' : ''}row top"><div class="grow"><div class="nm">Уведомления об обновлениях</div><div class="sm">Nimb скажет, когда выйдет новая версия.</div>
+    ${on && showsTest ? `<button class="btn" style="margin-top:5px" data-a="notifytest" data-f="notifytest" id="notifytest" aria-label="Отправить тестовое уведомление" ${extra.testSent ? 'disabled' : ''}>${extra.testSent ? 'Отправлено' : 'Отправить тестовое уведомление'}</button>` : ''}</div>
     <button class="pill ${on ? 'on' : ''}" role="switch" aria-checked="${on}" aria-label="Уведомления об обновлениях" data-a="notify" data-f="notify" id="notify"></button></div>`;
 }
 
@@ -271,7 +254,7 @@ function lastWords(unix) {
 /** The second line of the card «Сообщить о проблеме» (HelpTestingRow.swift): the switch «Помогать тестированию» and what it is. */
 function helpRow(S) {
   const h = S.help || {};
-  const detail = !h.on ? 'Сам отправит отчёт, если что-то пойдёт не так.'
+  const detail = h.paused ? h.paused : !h.on ? 'Раз в сутки сам отправит сводку, если разрешите.'
     : !h.last ? 'Включено. Пока ничего не отправлено.' : `Отправлено: ${h.count}, последний ${lastWords(h.last)}.`;
   return `<div class="hr"></div><div class="rowline"><div class="grow"><div class="nm-line"><span class="nm">Помогать тестированию</span>
     <button class="info" data-a="helpinfo" data-f="helpinfo" id="helpinfo" aria-label="Что такое «Помогать тестированию»" title="Что это и что отправляется">${INFO_CIRCLE}</button></div>
@@ -279,28 +262,39 @@ function helpRow(S) {
     <button class="pill ${h.on ? 'on' : ''}" role="switch" aria-checked="${!!h.on}" aria-label="Помогать тестированию" data-a="helptest" data-f="helptest" id="helptest"></button></div>`;
 }
 
-/** What the switch does, in words, and a report as it would go now (HelpTestingInfo of the Mac). */
-function helpPopover(help) {
-  const point = (title, text) => `<div class="pt"><div class="pt-t">${title}</div><div class="pt-x">${text}</div></div>`;
-  const example = help.preview != null ? `<div class="sm" style="margin:0">Так выглядит отчёт сейчас</div><pre class="preview pop-pre">${esc(help.preview)}</pre>`
-    : `<button class="btn" data-a="helppreview" data-f="helppreview" id="helppreview" ${help.loading ? 'disabled' : ''}>${help.loading ? 'Собираю…' : 'Показать пример отчёта'}</button>`;
-  return `<div class="pop-back" data-a="helpclose"><div class="pop" role="dialog" aria-label="Помогать тестированию" data-stop="1">
-    <div class="pop-head"><h3>Помогать тестированию</h3><button class="btn soft" data-a="helpclose" data-f="helpclose" id="helpclose">Закрыть</button></div>
-    <div class="pop-body">
-    ${point('Когда', 'Сразу уходит отчёт, если сломалось что-то серьёзное: программа закрылась неожиданно, туннель остановился сам или включён, но сервер не отвечает больше 10 минут, сервис работает не так, как должен, больше 10 минут, включение или выключение закончилось ошибкой, проверка обновлений не удаётся несколько раз подряд. Если сайт или сервис просто не открылся, это не причина: такое бывает у всех.')}
-    ${point('Как часто', 'О сбоях: не чаще одного отчёта в час и пяти в сутки, одно и то же не чаще раза в 6 часов. И раз в сутки одна сводка: цифры за день, чтобы видеть мелочи, которые не стоят отдельного отчёта. Отчёт, который не удалось отправить (сети нет), ждёт в файле на этом компьютере не дольше суток и уходит, когда сеть вернётся.')}
-    ${point('Что внутри', 'То же, что в «Сообщить о проблеме»: версии, состояние сервисов, журнал и состояние раз в 5 минут за сутки. Паролей, ключей и ваших личных данных (адрес, адреса вашей сети, имя компьютера) нет. Адреса серверов провайдеров и сервера туннеля (они принадлежат Cloudflare) есть: они помогают найти ошибку.')}
-    ${point('Номер установки', 'Случайный. По нему отчёты с одного компьютера связываются между собой (видно, что это один и тот же компьютер), но не с вами лично. Когда вы выключаете переключатель, он стирается.')}
-    ${point('Пока работает Nimb', 'Записи и отчёты идут, пока Nimb запущен (в том числе у часов). После «Выйти из Nimb» ничего не пишется и не отправляется.')}
-    <div class="hr"></div>${example}</div></div></div>`;
+/** What the switch does, in a few short points; the report as it would go now stands in their place (HelpTestingInfo of the Mac). */
+export function toggleHelp(anchor) {
+  const point = (title, text) => `<div class="pv-pt"><b>${title}</b><span>${text}</span></div>`;
+  let example = false, text = null;
+  openPopover(anchor, { width: 440, side: 'right', build: (el, redraw) => {
+    const draw = () => {
+      if (example) {
+        el.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center"><button class="pv-back" id="pv-back">‹ Назад</button><span class="pv-note">Так выглядит отчёт сейчас</span></div>
+          <pre class="pv-pre">${esc(text ?? 'Собираю…')}</pre>`;
+        el.querySelector('#pv-back').addEventListener('click', () => { example = false; draw(); });
+      } else {
+        el.innerHTML = `<div class="pv-title">Помогать тестированию</div>
+          ${point('Когда', 'Раз в сутки уходит одна сводка с цифрами за день. Если за день что-то серьёзно сломалось (программа закрылась неожиданно, туннель остановился сам или молчит больше 10 минут, сервис не работает как надо больше 10 минут, обновление не ставится), это попадёт в сводку со временем и состоянием в момент первого сбоя. Если сайт просто не открылся, это не причина: такое бывает у всех.')}
+          ${point('Как часто', 'Один отчёт в сутки, больше ничего само не отправляется. Если сети нет, отчёт ждёт до суток и уходит сам. Отчёты принимаются только из последней версии Nimb: если вышла новая, сначала обновитесь.')}
+          ${point('Что внутри', 'То же, что в «Сообщить о проблеме»: версии, состояние сервисов, журнал. Паролей, ключей и личных данных (адрес, имя компьютера, адреса вашей сети) нет. Адреса серверов DNS и туннеля есть: они помогают найти ошибку.')}
+          ${point('Номер установки', 'Случайный. По нему отчёты с одного компьютера связываются между собой, но не с вами лично. Когда вы выключаете переключатель, он стирается.')}
+          <div class="pv-hr"></div><button class="btn" id="pv-example">Показать пример отчёта</button>`;
+        el.querySelector('#pv-example').addEventListener('click', async () => {
+          example = true; draw();
+          if (text == null) { try { text = await api().HelpTestingPreview(); } catch (e) { text = 'Не удалось собрать пример.'; } if (example) draw(); }
+        });
+      }
+      redraw();
+    };
+    draw();
+  } });
 }
 
 export class SettingsPage {
   constructor(actions) { this.actions = actions; }
   mount(root) { root.innerHTML = shell('Настройки', '<div class="settings" id="body"></div>'); this.body = root.querySelector('#body'); }
   update(S, extra) {
-    const help = extra.help || {};
-    if (same(this, 'rj', [extra.autostart, S.version, S.update.notify, extra.testSent, S.ai.error, S.media.error, S.help, help.open, help.preview, help.loading])) return;
+    if (same(this, 'rj', [extra.autostart, S.version, S.update.notify, extra.testSent, S.ai.error, S.media.error, S.help])) return;
     const card = (title, text, button, top = false) => `<div class="card row ${top ? 'top' : ''}"><div class="grow"><div class="nm">${title}</div>${text ? `<div class="sm">${text}</div>` : ''}</div>${button}</div>`;
     const group = (title, ...cards) => `<div class="group"><div class="label">${title}</div><div class="cards">${cards.join('')}</div></div>`;
     // The columns of the Mac (SettingsView.swift); the block «Пароль администратора» is not here (the service has the rights), so Помощь
@@ -314,7 +308,7 @@ export class SettingsPage {
         card('Первая настройка', 'Короткое обучение по шагам.', '<button class="btn" data-a="onboard" data-f="onboard" id="onboard">Пройти заново</button>'))}
         ${group('Удаление',
         card('Удалить Nimb', 'Вернёт DNS к автоматическому и удалит приложение вместе с настройками.', '<button class="btn red" data-a="uninstall" data-f="uninstall" id="uninstall">Удалить…</button>'))}
-        ${notice(S.ai.error || S.media.error)}</div>${help.open ? helpPopover(help) : ''}`);
+        ${notice(S.ai.error || S.media.error)}</div>`);
   }
   destroy() {}
 }
@@ -322,9 +316,13 @@ export class SettingsPage {
 // ------------------------------------------------------------------------------------------------------------------- Report
 
 export class ReportPage {
-  constructor(actions, rep) { this.actions = actions; this.rep = rep; }
+  constructor(actions, rep) { this.actions = actions; this.rep = rep; this.paused = ''; }
   mount(root) { root.innerHTML = shell('Сообщить о проблеме', '<div class="form" id="form"></div>'); this.form = root.querySelector('#form'); this.render(); }
-  update() { /* the form is drawn by render(), when the report changes */ }
+  update(S) {
+    // A newer version is out: nothing is sent (the form stays, and what is in it can be copied).
+    const words = (S.help || {}).pausedWords || '';
+    if (words !== this.paused) { this.paused = words; this.render(); }
+  }
   render() {
     const rep = this.rep;
     if (rep.stage === 'sent') {
@@ -335,7 +333,8 @@ export class ReportPage {
     }
     const sending = rep.stage === 'sending', can = !rep.loading && !sending;
     let msg = '';
-    if (rep.asked) msg = '<div class="ok-note">Отчёт скопирован. В открывшемся личном чате с разработчиком нажмите Ctrl+V и отправьте его.</div>';
+    if (this.paused) msg = `<div class="err" style="color:var(--warn)">${esc(this.paused)}</div>`;
+    else if (rep.asked) msg = '<div class="ok-note">Отчёт скопирован. В открывшемся личном чате с разработчиком нажмите Ctrl+V и отправьте его.</div>';
     else if (rep.stage === 'failed') msg = `<div class="err">${esc(rep.message)} Нажмите «Написать разработчику»: откроется личный чат, отчёт будет скопирован, останется вставить его и отправить.</div>`;
     const keep = document.activeElement && this.form.contains(document.activeElement) && /^(TEXTAREA|INPUT)$/.test(document.activeElement.tagName) ? document.activeElement : null;
     if (keep && this.form.querySelector('textarea')) { this.patch(sending, can, msg); return; }
@@ -352,8 +351,8 @@ export class ReportPage {
   buttons(sending, can) {
     return `<button class="btn soft" data-a="repcancel" data-f="repcancel" id="repcancel">Отмена</button>
       <button class="btn" data-a="repcopy" data-f="repcopy" id="repcopy" ${can ? '' : 'disabled'}>Скопировать</button>
-      ${this.rep.stage === 'failed' ? '<button class="btn" data-a="repwrite" data-f="repwrite" id="repwrite">Написать разработчику</button>' : ''}
-      <button class="btn main" data-a="repsend" data-f="repsend" id="repsend" ${can ? '' : 'disabled'}>${sending ? 'Отправляю…' : 'Отправить'}</button>`;
+      ${this.paused ? '' : `${this.rep.stage === 'failed' ? '<button class="btn" data-a="repwrite" data-f="repwrite" id="repwrite">Написать разработчику</button>' : ''}
+      <button class="btn main" data-a="repsend" data-f="repsend" id="repsend" ${can ? '' : 'disabled'}>${sending ? 'Отправляю…' : 'Отправить'}</button>`}`;
   }
   /** While a field has the cursor only the parts around it change. */
   patch(sending, can, msg) {

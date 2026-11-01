@@ -42,15 +42,17 @@ type Settings struct {
 	WindowSized bool `json:"windowSized,omitempty"`
 
 	// «Помогать тестированию» (off until the person turns it on, see autoreport_windows.go). HelpInstall is the random number of this
-	// installation (it is wiped when the switch is turned off, and so is everything below); HelpHistory are the reports that went in the last
-	// day (their cause and time); HelpCount and HelpLast are how many went and when the last one did (unix); HelpDigest is when the last
-	// digest of the day went, or when the switch was turned on.
-	HelpTesting bool              `json:"helpTesting,omitempty"`
-	HelpInstall string            `json:"helpInstall,omitempty"`
-	HelpHistory []autoreport.Sent `json:"helpHistory,omitempty"`
-	HelpCount   int               `json:"helpCount,omitempty"`
-	HelpLast    int64             `json:"helpLast,omitempty"`
-	HelpDigest  int64             `json:"helpDigest,omitempty"`
+	// installation (it is wiped when the switch is turned off, and so is everything below); HelpCauses are the causes that came up since the last
+	// report (the report of the day lists them); HelpCount and HelpLast are how many went and when the last one did (unix); HelpDigest is when
+	// the last report of the day went, or when the switch was turned on.
+	HelpTesting bool                  `json:"helpTesting,omitempty"`
+	HelpInstall string                `json:"helpInstall,omitempty"`
+	HelpCauses  []autoreport.DayCause `json:"helpCauses,omitempty"`
+	HelpCount   int                   `json:"helpCount,omitempty"`
+	HelpLast    int64                 `json:"helpLast,omitempty"`
+	HelpDigest  int64                 `json:"helpDigest,omitempty"`
+	// LatestKnown is the newest version of Nimb for Windows that the last answer of GitHub named: a report goes only from the latest version.
+	LatestKnown string `json:"latestKnown,omitempty"`
 }
 
 type settingsStore struct {

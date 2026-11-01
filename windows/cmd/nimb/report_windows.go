@@ -76,7 +76,11 @@ func (a *App) ReportPrepare() ReportPrep {
 
 // collectReportFacts is the body of a report: what a manual one and one that goes by itself («Помогать тестированию») both carry, with
 // what names the person taken out.
-func (a *App) collectReportFacts() string {
+func (a *App) collectReportFacts() string { return a.collectFacts(false) }
+
+// collectFacts is collectReportFacts; brief leaves out the chronology and the black box (the snapshot of a fault that waits for the report of
+// the day, which carries both itself).
+func (a *App) collectFacts(brief bool) string {
 	st := a.GetState()
 	var out []string
 
@@ -90,6 +94,7 @@ func (a *App) collectReportFacts() string {
 		"Компьютер включён с "+time.Now().Add(-windows.DurationSinceBoot()).Format("2006-01-02 15:04:05")+" (работает "+uptimeText(windows.DurationSinceBoot())+")",
 		"Прошлый запуск закончился неожиданно: "+yesNo(a.previousEndedBadly),
 		"Автозапуск с Windows: "+yesNo(autostartOn()),
+		buildLine(),
 	))
 
 	svc := []string{}
@@ -155,7 +160,7 @@ func (a *App) collectReportFacts() string {
 	)...))
 
 	// What the black box wrote every five minutes before this moment: what happened before the trouble is there even when it is found later.
-	if box := blackBoxTail(autoreport.ReportLines); len(box) > 0 {
+	if box := blackBoxTail(autoreport.ReportLines); len(box) > 0 && !brief {
 		out = append(out, report.Section("Чёрный ящик (раз в 5 минут, последние записи)", box...))
 	}
 
@@ -238,41 +243,45 @@ func (a *App) collectReportFacts() string {
 		out = append(out, report.Section("Процесс туннеля (последние строки его журнала)", report.LogTail(diag.TunnelLog, 25)...))
 	}
 	windowLog := tailLog(windowLogPath(), 500)
-	events := append(report.ParseLog("окно", windowLog, time.Local), report.ParseLog("служба", serviceLog, time.Local)...)
-	out = append(out, report.Section("Хронология (последние сутки)", report.Events(events, time.Now(), 24*time.Hour, 60)...))
-	// The logs above are of this run only. The last run has its own sections, and a run that ended unexpectedly has more of its lines.
-	previousWindow := tailLog(logfile.PreviousPath(windowLogPath()), 10)
-	title := "Прошлый запуск окна (последние строки его журнала)"
-	if a.previousEndedBadly {
-		previousWindow = tailLog(logfile.PreviousPath(windowLogPath()), 25)
-		title = "Перед неожиданным завершением (последние строки журнала прошлого запуска окна)"
+	if !brief {
+		events := append(report.ParseLog("окно", windowLog, time.Local), report.ParseLog("служба", serviceLog, time.Local)...)
+		out = append(out, report.Section("Хронология (последние сутки)", report.Events(events, time.Now(), 24*time.Hour, 60)...))
 	}
-	if len(previousWindow) > 0 {
-		out = append(out, report.Section(title, previousWindow...))
-	}
-	if diag != nil {
-		if len(diag.ServicePrevious) > 0 {
-			out = append(out, report.Section("Прошлый запуск службы (последние строки её журнала)", diag.ServicePrevious...))
+	if !brief {
+		// The logs above are of this run only. The last run has its own sections, and a run that ended unexpectedly has more of its lines.
+		previousWindow := tailLog(logfile.PreviousPath(windowLogPath()), 10)
+		title := "Прошлый запуск окна (последние строки его журнала)"
+		if a.previousEndedBadly {
+			previousWindow = tailLog(logfile.PreviousPath(windowLogPath()), 25)
+			title = "Перед неожиданным завершением (последние строки журнала прошлого запуска окна)"
 		}
-		if len(diag.TunnelPrevious) > 0 {
-			out = append(out, report.Section("Прошлый запуск службы: процесс туннеля (последние строки его журнала)", diag.TunnelPrevious...))
+		if len(previousWindow) > 0 {
+			out = append(out, report.Section(title, previousWindow...))
 		}
+		if diag != nil {
+			if len(diag.ServicePrevious) > 0 {
+				out = append(out, report.Section("Прошлый запуск службы (последние строки её журнала)", diag.ServicePrevious...))
+			}
+			if len(diag.TunnelPrevious) > 0 {
+				out = append(out, report.Section("Прошлый запуск службы: процесс туннеля (последние строки его журнала)", diag.TunnelPrevious...))
+			}
+		}
+		raw := windowLog
+		if len(raw) > 60 {
+			raw = raw[len(raw)-60:]
+		}
+		if len(raw) == 0 {
+			raw = []string{"пусто"}
+		}
+		out = append(out, report.Section("Журнал окна (последние строки)", raw...))
 	}
-	raw := windowLog
-	if len(raw) > 60 {
-		raw = raw[len(raw)-60:]
-	}
-	if len(raw) == 0 {
-		raw = []string{"пусто"}
-	}
-	out = append(out, report.Section("Журнал окна (последние строки)", raw...))
 
 	env := reportEnv()
 	// The addresses of the providers (their DNS servers and the pools that the check found) stay as they are: nothing of the person is in
 	// them, and a bad address is what a report is read for.
 	env.Public = probe.Addresses(probed)
 	for _, p := range dnsx.Providers {
-		env.Public = append(env.Public, p.Addresses...)
+		env.Public = append(env.Public, p.AllAddresses()...)
 	}
 	// The server of WARP that the tunnel is at (and the others that are tried) are addresses of Cloudflare; the city they leave from says
 	// much about a tunnel where YouTube does not open.
@@ -337,16 +346,29 @@ func (a *App) ReportPreview(description, contact string) string {
 
 // ReportSend sends the report to the developer through the relay.
 func (a *App) ReportSend(description, contact string) Result {
+	if words, _ := a.reportsPaused(); words != "" {
+		return Result{Error: words}
+	}
 	id, text := a.reportText(description, contact)
 	logLine("отчёт " + id + ": отправляю")
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
 	if err := report.Send(ctx, Version, id, text); err != nil {
+		a.noteOutdated(err)
 		logLine("отчёт " + id + ": не отправлен: " + err.Error())
 		return Result{Error: err.Error()}
 	}
 	logLine("отчёт " + id + ": отправлен")
 	return Result{OK: true}
+}
+
+// OpenDeveloperChat opens the chat with the developer (the button of the tag «MOD»): the Telegram app when it is there, the page of the chat otherwise.
+func (a *App) OpenDeveloperChat() {
+	cmd := exec.Command("rundll32.exe", "url.dll,FileProtocolHandler", "tg://resolve?domain="+report.DeveloperHandle)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	if cmd.Start() != nil {
+		wruntime.BrowserOpenURL(a.ctx, "https://t.me/"+report.DeveloperHandle)
+	}
 }
 
 // ReportCopy puts the whole report on the clipboard.
@@ -360,6 +382,9 @@ func (a *App) ReportCopy(description, contact string) Result {
 
 // ReportWrite copies the report (cut to one message) and opens the chat with the developer, for when sending does not work.
 func (a *App) ReportWrite(description, contact string) Result {
+	if words, _ := a.reportsPaused(); words != "" {
+		return Result{Error: words}
+	}
 	id, text := a.reportText(description, contact)
 	if err := wruntime.ClipboardSetText(a.ctx, report.Fitted(text, report.MessageLimit)); err != nil {
 		return Result{Error: "Не удалось скопировать."}

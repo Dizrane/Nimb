@@ -29,7 +29,7 @@ func Cleanup(dir string, logf func(string, ...any)) (problems []string) {
 	if adapters, err := dnsx.Adapters(); err == nil {
 		for _, a := range adapters {
 			for _, p := range dnsx.Providers {
-				if dnsx.Same(a.NameServer, p.Servers()) {
+				if p.Matches(a.NameServer) {
 					logf("cleanup: %q still had %s, given back to the network", a.Name, p.ID)
 					a.NameServer = ""
 					if err := dnsx.Write(a); err != nil {

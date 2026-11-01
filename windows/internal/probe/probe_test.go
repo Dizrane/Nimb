@@ -208,7 +208,7 @@ func TestRanking(t *testing.T) {
 
 func TestView(t *testing.T) {
 	v := healthy(dnsx.Providers[1], 0.5).View()
-	if v.ID != dnsx.Providers[1].ID || v.Working != 5 || v.Total != 5 || v.Median == nil || *v.Median != 0.5 || len(v.Services) != 5 {
+	if v.ID != dnsx.Providers[1].ID || v.Working != 6 || v.Total != 6 || v.Median == nil || *v.Median != 0.5 || len(v.Services) != 6 {
 		t.Errorf("%+v", v)
 	}
 	if v.Services[0].Name != "ChatGPT" || v.Services[0].Status != Works || v.Services[0].Site != "2/2" || v.Services[0].API != "2/2" {
@@ -475,7 +475,7 @@ func TestLinesOfAReport(t *testing.T) {
 	}
 	lines := Lines([]ProviderReport{r})
 	want := []string{
-		dnsx.Providers[0].Name + ": работает 4 из 5 (ChatGPT 4/4, Claude 4/4, Gemini 2/4, Grok 4/4, ElevenLabs 4/4), медиана 0.5 с",
+		dnsx.Providers[0].Name + ": работает 5 из 6 (ChatGPT 4/4, Claude 4/4, Gemini 2/4, Grok 4/4, ElevenLabs 4/4, Perplexity 4/4), медиана 0.5 с",
 		"  отказ: Gemini · 10.0.0.2: 403: доступ закрыт",
 		"  без нормального ответа: ",
 	}

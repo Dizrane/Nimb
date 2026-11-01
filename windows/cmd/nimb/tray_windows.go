@@ -83,16 +83,14 @@ func onTrayReady(a *App) {
 			case <-trayItems.tgCopy.ClickedCh:
 				a.CopyLink()
 			case <-trayItems.update.ClickedCh:
-				if u := a.upd.view(); u.Error != "" {
-					a.ShowWindow()
-				} else if u.Available && u.Installing == "" {
-					a.InstallUpdate()
-				}
+				// As on the Mac: the line opens the window of the update (what is new, the steps, the reason of a failure).
+				a.OpenUpdateWindow()
 			case <-open.ClickedCh:
 				a.ShowWindow()
 			case <-quit.ClickedCh:
-				a.quitFrom("пункт «Выйти» в меню значка у часов")
-				return
+				if a.quitFrom("пункт «Выйти» в меню значка у часов") {
+					return
+				}
 			}
 		}
 	})
@@ -213,7 +211,7 @@ func refreshUpdateItem(u UpdateView) {
 		item.Disable()
 		item.Show()
 	case u.Error != "":
-		item.SetTitle("Не удалось обновить, открыть Nimb")
+		item.SetTitle("Не удалось обновить, открыть окно обновления")
 		item.Enable()
 		item.Show()
 	case u.Available:

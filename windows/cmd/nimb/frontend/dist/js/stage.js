@@ -4,13 +4,15 @@ import { img, seq } from './art.js';
 import { drawHalo, drawSparkle } from './halo.js';
 import { Wanderer } from './wander.js';
 import { drawMedia } from './media.js';
+import { PowerButton } from './power.js';
 
 export const POWER = '<svg viewBox="0 0 24 24" aria-hidden="true"><path class="power-icon" d="M12 3.5v8.2M7 6.9a7.6 7.6 0 1 0 10 0"/></svg>';
 
 /**
  * The big switch of the Telegram and YouTube/Discord pages: a figure under the halo of Nimb. The halo comes down and the figure
- * lights up when the service is on, a small power button sits below. Port of Sources/Nimb/MascotHero.swift; every picture comes
- * from the art studio and everything that moves is drawn by one canvas from a clock.
+ * lights up when the service is on. With the service off the page is the power button alone; switching on, the button settles under the
+ * figure (power.js) and the figure comes up after it. Port of Sources/Nimb/MascotHero.swift; every picture comes from the art studio and
+ * everything that moves is drawn by one canvas from a clock.
  */
 export class Stage {
   /** `art` is 'hood' (the dog and the plane) or 'screen' (YouTube and Discord). */
@@ -23,13 +25,15 @@ export class Stage {
 
     this.el = document.createElement('div'); this.el.className = 'hero';
     this.btn = document.createElement('button'); this.btn.className = 'stage-btn';
-    this.btn.style.cssText = `width:${this.W}px;height:${this.H}px;-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 10%,#000 90%,transparent 100%)`;
+    this.btn.style.cssText = `width:${this.W}px;height:${this.H}px`;
     this.btn.addEventListener('click', onClick);
     this.btn.addEventListener('mouseenter', () => this.setHover(true));
     this.btn.addEventListener('mouseleave', () => this.setHover(false));
     [this.canvas, this.ctx, this.dpr] = makeCanvas(this.W, this.H);
-    this.badge = document.createElement('div'); this.badge.className = 'badge'; this.badge.style.top = `${this.H / 2 + 90 - 20}px`; this.badge.innerHTML = POWER;
-    this.btn.append(this.canvas, this.badge);
+    // The glow fades out before the edges of the stage, so that it never reaches the tab bar or the title.
+    this.canvas.style.cssText += ';-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 10%,#000 90%,transparent 100%)';
+    this.power = new PowerButton(this.H);
+    this.btn.append(this.canvas, this.power.el);
     this.titleEl = document.createElement('h2'); this.subEl = document.createElement('div'); this.subEl.className = 'sub';
     this.el.append(this.btn, this.titleEl, this.subEl);
     this.anim = new Animator((t) => this.draw(t), {
@@ -39,20 +43,23 @@ export class Stage {
     });
   }
   moving() { return now() < this.movingUntil; }
-  setHover(h) { this.hover.set(h ? 1 : 0, now()); this.movingUntil = Math.max(this.movingUntil, now() + 0.5); this.anim.invalidate(); }
+  setHover(h) { this.hover.set(h ? 1 : 0, now()); this.power.setHover(h); this.movingUntil = Math.max(this.movingUntil, now() + 0.5); this.anim.invalidate(); }
 
   update({ on, busy, title, subtitle, disabled, label }) {
     const t = now();
+    if (!this.shown) { this.power.setOn(on, true); this.shown = true; }
     if (on !== this.on) {
-      this.light.set(on ? 1 : 0, t);
-      if (on) this.turnedOn = t; else this.turnedOn = null;
-      this.movingUntil = Math.max(this.movingUntil, t + (on ? 3 : 1.2));
-      setTimeout(() => this.anim.invalidate(), (on ? 3.1 : 1.3) * 1000);
+      // The figure comes up while the button is on its way, and goes at once when it is switched off.
+      const delay = on ? 0.5 : 0;
+      this.light.set(on ? 1 : 0, t, delay);
+      if (on) this.turnedOn = t + delay; else this.turnedOn = null;
+      this.movingUntil = Math.max(this.movingUntil, t + (on ? 3.5 : 1.4));
+      setTimeout(() => this.anim.invalidate(), (on ? 3.6 : 1.5) * 1000);
+      this.power.setOn(on);
     }
     this.on = on; this.busy = busy; this.disabled = disabled;
     this.btn.disabled = disabled; this.btn.setAttribute('aria-label', label);
-    this.badge.classList.toggle('on', on);
-    this.badge.innerHTML = busy ? '<span class="spin"></span>' : POWER;
+    this.power.setBusy(busy);
     if (this.titleEl.textContent !== title) this.titleEl.textContent = title;
     if (this.subEl.textContent !== subtitle) this.subEl.textContent = subtitle;
     this.anim.invalidate();
@@ -116,8 +123,7 @@ export class Stage {
     const size = this.art === 'hood' ? { w: 128, h: 154 } : { w: 160, h: 132 };
     ctx.save();
     ctx.translate(figure.x, figure.y); ctx.rotate(sway * Math.PI / 180);
-    const off = img(`${folder}/off.png`), on = img(`${folder}/on.png`);
-    if (off && lit < 0.999) ctx.drawImage(off, -size.w / 2, -size.h / 2, size.w, size.h);
+    const on = img(`${folder}/on.png`);
     if (on && lit > 0.003) { ctx.globalAlpha = lit; ctx.drawImage(on, -size.w / 2, -size.h / 2, size.w, size.h); }
     ctx.restore();
   }
@@ -143,5 +149,5 @@ export class Stage {
     if (mix > 0.002) { ctx.globalAlpha = alpha * mix; ctx.drawImage(frames[lower + 1], -32, -32, 64, 64); }
     ctx.restore();
   }
-  destroy() { this.anim.destroy(); }
+  destroy() { this.anim.destroy(); this.power.destroy(); }
 }

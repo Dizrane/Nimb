@@ -5,6 +5,7 @@ package dnsx
 
 import (
 	"net/netip"
+	"sort"
 	"strings"
 )
 
@@ -13,16 +14,30 @@ type Provider struct {
 	ID        string
 	Name      string
 	Addresses []string
+	// Legacy are the addresses an earlier Nimb set for this provider and that it still answers on: they are still recognised as the provider's.
+	Legacy [][]string
 }
 
 // Providers are the providers the service accepts; the first is the default. A command names one by its ID, so no address
 // ever comes from the window.
 var Providers = []Provider{
-	{"geohide-eu", "GeoHide (EU)", []string{"143.20.64.192", "45.13.237.213"}},
-	{"comss", "Comss.one", []string{"83.220.169.155", "212.109.195.93"}},
-	{"geohide", "GeoHide (RU)", []string{"159.194.200.33", "193.233.112.67"}},
-	{"geohide-us", "GeoHide (US)", []string{"192.255.159.241", "192.255.159.240"}},
+	{ID: "geohide-eu", Name: "GeoHide (EU)", Addresses: []string{"143.20.64.192", "45.13.237.213"}},
+	{ID: "comss", Name: "Comss.one", Addresses: []string{"94.250.253.55", "212.109.195.93"}, Legacy: [][]string{{"83.220.169.155", "212.109.195.93"}}},
+	{ID: "magicdns", Name: "MagicDNS", Addresses: []string{"109.120.132.43", "94.249.177.102"}},
+	{ID: "malwlink", Name: "malw.link", Addresses: []string{"179.254.166.171", "164.5.224.81"}},
+	{ID: "geohide", Name: "GeoHide (RU)", Addresses: []string{"159.194.200.33", "193.233.112.67"}},
+	{ID: "geohide-us", Name: "GeoHide (US)", Addresses: []string{"192.255.159.241", "192.255.159.240"}},
 }
+
+// ByName is the order of the list on the page: by name.
+func ByName() []Provider {
+	out := append([]Provider(nil), Providers...)
+	sort.SliceStable(out, func(i, j int) bool { return naturalLess(out[i].Name, out[j].Name) })
+	return out
+}
+
+// naturalLess compares names the way the Mac list is ordered (case-insensitive, «Comss.one» before «GeoHide (EU)»).
+func naturalLess(a, b string) bool { return strings.ToLower(a) < strings.ToLower(b) }
 
 // Find returns the provider with this ID.
 func Find(id string) (Provider, bool) {
@@ -36,6 +51,28 @@ func Find(id string) (Provider, bool) {
 
 // Servers is the value written to an adapter: the addresses, comma separated.
 func (p Provider) Servers() string { return strings.Join(p.Addresses, ",") }
+
+// Matches says whether these servers are the provider's: the current addresses or an earlier set.
+func (p Provider) Matches(servers string) bool {
+	if Same(servers, p.Servers()) {
+		return true
+	}
+	for _, old := range p.Legacy {
+		if Same(servers, strings.Join(old, ",")) {
+			return true
+		}
+	}
+	return false
+}
+
+// AllAddresses is every address Nimb has ever set for this provider.
+func (p Provider) AllAddresses() []string {
+	out := append([]string(nil), p.Addresses...)
+	for _, old := range p.Legacy {
+		out = append(out, old...)
+	}
+	return out
+}
 
 // Servers6 is what an adapter that has DNS servers of IPv6 gets in their place: the same addresses as IPv4-mapped IPv6 ones. Windows
 // asks the IPv6 servers of an adapter before the IPv4 ones, so the ones the router hands out (they answer with the real addresses)
@@ -196,7 +233,7 @@ func (b *Backup) Restore(now []Adapter) (write []Adapter, skipped []string) {
 		if current == nil {
 			continue
 		}
-		if known && !Same(current.NameServer, provider.Servers()) {
+		if known && !provider.Matches(current.NameServer) {
 			if !Same(current.NameServer, saved.NameServer) {
 				skipped = append(skipped, saved.Name)
 			}
@@ -210,4 +247,18 @@ func (b *Backup) Restore(now []Adapter) (write []Adapter, skipped []string) {
 		write = append(write, back)
 	}
 	return write, skipped
+}
+
+// UnreachablePrefix starts the warning for a network that lets no DNS through but its own (a university, an office): the notification looks
+// for it at the start of a warning.
+const UnreachablePrefix = "В этой сети DNS"
+
+// UnreachableWarning is the warning for such a network: the provider chosen in Nimb does not answer at all while the internet itself works,
+// so with its DNS set no name resolves and nothing opens. Empty when it answers, and when the internet is gone (that is another trouble, and it
+// has its own words).
+func UnreachableWarning(providerName string, providerAnswers, internetWorks bool) string {
+	if providerAnswers || !internetWorks {
+		return ""
+	}
+	return UnreachablePrefix + " «" + providerName + "» не отвечает: так бывает в сетях вуза или офиса, которые пропускают только свой DNS. Пока он включён, адреса могут не открываться совсем. Выключите «Нейросети» или смените сеть."
 }

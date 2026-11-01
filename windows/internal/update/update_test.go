@@ -320,3 +320,55 @@ func TestWaitAfterFailureIsShorter(t *testing.T) {
 		t.Error("two minutes after a failure (with the slack) is due")
 	}
 }
+
+func TestWhatsNewTakesThePointsUpToTheFirstHeading(t *testing.T) {
+	notes := "Нестабильная версия.\n\nNimb 0.3.1:\n\n1. **Первое.** Слова.\n2. Второе.\n- третье\n\n## Что работает\n- не это\n"
+	got := WhatsNew(notes)
+	if len(got) != 3 || got[0] != "**Первое.** Слова." || got[1] != "Второе." || got[2] != "третье" {
+		t.Errorf("%q", got)
+	}
+	if len(WhatsNew("")) != 0 || len(WhatsNew("**SHA-256**\n- x")) != 0 {
+		t.Error("nothing before the end is nothing")
+	}
+}
+
+func TestTheStagesAddUpToOneAndAFailureNamesItsStage(t *testing.T) {
+	sum := 0.0
+	for s := Stage(0); s < StageCount; s++ {
+		sum += s.Weight()
+		if s.Title() == "" {
+			t.Errorf("stage %d has no title", s)
+		}
+	}
+	if sum < 0.999 || sum > 1.001 {
+		t.Errorf("weights add up to %v", sum)
+	}
+	f := newFake(t, []byte("the installer"), 200)
+	c := f.client()
+	r, err := c.Latest(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.installer = []byte("something else")
+	var seen []string
+	var bytes int64
+	_, err = c.Fetch(context.Background(), r, t.TempDir(), Hooks{
+		Stage: func(s Stage, st string) { seen = append(seen, s.Title()+":"+st) },
+		Bytes: func(done, total int64) { bytes = done },
+	})
+	var se *StageError
+	if !errors.As(err, &se) || se.Stage != StageCheck || !se.Stage.IsOurs() {
+		t.Fatalf("err = %#v", err)
+	}
+	if got := strings.Join(seen, ","); got != "Подготовка:running,Подготовка:done,Загрузка:running,Загрузка:done,Проверка файла:running" {
+		t.Errorf("stages: %s", got)
+	}
+	if bytes != int64(len("something else")) {
+		t.Errorf("bytes %d", bytes)
+	}
+	noHash := r
+	noHash.SHA256 = ""
+	if _, err := c.Fetch(context.Background(), noHash, t.TempDir(), Hooks{}); !errors.As(err, &se) || se.Stage != StagePrepare {
+		t.Errorf("no hash is a failure of the preparation: %v", err)
+	}
+}

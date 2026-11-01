@@ -1,5 +1,5 @@
 // Package autoreport is the rules of «Помогать тестированию» that need no program around them: what counts as a fault, how often a report
-// may go, what the black box writes and what the digest of the day says. It is the port of the pure parts of Sources/Nimb/Report/AutoReporter.swift
+// may go (once a day), what the black box writes and what the digest of the day says. It is the port of the pure parts of Sources/Nimb/Report/AutoReporter.swift
 // and BlackBox.swift; the window (cmd/nimb) brings the facts and does the sending.
 package autoreport
 
@@ -38,7 +38,7 @@ func DNSAgrees(active *dnsx.Provider, adapters []dnsx.Adapter) bool {
 	if active == nil {
 		for _, a := range adapters {
 			for _, p := range dnsx.Providers {
-				if dnsx.Same(a.NameServer, p.Servers()) {
+				if p.Matches(a.NameServer) {
 					return false
 				}
 			}
@@ -49,7 +49,7 @@ func DNSAgrees(active *dnsx.Provider, adapters []dnsx.Adapter) bool {
 		return false
 	}
 	for _, a := range adapters {
-		if !dnsx.Same(a.NameServer, active.Servers()) {
+		if !active.Matches(a.NameServer) {
 			return false
 		}
 	}
@@ -65,7 +65,7 @@ func DNSTakenByOthers(active *dnsx.Provider, adapters []dnsx.Adapter) bool {
 	}
 	others := 0
 	for _, a := range adapters {
-		if dnsx.Same(a.NameServer, active.Servers()) {
+		if active.Matches(a.NameServer) {
 			continue
 		}
 		if strings.TrimSpace(a.NameServer) == "" {
@@ -128,8 +128,6 @@ func (s Service) Name() string {
 type Trigger struct {
 	Key   string
 	Title string
-	// IgnoresHourLimit: a cause that is told even when another report went within the hour, the one that matters most.
-	IgnoresHourLimit bool
 }
 
 var (
@@ -138,7 +136,7 @@ var (
 	TunnelDropped      = Trigger{Key: "tunnel-dropped", Title: "туннель остановился сам и не запустился снова"}
 	UpdateCheck        = Trigger{Key: "update-check", Title: "проверка обновлений не удаётся несколько раз подряд"}
 	TunnelSilentCause  = Trigger{Key: "tunnel-silent", Title: "туннель включён, но сервер не отвечает больше 10 минут"}
-	NewKeysFailed      = Trigger{Key: "keys-failed", Title: "новые ключи туннеля не помогли: туннель по-прежнему не включается", IgnoresHourLimit: true}
+	NewKeysFailed      = Trigger{Key: "keys-failed", Title: "новые ключи туннеля не помогли: туннель по-прежнему не включается"}
 	DailyDigestCause   = Trigger{Key: "daily", Title: "ежедневная сводка"}
 )
 
@@ -146,56 +144,84 @@ func Mismatch(s Service) Trigger {
 	return Trigger{Key: "mismatch-" + string(s), Title: "«" + s.Name() + "» работает не так, как должен, больше 10 минут"}
 }
 
+// UpdateInstall: the installation of an update stopped at a stage that is not the network's (the check of the file, the replacement).
+func UpdateInstall(stage string) Trigger {
+	return Trigger{Key: "update-install", Title: "установка обновления остановилась на этапе «" + stage + "»"}
+}
+
 func Error(s Service) Trigger {
 	return Trigger{Key: "error-" + string(s), Title: "ошибка при работе с «" + s.Name() + "»"}
 }
 
-// ---- how often --------------------------------------------------------------------------------------------------------------------
+// ---- the causes of the day ------------------------------------------------------------------------------------------------------
 
-// Sent is a report that was sent, written down with its key and its time.
-type Sent struct {
-	Key string    `json:"key"`
-	At  time.Time `json:"at"`
+// A report goes by itself once a day. A fault does not send anything at once: it is written down (its cause, the time of the first one and
+// how many times), and the single report of the day lists them and carries the snapshot of the state at the first fault of the day.
+
+// DayCause is a cause that came up during the day; the same cause is one line with a count.
+type DayCause struct {
+	Key   string `json:"key"`
+	Title string `json:"title"`
+	First int64  `json:"first"` // unix seconds
+	Count int    `json:"count"`
 }
 
-const (
-	// SamePause: the same cause is told once in this time.
-	SamePause = 6 * time.Hour
-	PerHour   = 1
-	PerDay    = 5
-)
-
-// Allows says whether a report with this key may go now, given the ones that went.
-func Allows(key string, now time.Time, history []Sent, ignoresHourLimit bool) bool {
-	hour, day := 0, 0
-	for _, s := range history {
-		age := now.Sub(s.At)
-		if s.Key == key && age < SamePause {
-			return false
-		}
-		if age < time.Hour {
-			hour++
-		}
-		if age < 24*time.Hour {
-			day++
+// Recorded is the list after the cause key came up at `at`: a new line, or one more for the line that is there.
+func Recorded(causes []DayCause, key, title string, at time.Time) []DayCause {
+	out := append([]DayCause(nil), causes...)
+	for i := range out {
+		if out[i].Key == key {
+			out[i].Count++
+			return out
 		}
 	}
-	if !ignoresHourLimit && hour >= PerHour {
-		return false
-	}
-	return day < PerDay
+	return append(out, DayCause{Key: key, Title: title, First: at.Unix(), Count: 1})
 }
 
-// Pruned keeps only the last day.
-func Pruned(history []Sent, now time.Time) []Sent {
-	var out []Sent
-	for _, s := range history {
-		if now.Sub(s.At) < 24*time.Hour {
-			out = append(out, s)
+// Clock is «14:54», the time of day as the report writes it.
+func Clock(at time.Time) string { return at.Format("15:04") }
+
+// CauseLines are «14:54 · обновления не проверяются (раз: 3)», the lines for the report.
+func CauseLines(causes []DayCause) []string {
+	var out []string
+	for _, c := range causes {
+		line := Clock(time.Unix(c.First, 0)) + " · " + c.Title
+		if c.Count > 1 {
+			line += fmt.Sprintf(" (раз: %d)", c.Count)
 		}
+		out = append(out, line)
 	}
 	return out
 }
+
+// FaultSnapshot is the state at the moment of the first fault of the day, kept until the report of the day takes it (a report that goes at once
+// is not sent: one a day, and the moment of a fault is what is lost by waiting).
+type FaultSnapshot struct {
+	Title string `json:"title"`
+	At    int64  `json:"at"`
+	Text  string `json:"text"`
+}
+
+// Section is how the snapshot stands in the report.
+func (f FaultSnapshot) Section() string {
+	return "— Снимок первого сбоя (" + Clock(time.Unix(f.At, 0)) + " · " + f.Title + ") —\n" + f.Text
+}
+
+// ---- when the testing is paused ----------------------------------------------------------------------------------------------------
+
+// A report goes only from the latest version: a fault of an older one is mended already (or is about to be), and its reports are noise. The
+// update check writes down the latest version each time GitHub answers; between two answers the last word stands.
+
+// OutdatedWords are the words for the person when a newer version is out.
+func OutdatedWords(latest string) string {
+	if latest != "" {
+		latest = " " + latest
+	}
+	return "Вышла новая версия" + latest + ", а эта уже не последняя, поэтому тестирование приостановлено. Обновите Nimb: отчёты принимаются только из последней версии."
+}
+
+// OutdatedShort is the same in a few words, for the line of the switch.
+const OutdatedShort = "Тестирование приостановлено: есть новая версия."
 
 // MismatchLooks: «не так» must last, one look that disagrees is a moment of switching, two in a row (ten minutes) is a fault.
 const MismatchLooks = 2
@@ -320,8 +346,8 @@ func Trimmed(lines []string) []string {
 
 // ---- the digest of the day --------------------------------------------------------------------------------------------------------
 
-// DigestEvery: once in 24 hours, with the small things that are not worth a report of their own. It does not count in the limits above (it is
-// one a day by its own clock).
+// DigestEvery: once in 24 hours; it is the only report that goes by itself, and it carries the numbers of the black box, the causes of the day and
+// the snapshot of the first fault.
 const DigestEvery = 24 * time.Hour
 
 func DigestDue(now, last time.Time) bool { return now.Sub(last) >= DigestEvery }
@@ -342,8 +368,8 @@ func LinesSince(all []string, since time.Time) []string {
 	return out
 }
 
-// Summary is the time since the last digest in numbers, from the lines of the black box (see Line) and the keys of the reports sent that day.
-func Summary(lines, sentKeys []string) string {
+// Summary is the time since the last digest in numbers, from the lines of the black box (see Line), and the causes of the day.
+func Summary(lines []string, causes []DayCause) string {
 	disagreements := map[string]int{"dns": 0, "telegram": 0, "туннель": 0}
 	var memory []int
 	silent := 0
@@ -388,9 +414,12 @@ func Summary(lines, sentKeys []string) string {
 		}
 		out = append(out, fmt.Sprintf("Память: до %d МБ, в последней записи %d МБ", top, memory[len(memory)-1]))
 	}
-	reports := fmt.Sprintf("Отчётов по сбоям за это время: %d", len(sentKeys))
-	if len(sentKeys) > 0 {
-		reports += " (" + strings.Join(sentKeys, ", ") + ")"
+	if len(causes) == 0 {
+		return strings.Join(append(out, "Сбоев за это время не было"), "\n")
 	}
-	return strings.Join(append(out, reports), "\n")
+	out = append(out, "Сбои за это время:")
+	for _, line := range CauseLines(causes) {
+		out = append(out, "  "+line)
+	}
+	return strings.Join(out, "\n")
 }

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"regexp"
@@ -78,7 +79,7 @@ func Clean(text string, env Environment) string {
 	}
 	// A DNS server of a provider that is not among the public addresses is told by the name of the provider.
 	for _, p := range dnsx.Providers {
-		for _, a := range p.Addresses {
+		for _, a := range p.AllAddresses() {
 			text = strings.ReplaceAll(text, a, "‹"+p.Name+"›")
 		}
 	}
@@ -226,6 +227,10 @@ func SendAuto(ctx context.Context, appVersion, id, text, trigger, install string
 }
 
 func send(ctx context.Context, appVersion, id, text string, extra map[string]any) error {
+	k := currentKey()
+	if len(k) == 0 {
+		return ErrNoKey // a build that is not an official one sends nothing
+	}
 	if utf8.RuneCountInString(text) > sendLimit {
 		r := []rune(text)
 		text = string(r[:sendLimit/2]) + "\n…\n" + string(r[len(r)-sendLimit/2:])
@@ -234,6 +239,8 @@ func send(ctx context.Context, appVersion, id, text string, extra map[string]any
 	for k, v := range extra {
 		payload[k] = v
 	}
+	install, _ := extra["install"].(string)
+	payload["sig"] = Signature(Message(id, appVersion, "windows", install, text), k)
 	body, _ := json.Marshal(payload)
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
@@ -253,9 +260,46 @@ func send(ctx context.Context, appVersion, id, text string, extra map[string]any
 	switch {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
 		return nil
+	case resp.StatusCode == 403:
+		// The relay says why: «outdated» (a newer version is out, and it names it) or a signature that is not a release's.
+		var said struct {
+			Error  string `json:"error"`
+			Latest string `json:"latest"`
+		}
+		json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&said)
+		if said.Error == "outdated" {
+			return &Outdated{Latest: said.Latest}
+		}
+		return ErrNoKey
 	case resp.StatusCode == 429:
 		return errors.New("Отчётов слишком много, попробуйте через несколько минут.")
 	default:
-		return fmt.Errorf("Сервер отчётов отказал (код %d).", resp.StatusCode)
+		return &Refused{Code: resp.StatusCode}
 	}
+}
+
+// Outdated is the answer of the relay that a newer version is out: reports go only from the latest one.
+type Outdated struct{ Latest string }
+
+func (o *Outdated) Error() string {
+	latest := ""
+	if o.Latest != "" {
+		latest = " " + o.Latest
+	}
+	return "Вышла новая версия" + latest + ", а эта уже не последняя, поэтому тестирование приостановлено. Обновите Nimb: отчёты принимаются только из последней версии."
+}
+
+// Refused is the answer of the relay that it will not take the report (any 4xx but «too many»): trying again later changes nothing, so a
+// report that waits in the queue is dropped on it.
+type Refused struct{ Code int }
+
+func (r *Refused) Error() string {
+	return fmt.Sprintf("Сервер отчётов отказал (код %d).", r.Code)
+}
+
+// IsRefused says whether the error is a refusal that will not pass.
+func IsRefused(err error) bool {
+	var r *Refused
+	var o *Outdated
+	return (errors.As(err, &r) && r.Code >= 400 && r.Code < 500) || errors.As(err, &o) || errors.Is(err, ErrNoKey)
 }

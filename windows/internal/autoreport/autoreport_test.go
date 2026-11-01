@@ -121,7 +121,7 @@ func TestASilentTunnelIsOneWithNoAnswerAndNoInternetThroughIt(t *testing.T) {
 func TestCausesHaveKeysAndWords(t *testing.T) {
 	keys := map[string]bool{}
 	for _, tr := range []Trigger{PreviousEndedBadly, TunnelRestarted, TunnelDropped, Mismatch(DNS), Mismatch(Telegram), Mismatch(Tunnel),
-		Error(DNS), Error(Telegram), Error(Tunnel), UpdateCheck, TunnelSilentCause, NewKeysFailed, DailyDigestCause} {
+		Error(DNS), Error(Telegram), Error(Tunnel), UpdateCheck, TunnelSilentCause, NewKeysFailed, DailyDigestCause, UpdateInstall("Установка")} {
 		if tr.Key == "" || tr.Title == "" || len(tr.Key) > 40 {
 			t.Errorf("a cause without a key or words: %+v", tr)
 		}
@@ -140,59 +140,32 @@ func TestCausesHaveKeysAndWords(t *testing.T) {
 	}
 }
 
-func TestTheFirstReportGoesAndTheSameCauseWaitsSixHours(t *testing.T) {
-	now := time.Date(2026, 10, 29, 12, 0, 0, 0, time.UTC)
-	if !Allows("crash", now, nil, false) {
-		t.Fatal("the first one goes")
+func TestACauseOfTheDayIsOneLineWithACount(t *testing.T) {
+	at := time.Date(2026, 11, 2, 14, 54, 0, 0, time.Local)
+	var causes []DayCause
+	causes = Recorded(causes, "update-check", "обновления не проверяются", at)
+	causes = Recorded(causes, "crash", "прошлый запуск закончился неожиданно", at.Add(time.Hour))
+	causes = Recorded(causes, "update-check", "обновления не проверяются", at.Add(2*time.Hour))
+	causes = Recorded(causes, "update-check", "обновления не проверяются", at.Add(3*time.Hour))
+	if len(causes) != 2 || causes[0].Count != 3 || causes[1].Count != 1 {
+		t.Fatalf("%+v", causes)
 	}
-	history := []Sent{{"crash", now.Add(-5 * time.Hour)}}
-	if Allows("crash", now, history, false) {
-		t.Error("the same cause is not told twice in six hours")
-	}
-	if !Allows("crash", now.Add(2*time.Hour), history, false) {
-		t.Error("after six hours it is told again")
-	}
-}
-
-func TestNotMoreThanOneAnHourAndFiveADay(t *testing.T) {
-	now := time.Date(2026, 10, 29, 12, 0, 0, 0, time.UTC)
-	if Allows("a", now, []Sent{{"b", now.Add(-30 * time.Minute)}}, false) {
-		t.Error("a second report within the hour waits")
-	}
-	if !Allows("a", now, []Sent{{"b", now.Add(-90 * time.Minute)}}, false) {
-		t.Error("an hour later it goes")
-	}
-	var day []Sent
-	for i := 0; i < 5; i++ {
-		day = append(day, Sent{string(rune('b' + i)), now.Add(-time.Duration(2+3*i) * time.Hour)})
-	}
-	if Allows("a", now, day, false) {
-		t.Error("the sixth in a day waits")
-	}
-	if Allows("a", now, day, true) {
-		t.Error("the limit of the day holds even for the one that ignores the hour")
+	lines := CauseLines(causes)
+	if lines[0] != "14:54 · обновления не проверяются (раз: 3)" || lines[1] != "15:54 · прошлый запуск закончился неожиданно" {
+		t.Errorf("%q", lines)
 	}
 }
 
-func TestTheReportThatNewKeysDidNotHelpIsNotHeldBackByTheHourLimit(t *testing.T) {
-	now := time.Date(2026, 10, 29, 12, 0, 0, 0, time.UTC)
-	history := []Sent{{"crash", now.Add(-10 * time.Minute)}}
-	if Allows(Error(DNS).Key, now, history, false) {
-		t.Error("an ordinary cause waits")
+func TestTheSnapshotAndTheWordsOfAPausedTesting(t *testing.T) {
+	f := FaultSnapshot{Title: "туннель остановился", At: time.Date(2026, 11, 2, 9, 5, 0, 0, time.Local).Unix(), Text: "состояние"}
+	if got := f.Section(); got != "— Снимок первого сбоя (09:05 · туннель остановился) —\nсостояние" {
+		t.Errorf("%q", got)
 	}
-	if !NewKeysFailed.IgnoresHourLimit || !Allows(NewKeysFailed.Key, now, history, NewKeysFailed.IgnoresHourLimit) {
-		t.Error("the keys that did not help go at once")
+	if w := OutdatedWords("0.3.2"); !strings.Contains(w, "Вышла новая версия 0.3.2") || !strings.Contains(w, "приостановлено") {
+		t.Errorf("%q", w)
 	}
-	if Mismatch(DNS).IgnoresHourLimit || DailyDigestCause.IgnoresHourLimit {
-		t.Error("only the keys ignore the hour")
-	}
-}
-
-func TestOnlyTheLastDayOfHistoryIsKept(t *testing.T) {
-	now := time.Date(2026, 10, 29, 12, 0, 0, 0, time.UTC)
-	kept := Pruned([]Sent{{"old", now.Add(-25 * time.Hour)}, {"new", now.Add(-time.Hour)}}, now)
-	if len(kept) != 1 || kept[0].Key != "new" {
-		t.Errorf("kept %v", kept)
+	if !strings.Contains(OutdatedWords(""), "Вышла новая версия,") {
+		t.Error("without a number the words still read")
 	}
 }
 
@@ -324,16 +297,16 @@ func TestTheDigestSaysWhatDidNotAgreeAndWhenTheServerWasSilent(t *testing.T) {
 		}
 		lines = append(lines, Line(base.Add(time.Duration(i)*5*time.Minute), 0, f))
 	}
-	text := Summary(lines, []string{"mismatch-tunnel", "daily"})
+	text := Summary(lines, []DayCause{{Key: "mismatch-tunnel", Title: "туннель расходится", First: time.Date(2026, 10, 28, 9, 0, 0, 0, time.Local).Unix(), Count: 2}})
 	for _, want := range []string{"Записей чёрного ящика: 6 из 288", "с 2026-10-28 08:00:00 по 2026-10-28 08:25:00", "около 30 мин", "dns: не совпало в 0 записях",
 		"telegram: не совпало в 1 записях", "туннель: не совпало в 3 записях", "сервер не отвечал: в 3 записях", "Память: до 45 МБ, в последней записи 45 МБ",
-		"Отчётов по сбоям за это время: 2 (mismatch-tunnel, daily)"} {
+		"Сбои за это время:", "  09:00 · туннель расходится (раз: 2)"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("no %q in\n%s", want, text)
 		}
 	}
 	empty := Summary(nil, nil)
-	if !strings.Contains(empty, "Записей чёрного ящика: 0 из 288") || strings.Contains(empty, "Период") || strings.Contains(empty, "Память") || !strings.Contains(empty, "Отчётов по сбоям за это время: 0") {
+	if !strings.Contains(empty, "Записей чёрного ящика: 0 из 288") || strings.Contains(empty, "Период") || strings.Contains(empty, "Память") || !strings.Contains(empty, "Сбоев за это время не было") {
 		t.Errorf("an empty digest:\n%s", empty)
 	}
 }

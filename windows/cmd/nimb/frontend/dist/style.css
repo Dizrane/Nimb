@@ -76,13 +76,11 @@ canvas{display:block}
 .hero .stage-btn:active:not(:disabled){transform:scale(.985);opacity:.9}
 .hero .stage-btn:disabled{cursor:default}
 .hero h2{font:400 31px/1.15 var(--serif);margin:6px 0 0;color:var(--t1);text-shadow:0 1px 8px rgba(0,0,0,.55)}
-.hero .sub{font-size:13px;color:var(--t2);max-width:320px;min-height:38px;margin-top:6px}
-.hero .status-line{display:flex;align-items:center;gap:7px;min-height:38px;font-size:15px;font-weight:500;margin-top:6px}
+.hero .sub{font-size:13px;color:var(--t2);max-width:320px;min-height:54px;margin-top:6px}
+.hero .status-line{max-width:320px;text-align:center;display:flex;justify-content:center;align-items:flex-start;gap:7px;min-height:54px;font-size:15px;font-weight:500;margin-top:6px}
 .dot{width:6px;height:6px;border-radius:50%;background:var(--ok);flex:none}
-.badge{position:absolute;left:50%;width:40px;height:40px;margin-left:-20px;border-radius:50%;background:rgba(0,0,0,.6);border:1px solid rgba(255,255,255,.3);display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.85);transition:border-color .4s,color .4s,opacity .4s,transform .4s;pointer-events:none}
-.badge.on{border-color:rgba(48,209,89,.7);color:var(--ok)}
-.stage-btn:hover .badge:not(.on){border-color:rgba(255,255,255,.55)}
-.badge svg{width:17px;height:17px}
+.pwr{position:absolute;box-sizing:border-box;border-style:solid;border-radius:50%;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;color:#fff;pointer-events:none}
+.pwr svg{display:block}
 .power-icon{fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round}
 .home-btn{margin-top:12px;font-size:13.5px;font-weight:600;color:rgba(0,0,0,.88);background:rgba(255,255,255,.92);border-radius:9px;padding:7px 24px;display:inline-flex;align-items:center;gap:8px;transition:transform .12s ease-out,opacity .12s,background .2s}
 .home-btn:active:not(:disabled){transform:scale(.985);opacity:.88}
@@ -209,14 +207,6 @@ textarea:focus,input[type=text]:focus{outline:none;border-color:rgba(255,255,255
 .onb .banner{width:100%;text-align:left;margin:0}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 
-/* the big button of the planet page while Smart DNS is off */
-.big-ring{position:absolute;inset:0;border-radius:50%;border:1px solid rgba(255,255,255,.12);transition:border-color .45s}
-.stage-btn:hover .big-ring{border-color:rgba(255,255,255,.28)}
-.big-disc{position:absolute;left:13px;top:13px;width:120px;height:120px;border-radius:50%;background:linear-gradient(#4d4d4d,#1f1f1f);box-shadow:0 9px 16px rgba(0,0,0,.6),inset 0 0 0 1.2px rgba(255,255,255,.4);display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.92);transition:box-shadow .45s}
-.stage-btn:hover .big-disc{box-shadow:0 9px 16px rgba(0,0,0,.6),inset 0 0 0 1.2px rgba(255,255,255,.7)}
-.big-power svg{width:46px;height:46px}
-.big-power .power-icon{stroke-width:1.2}
-
 /* ---- later additions ---- */
 .onb{background:#000;z-index:40}
 .onb-icon{display:flex;align-items:center;justify-content:center;margin-bottom:-6px}
@@ -259,3 +249,62 @@ textarea:focus,input[type=text]:focus{outline:none;border-color:rgba(255,255,255
 .pop .hr{height:1px;background:var(--hair)}
 .pop-pre{max-height:160px;margin:0}
 .pop .btn{align-self:flex-start}
+
+/* ---- the window of the update (UpdateWindow.swift) ---- */
+.upw-back{position:fixed;inset:0 0 42px 0;z-index:35;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(0,0,0,.6);animation:fade .2s ease-out}
+.upw{width:470px;max-width:100%;max-height:100%;overflow:auto;display:flex;flex-direction:column;gap:16px;padding:24px 26px;border-radius:14px;background:rgba(10,10,10,.96);border:1px solid rgba(255,255,255,.16);box-shadow:0 18px 50px rgba(0,0,0,.7)}
+.us-title{font:400 28px/1.15 var(--serif);color:var(--t1)}
+.us-cap{font-size:11px;font-weight:600;letter-spacing:1.4px;color:var(--t2);margin-bottom:10px}
+.us-notes{display:flex;flex-direction:column;gap:10px;max-height:250px;overflow:auto;user-select:text;-webkit-user-select:text}
+.us-note{display:flex;gap:10px;align-items:baseline;font-size:13px;line-height:1.35;color:rgba(255,255,255,.9)}
+.us-note i{flex:none;width:6px;height:6px;border-radius:50%;background:var(--ok);transform:translateY(-1px)}
+.us-note code{font:12px var(--mono)}
+.us-plain{font-size:13px;color:var(--t2)}
+.us-steps{display:flex;flex-direction:column;gap:10px}
+.us-bar{padding-bottom:6px}
+.us-row{display:flex;justify-content:space-between;font-size:13px;margin-bottom:7px;color:var(--t1)}
+.us-pct{font-weight:500;font-variant-numeric:tabular-nums}
+.us-bar.bad .us-pct{color:var(--bad)}
+.us-track{height:6px;border-radius:3px;background:rgba(255,255,255,.12);overflow:hidden}
+.us-fill{height:100%;min-width:6px;border-radius:3px;background:var(--ok);box-shadow:0 0 5px rgba(48,209,89,.5);transition:width .3s ease-out}
+.us-bar.bad .us-fill{background:var(--bad);box-shadow:0 0 5px rgba(255,89,82,.5)}
+.us-step{display:flex;align-items:center;gap:12px;font-size:14px;color:var(--t1)}
+.us-step.st-pending{color:var(--t2)}
+.us-mark{width:20px;height:20px;display:flex;align-items:center;justify-content:center;flex:none}
+.us-pend{width:14px;height:14px;border-radius:50%;border:1.5px solid rgba(255,255,255,.34)}
+.us-restart{display:flex;align-items:center;gap:8px;font-size:12px;margin-top:4px}
+.us-fail{margin-top:4px;padding:12px;border-radius:10px;background:rgba(255,89,82,.1);border:1px solid rgba(255,89,82,.4);user-select:text;-webkit-user-select:text}
+.us-failt{font-size:13px;font-weight:600;color:var(--bad);margin-bottom:6px}
+.us-failm{font-size:12px;line-height:1.35;color:rgba(255,255,255,.85)}
+.us-buttons{display:flex;align-items:center;gap:10px}
+.us-link{font-size:12px;color:var(--t2);text-decoration:underline}.us-link:hover{color:#fff}
+.us-primary{font-size:12.5px;font-weight:600;padding:7px 16px;border-radius:9px;color:rgba(0,0,0,.85);background:rgba(255,255,255,.92)}
+.us-primary:hover:not(:disabled){background:#fff}.us-primary:disabled{opacity:.45;cursor:default}
+
+/* ---- the popover of every «i» (infoPanel of the Mac) ---- */
+.popv{position:fixed;z-index:60;box-sizing:border-box;padding:14px;overflow:auto;border-radius:10px;background:rgba(20,20,20,.97);border:1px solid rgba(255,255,255,.16);box-shadow:0 12px 36px rgba(0,0,0,.65);animation:fade .12s ease-out;user-select:text;-webkit-user-select:text}
+.popv .pv-title{font-size:15px;font-weight:500;color:var(--t1);margin-bottom:6px}
+.popv .pv-note{font-size:11px;line-height:1.35;color:var(--t2)}
+.popv .pv-hr{height:1px;background:var(--hair);margin:8px 0}
+.popv .pv-pt{margin-bottom:8px}.popv .pv-pt b{display:block;font-size:12px;font-weight:500;color:var(--t1);margin-bottom:1px}
+.popv .pv-pt span{display:block;font-size:11px;line-height:1.35;color:var(--t2)}
+.popv .pv-back{font-size:11.5px;font-weight:500;color:var(--t2)}.popv .pv-back:hover{color:#fff}
+.popv .pv-pre{margin:6px 0 0;padding:10px;max-height:300px;overflow:auto;border-radius:8px;background:rgba(255,255,255,.06);font:10.5px/1.45 var(--mono);color:var(--t1);white-space:pre-wrap;word-break:break-word}
+.popv .pv-cols{display:flex;gap:22px}.popv .pv-cols>div{flex:1;min-width:0}
+.popv .pv-site{display:flex;align-items:center;gap:8px;padding:4px 0}
+.popv .pv-site i{font:normal 10.5px var(--mono);color:var(--t3);width:18px;text-align:right}
+.popv .pv-site b{font-size:12px;font-weight:500;flex:none;max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.popv .pv-site span{margin-left:auto;font-size:11px;color:var(--t2);white-space:nowrap}
+.foot .tag{font-size:10px;font-weight:600;padding:2px 6px;border-radius:6px;border:1px solid rgba(255,255,255,.34);color:var(--t2)}
+.foot .tag:hover{color:#fff;border-color:rgba(255,255,255,.6)}
+.foot .tag.mod{color:var(--warn);border-color:var(--warn)}
+
+/* the step of the first set-up in a low window (fit() of onboarding.js) */
+.onb{overflow-y:auto}
+.onb-col.compact{gap:8px}
+.onb-col.compact .onb-icon{transform:scale(.7);margin:-12px 0 -18px}
+.onb-col.compact h2{font-size:26px}
+.card.rows{padding-top:6px;padding-bottom:6px}
+.card.rows .row{display:flex;align-items:center;gap:12px;padding:8px 0}
+.card.rows .row.top{align-items:flex-start}
+.card.rows .hr{height:1px;background:var(--hair)}

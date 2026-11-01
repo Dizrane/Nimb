@@ -38,6 +38,7 @@ type Release struct {
 	URL       string // of the installer
 	SHA256    string // from the description of the release; empty when it is not there
 	PageURL   string
+	Notes     string // the description of the release (empty when it came from the page of the release)
 }
 
 type ghAsset struct {
@@ -91,7 +92,7 @@ func newest(list []ghRelease, arch string) (Release, bool) {
 		if asset == nil || (found && !IsNewer(version, best.Version)) {
 			continue
 		}
-		best = Release{Version: version, AssetName: name, URL: asset.URL, SHA256: SHA256For(name, r.Body), PageURL: r.PageURL}
+		best = Release{Version: version, AssetName: name, URL: asset.URL, SHA256: SHA256For(name, r.Body), PageURL: r.PageURL, Notes: r.Body}
 		found = true
 	}
 	return best, found
@@ -314,48 +315,174 @@ func (c *Client) allowedURL(address string) bool {
 	return u.Scheme == "https" && (host == "github.com" || strings.HasSuffix(host, ".github.com") || strings.HasSuffix(host, ".githubusercontent.com"))
 }
 
+// Stage is a step of an installation, in order. The window shows each with a mark, and a failure says at which of them it stopped.
+type Stage int
+
+const (
+	StagePrepare Stage = iota
+	StageDownload
+	StageCheck
+	StageInstall
+	StageCount
+)
+
+// Title is the name of the stage as the window says it (the same words as the Mac, where the check is of a signature).
+func (s Stage) Title() string {
+	switch s {
+	case StagePrepare:
+		return "Подготовка"
+	case StageDownload:
+		return "Загрузка"
+	case StageCheck:
+		return "Проверка файла"
+	}
+	return "Установка"
+}
+
+// Weight is the share of the whole installation that the stage is (the download is the long one); they add up to 1.
+func (s Stage) Weight() float64 {
+	switch s {
+	case StagePrepare:
+		return 0.03
+	case StageDownload:
+		return 0.70
+	case StageCheck:
+		return 0.07
+	}
+	return 0.20
+}
+
+// IsOurs: a failure here is not the network's or the person's, and is worth a report that goes by itself.
+func (s Stage) IsOurs() bool { return s == StageCheck || s == StageInstall }
+
+// StageError is an error that knows the stage it came at.
+type StageError struct {
+	Stage Stage
+	Msg   string
+}
+
+func (e *StageError) Error() string { return e.Msg }
+
+func stageErr(s Stage, msg string) error { return &StageError{Stage: s, Msg: msg} }
+
+// Hooks are what an installation reports as it goes; either may be nil. Stage is called with "running" and then "done" for each stage
+// that Fetch covers (the preparation, the download and the check of the file); Bytes with the bytes got so far and the size (0 when unknown).
+type Hooks struct {
+	Stage func(Stage, string)
+	Bytes func(done, total int64)
+}
+
+func (h Hooks) stage(s Stage, state string) {
+	if h.Stage != nil {
+		h.Stage(s, state)
+	}
+}
+
+// WhatsNew are the points of the description of a release that say what is new: its numbered or bullet lines, up to the first heading,
+// the lines about how to run it and the hashes.
+func WhatsNew(notes string) []string {
+	var items []string
+	for _, raw := range strings.Split(notes, "\n") {
+		line := strings.TrimSpace(raw)
+		if strings.HasPrefix(line, "#") || strings.HasPrefix(line, "Остальное") || strings.HasPrefix(line, "**Как запустить") || strings.HasPrefix(line, "**SHA") {
+			break
+		}
+		switch {
+		case strings.HasPrefix(line, "- "), strings.HasPrefix(line, "* "):
+			items = append(items, line[2:])
+		default:
+			if m := reNumbered.FindStringIndex(line); m != nil {
+				items = append(items, line[m[1]:])
+			}
+		}
+	}
+	return items
+}
+
+var reNumbered = regexp.MustCompile(`^\d+\.\s+`)
+
 // Download brings the installer into dir and checks it against the hash of the release. Without a hash nothing is downloaded: the
 // installer has no signature yet, so the hash is the only check. The file is deleted if the hash does not match.
 func (c *Client) Download(ctx context.Context, rel Release, dir string, status func(string)) (path string, err error) {
+	return c.Fetch(ctx, rel, dir, Hooks{Stage: func(s Stage, state string) {
+		if state != "running" {
+			return
+		}
+		switch s {
+		case StageDownload:
+			status("Загрузка…")
+		case StageCheck:
+			status("Проверка…")
+		}
+	}})
+}
+
+// progressReader counts what passes through it.
+type progressReader struct {
+	r     io.Reader
+	done  int64
+	total int64
+	bytes func(done, total int64)
+	last  time.Time
+}
+
+func (p *progressReader) Read(b []byte) (int, error) {
+	n, err := p.r.Read(b)
+	p.done += int64(n)
+	if p.bytes != nil && (time.Since(p.last) > 100*time.Millisecond || err != nil) {
+		p.last = time.Now()
+		p.bytes(p.done, p.total)
+	}
+	return n, err
+}
+
+// Fetch is Download that says which stage it is at and how many bytes have come; an error is a *StageError.
+func (c *Client) Fetch(ctx context.Context, rel Release, dir string, h Hooks) (path string, err error) {
+	h.stage(StagePrepare, "running")
 	if rel.SHA256 == "" {
-		return "", errors.New("В описании релиза нет SHA-256, установка отменена.")
+		return "", stageErr(StagePrepare, "В описании релиза нет SHA-256, установка отменена.")
 	}
 	if !c.allowedURL(rel.URL) {
-		return "", errors.New("Адрес установщика не с GitHub, установка отменена.")
+		return "", stageErr(StagePrepare, "Адрес установщика не с GitHub, установка отменена.")
 	}
 	if rel.AssetName != filepath.Base(rel.AssetName) || !strings.HasPrefix(rel.AssetName, "Nimb-Setup-") {
-		return "", errors.New("Неожиданное имя установщика, установка отменена.")
+		return "", stageErr(StagePrepare, "Неожиданное имя установщика, установка отменена.")
 	}
-	status("Загрузка…")
+	h.stage(StagePrepare, "done")
+	h.stage(StageDownload, "running")
+	failed := stageErr(StageDownload, "Не удалось скачать "+rel.AssetName+".")
 	req, err := http.NewRequestWithContext(ctx, "GET", rel.URL, nil)
 	if err != nil {
-		return "", err
+		return "", stageErr(StageDownload, err.Error())
 	}
 	req.Header.Set("User-Agent", "Nimb-Windows")
 	resp, err := (&http.Client{Timeout: 10 * time.Minute}).Do(req)
 	if err != nil {
-		return "", errors.New("Не удалось скачать " + rel.AssetName + ".")
+		return "", failed
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return "", errors.New("Не удалось скачать " + rel.AssetName + ".")
+		return "", failed
 	}
 	path = filepath.Join(dir, rel.AssetName)
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
-		return "", err
+		return "", stageErr(StageDownload, err.Error())
 	}
-	h := sha256.New()
-	_, err = io.Copy(io.MultiWriter(f, h), io.LimitReader(resp.Body, 200<<20))
+	sum := sha256.New()
+	body := &progressReader{r: io.LimitReader(resp.Body, 200<<20), total: max(resp.ContentLength, 0), bytes: h.Bytes}
+	_, err = io.Copy(io.MultiWriter(f, sum), body)
 	f.Close()
 	if err != nil {
 		os.Remove(path)
-		return "", errors.New("Не удалось скачать " + rel.AssetName + ".")
+		return "", failed
 	}
-	status("Проверка…")
-	if hex.EncodeToString(h.Sum(nil)) != strings.ToLower(rel.SHA256) {
+	h.stage(StageDownload, "done")
+	h.stage(StageCheck, "running")
+	if hex.EncodeToString(sum.Sum(nil)) != strings.ToLower(rel.SHA256) {
 		os.Remove(path)
-		return "", errors.New("SHA-256 скачанного файла не совпадает с указанным в релизе. Установка отменена.")
+		return "", stageErr(StageCheck, "SHA-256 скачанного файла не совпадает с указанным в релизе. Установка отменена.")
 	}
+	h.stage(StageCheck, "done")
 	return path, nil
 }

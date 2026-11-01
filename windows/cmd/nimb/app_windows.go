@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -59,6 +60,7 @@ type App struct {
 	wrongKey   tgproxy.RecentCount // the connections of Telegram that came with another key
 	failures   tgproxy.RecentCount // the connections that did not get to Telegram
 
+	reach dnsReach    // whether the provider answers in this network (dnswarn_windows.go)
 	probe probeState  // the check of the providers
 	upd   updateState // the look for a new version
 	sites siteState   // the check of YouTube and Discord
@@ -127,11 +129,25 @@ func (a *App) ShowWindow() {
 func (a *App) Quit() { a.quitFrom("кнопка «Выйти из Nimb» в окне") }
 
 // quitFrom closes Nimb and writes down who asked for it.
-func (a *App) quitFrom(reason string) {
+func (a *App) quitFrom(reason string) bool {
+	// The update is being installed: a quit now would stop it half-way (the same question as on the Mac).
+	a.upd.mu.Lock()
+	installing := a.upd.installing != "" && !a.upd.restarting
+	a.upd.mu.Unlock()
+	if installing {
+		title, _ := syscall.UTF16PtrFromString("Идёт обновление")
+		text, _ := syscall.UTF16PtrFromString("Если выйти сейчас, оно прервётся и начнётся заново при следующей попытке. Обычно оно занимает около минуты.\n\nВыйти всё равно?")
+		const yesNo, warning, defaultNo, topmost = 0x4, 0x30, 0x100, 0x40000
+		if answer, _ := windows.MessageBox(0, text, title, yesNo|warning|defaultNo|topmost); answer != 6 { // IDYES
+			logLine("выход: пока идёт обновление человек решил подождать")
+			return false
+		}
+	}
 	logExit("по команде человека: " + reason)
 	endSession()
 	stopTray()
 	runtime.Quit(a.ctx)
+	return true
 }
 
 // ---- the state the page draws ----------------------------------------------------------------------------------------
@@ -144,7 +160,10 @@ type Provider struct {
 
 // State is everything the page shows.
 type State struct {
-	Version      string `json:"version"`
+	Version string `json:"version"`
+	// Modified: this build is not an official one (no key of a release, or a file next to the program is not the one the build made); its
+	// reports are paused, and the bar at the bottom says «MOD». Why is in the report.
+	Modified     bool   `json:"modified"`
 	ServiceOK    bool   `json:"serviceOk"`
 	ServiceError string `json:"serviceError,omitempty"`
 
@@ -188,7 +207,7 @@ type State struct {
 
 func providerList() []Provider {
 	var out []Provider
-	for _, p := range dnsx.Providers {
+	for _, p := range dnsx.ByName() {
 		out = append(out, Provider{p.ID, p.Name})
 	}
 	return out
@@ -198,6 +217,7 @@ func providerList() []Provider {
 func (a *App) GetState() State {
 	var st State
 	st.Version = Version
+	st.Modified = buildProblem() != ""
 	st.Providers = providerList()
 	st.Probe = a.probe.view()
 	st.Update = a.upd.view()
@@ -234,6 +254,11 @@ func (a *App) GetState() State {
 			st.AI.Provider = resp.DNS.Provider
 			if hint := a.browserHint(); hint != "" {
 				st.AI.Warnings = append(st.AI.Warnings, hint)
+			}
+			if p, ok := dnsx.Find(resp.DNS.Provider); ok {
+				if unreachable := a.unreachableWarning(p); unreachable != "" {
+					st.AI.Warnings = append([]string{unreachable}, st.AI.Warnings...)
+				}
 			}
 		}
 		if resp.Tunnel != nil {
@@ -536,6 +561,10 @@ func (a *App) applyMedia(on bool) Result {
 	_, err := callService(ipc.Request{Cmd: cmd})
 	// What the person did last is what comes back after a restart of the computer.
 	a.settings.update(func(s *Settings) { s.TunnelWanted = on && err == nil })
+	if err != nil && strings.Contains(err.Error(), "сервер не ответил") {
+		// A network of a university, an office or a hotel may close the tunnel; the words of the Mac for it.
+		err = errors.New(err.Error() + ". Проверьте интернет и попробуйте ещё раз. В некоторых сетях (вуз, работа, отель) туннель закрыт: тогда поможет другая сеть или мобильный интернет.")
+	}
 	return a.end("media", err)
 }
 

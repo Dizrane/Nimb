@@ -11,6 +11,7 @@ WAILS="$(go env GOPATH)/bin/wails"
 OUT="$ROOT/build/windows"
 CACHE="$ROOT/build/windows-cache"
 mkdir -p "$OUT" "$CACHE"
+REPORT_KEY_FILE="${REPORT_KEY_FILE:-$HOME/.config/nimb/report.key}"
 ARCHES=("$@"); [ ${#ARCHES[@]} -eq 0 ] && ARCHES=(arm64 amd64)
 
 # wintun.dll of the Wintun project, taken from its own site and checked against the sum that was looked at by hand.
@@ -22,9 +23,21 @@ if [ ! -f "$CACHE/wintun.zip" ]; then curl -fsSL -o "$CACHE/wintun.zip" https://
 for ARCH in "${ARCHES[@]}"; do
   echo "== $ARCH"
   STAGE="$OUT/stage-$ARCH"; rm -rf "$STAGE"; mkdir -p "$STAGE"
-  (cd cmd/nimb && "$WAILS" build -platform "windows/$ARCH" -s -skipbindings -trimpath -ldflags "-s -w" -o Nimb.exe >/dev/null && cp build/bin/Nimb.exe "$STAGE/Nimb.exe")
   GOOS=windows GOARCH=$ARCH go build -trimpath -ldflags "-s -w" -o "$STAGE/nimb-svc.exe" ./cmd/nimb-svc
   cp "$CACHE/wintun/bin/$ARCH/wintun.dll" "$STAGE/wintun.dll"
+  # The key that signs reports (see internal/report/sign.go) is kept outside the repository. With it the build is an official one; without
+  # it (a build from the sources) the program sends no reports and says «MOD». The key is made for this version and mixed with its number,
+  # and goes to the linker only. The program also learns the sums of the files that the service is made of (what stands next to it on a
+  # computer must be these), so that a replaced service or wintun.dll makes the build «not ours».
+  LDFLAGS="-s -w"
+  if [ -f "$REPORT_KEY_FILE" ]; then
+    MIXED=$(go run ./tools/reportkey mixed "$REPORT_KEY_FILE" "$VERSION")
+    FILES="nimb-svc.exe=$(shasum -a 256 "$STAGE/nimb-svc.exe" | cut -d' ' -f1);wintun.dll=$(shasum -a 256 "$STAGE/wintun.dll" | cut -d' ' -f1)"
+    LDFLAGS="$LDFLAGS -X main.officialReportKey=$MIXED -X main.officialFiles=$FILES"
+  else
+    echo "Note: no $REPORT_KEY_FILE: this build is not an official one and sends no reports." >&2
+  fi
+  (cd cmd/nimb && "$WAILS" build -platform "windows/$ARCH" -s -skipbindings -trimpath -ldflags "$LDFLAGS" -o Nimb.exe >/dev/null && cp build/bin/Nimb.exe "$STAGE/Nimb.exe")
   cp "$ROOT/LICENSE" "$STAGE/LICENSE"
   cp THIRD-PARTY-NOTICES.md "$STAGE/THIRD-PARTY-NOTICES.md"
   makensis -V2 -DARCH="$ARCH" -DVERSION="$VERSION" -DSRC="$STAGE" -DICON="$PWD/installer/nimb.ico" \

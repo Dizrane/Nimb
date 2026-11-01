@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 	"golang.org/x/sys/windows"
 
 	"github.com/Dizrane/Nimb/windows/internal/autoreport"
@@ -33,7 +34,20 @@ type updateState struct {
 	release    *update.Release // a newer version, when there is one
 	installing string          // what is going on while the installer is being brought ("Загрузка…")
 	err        string          // why the last installation did not happen
-	lastLog    string          // the last line of a check that was written to the log (the same line is written once)
+	// The installation by stages, for the window of the update.
+	stages     [update.StageCount]string // "", "running", "done" or "failed" for each stage
+	downloaded int64
+	total      int64
+	failStage  update.Stage
+	restarting bool   // the installer has been given to Windows and takes over in a moment
+	showWindow bool   // the tray (or a failure) asks the page to open the window of the update
+	lastLog    string // the last line of a check that was written to the log (the same line is written once)
+}
+
+// UpdateStageView is one step of the installation as the window of the update draws it.
+type UpdateStageView struct {
+	Title string `json:"title"`
+	State string `json:"state"` // pending, running, done, failed
 }
 
 // UpdateView is what the page shows.
@@ -42,10 +56,22 @@ type UpdateView struct {
 	Version    string `json:"version,omitempty"`
 	Installing string `json:"installing,omitempty"`
 	Error      string `json:"error,omitempty"`
-	Notify     bool   `json:"notify"` // the notifications about new versions are on
-	Checking   bool   `json:"checking"`
-	Failed     bool   `json:"failed"`            // the last check did not work
-	Checked    int64  `json:"checked,omitempty"` // when a check last worked (unix seconds), for «проверено сегодня»
+	// The window of the update: what is new, the stages, how far it has got (0 to 1) and the line over the bar, the stage a failure stopped
+	// at, and whether the installer has been handed over (the program is about to be replaced).
+	Current     string            `json:"current"`
+	Notes       []string          `json:"notes"`
+	PageURL     string            `json:"pageUrl,omitempty"`
+	Started     bool              `json:"started"` // an installation was begun (it goes, it failed, or it is handed over)
+	Stages      []UpdateStageView `json:"stages"`
+	Fraction    float64           `json:"fraction"`
+	Line        string            `json:"line,omitempty"`
+	FailedStage string            `json:"failedStage,omitempty"`
+	Restarting  bool              `json:"restarting,omitempty"`
+	Show        bool              `json:"show,omitempty"` // the page opens the window of the update (once)
+	Notify      bool              `json:"notify"`         // the notifications about new versions are on
+	Checking    bool              `json:"checking"`
+	Failed      bool              `json:"failed"`            // the last check did not work
+	Checked     int64             `json:"checked,omitempty"` // when a check last worked (unix seconds), for «проверено сегодня»
 }
 
 func (u *updateState) view() UpdateView {
@@ -55,10 +81,71 @@ func (u *updateState) view() UpdateView {
 	if !u.checked.IsZero() {
 		v.Checked = u.checked.Unix()
 	}
+	v.Current, v.Notes, v.Stages = Version, []string{}, []UpdateStageView{}
 	if u.release != nil {
 		v.Available, v.Version = true, u.release.Version
+		v.Notes, v.PageURL = update.WhatsNew(u.release.Notes), u.release.PageURL
+		if v.Notes == nil {
+			v.Notes = []string{}
+		}
 	}
+	fraction, running := 0.0, -1
+	for s := update.Stage(0); s < update.StageCount; s++ {
+		state := u.stages[s]
+		if state == "" {
+			state = "pending"
+		}
+		v.Stages = append(v.Stages, UpdateStageView{Title: s.Title(), State: state})
+		switch state {
+		case "done":
+			fraction += s.Weight()
+		case "running":
+			running = int(s)
+			if s == update.StageDownload && u.total > 0 {
+				fraction += s.Weight() * float64(u.downloaded) / float64(u.total)
+			}
+		case "failed":
+			v.FailedStage = s.Title()
+		}
+		if state != "pending" {
+			v.Started = true
+		}
+	}
+	v.Fraction = min(fraction, 1)
+	switch {
+	case u.restarting:
+		v.Restarting, v.Line, v.Fraction = true, "Готово", 1
+	case v.FailedStage != "":
+		v.Line = "Остановилось"
+	case running == int(update.StageDownload) && u.total > 0:
+		v.Line = "Загрузка · " + megabytes(u.downloaded) + " из " + megabytes(u.total)
+	case running >= 0:
+		v.Line = update.Stage(running).Title()
+	case v.Started:
+		v.Line = "Начинаю…"
+	}
+	v.Show = u.showWindow
 	return v
+}
+
+// megabytes is «4,5 МБ», the way the window of the update says a size.
+func megabytes(n int64) string {
+	return strings.Replace(strconv.FormatFloat(float64(n)/(1<<20), 'f', 1, 64), ".", ",", 1) + " МБ"
+}
+
+// AckUpdateShow is the page saying that it has opened the window of the update that was asked for.
+func (a *App) AckUpdateShow() {
+	a.upd.mu.Lock()
+	a.upd.showWindow = false
+	a.upd.mu.Unlock()
+}
+
+// OpenUpdateWindow asks the page to open the window of the update (from the tray); the window of Nimb is brought forward.
+func (a *App) OpenUpdateWindow() {
+	a.upd.mu.Lock()
+	a.upd.showWindow = true
+	a.upd.mu.Unlock()
+	a.ShowWindow()
 }
 
 // updateInterval is ten minutes; NIMB_UPDATE_INTERVAL (seconds, at least 5) is for trying it out.
@@ -123,7 +210,8 @@ func (a *App) checkUpdate() {
 		a.upd.mu.Unlock()
 		a.logCheck("обновления: не удалось проверить: " + err.Error())
 		// Three failed checks in a row are told (a limit of GitHub is not a failed check: it is the address of the person that is limited).
-		if !errors.Is(err, update.ErrLimit) {
+		// ... nor is one that failed only because there is no network (a computer that has just woken up): no report for it.
+		if !errors.Is(err, update.ErrLimit) && internetWorks() {
 			a.auto.mu.Lock()
 			a.auto.failed++
 			told := a.auto.failed == 3
@@ -135,6 +223,9 @@ func (a *App) checkUpdate() {
 		return
 	}
 	newer := update.IsNewer(rel.Version, Version)
+	if a.settings.get().LatestKnown != rel.Version {
+		a.settings.update(func(s *Settings) { s.LatestKnown = rel.Version })
+	}
 	a.upd.failed, a.upd.retrySoon, a.upd.checked = false, false, time.Now()
 	a.resetFailedChecks()
 	a.upd.err = "" // a check that worked: the error of an installation that did not happen is old news
@@ -163,34 +254,63 @@ func (a *App) InstallUpdate() Result {
 		a.upd.mu.Unlock()
 		return Result{Error: "Новой версии нет."}
 	}
-	a.upd.installing, a.upd.err = "Загрузка…", ""
+	a.upd.installing, a.upd.err = "Подготовка…", ""
+	a.upd.stages, a.upd.downloaded, a.upd.total, a.upd.restarting = [update.StageCount]string{}, 0, 0, false
 	a.upd.mu.Unlock()
 	goSafe("установка обновления", func() { a.install(*rel) })
 	return Result{OK: true}
 }
 
 func (a *App) install(rel update.Release) {
-	set := func(s string) { a.upd.mu.Lock(); a.upd.installing = s; a.upd.mu.Unlock() }
-	fail := func(msg string) {
-		logLine("обновления: не удалось: " + msg)
+	stage := func(s update.Stage, state string) {
 		a.upd.mu.Lock()
-		a.upd.installing, a.upd.err = "", msg
+		a.upd.stages[s] = state
+		if state == "running" {
+			a.upd.installing = s.Title() + "…"
+		}
 		a.upd.mu.Unlock()
+		logLine("обновления: этап «" + s.Title() + "»: " + map[string]string{"running": "начат", "done": "готов", "failed": "не вышел"}[state])
 	}
+	fail := func(at update.Stage, msg string) {
+		logLine("обновления: не удалось на этапе «" + at.Title() + "»: " + msg)
+		a.upd.mu.Lock()
+		a.upd.stages[at] = "failed"
+		a.upd.installing, a.upd.err, a.upd.failStage = "", msg, at
+		a.upd.showWindow = true // a failure must not be missed: the window comes back with the reason
+		a.upd.mu.Unlock()
+		a.ShowWindow()
+		if at.IsOurs() {
+			a.notifyAuto(autoreport.UpdateInstall(at.Title()))
+		}
+	}
+	stage(update.StagePrepare, "running")
 	dir, err := os.MkdirTemp("", "nimb-update-")
 	if err != nil {
-		fail("Не удалось подготовить папку для загрузки.")
+		fail(update.StagePrepare, "Не удалось подготовить папку для загрузки.")
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
 	defer cancel()
-	path, err := a.upd.client.Download(ctx, rel, dir, set)
+	// Fetch says the preparation ends itself, after it has looked at the release; the folder was part of it.
+	path, err := a.upd.client.Fetch(ctx, rel, dir, update.Hooks{
+		Stage: func(s update.Stage, state string) { stage(s, state) },
+		Bytes: func(done, total int64) {
+			a.upd.mu.Lock()
+			a.upd.downloaded, a.upd.total = done, total
+			a.upd.mu.Unlock()
+		},
+	})
 	if err != nil {
 		os.RemoveAll(dir)
-		fail(err.Error())
+		var se *update.StageError
+		if errors.As(err, &se) {
+			fail(se.Stage, se.Msg)
+		} else {
+			fail(update.StageDownload, err.Error())
+		}
 		return
 	}
-	set("Установка…")
+	stage(update.StageInstall, "running")
 	logLine("обновления: запускаю установщик версии " + rel.Version)
 	verb, _ := syscall.UTF16PtrFromString("runas")
 	file, _ := syscall.UTF16PtrFromString(path)
@@ -202,19 +322,25 @@ func (a *App) install(rel update.Release) {
 		restoreSession()
 		os.RemoveAll(dir)
 		if err == windows.ERROR_CANCELLED {
-			fail("Установка отменена: Windows не получила разрешения.")
+			fail(update.StageInstall, "Установка отменена: Windows не получила разрешения.")
 		} else {
-			fail("Не удалось запустить установщик.")
+			fail(update.StageInstall, "Не удалось запустить установщик.")
 		}
 		return
 	}
-	// The installer stops this program in a moment; if it does not (it failed), the page says so after a minute.
+	a.upd.mu.Lock()
+	a.upd.restarting = true
+	a.upd.mu.Unlock()
+	// The installer stops this program in a moment; if it does not (it failed), the page says so after two minutes.
 	go func() {
 		time.Sleep(2 * time.Minute)
 		restoreSession()
 		a.upd.mu.Lock()
-		a.upd.installing = ""
+		a.upd.installing, a.upd.restarting = "", false
+		a.upd.stages[update.StageInstall] = "failed"
+		a.upd.err, a.upd.failStage, a.upd.showWindow = "Установщик не заменил Nimb за две минуты. Попробуйте ещё раз.", update.StageInstall, true
 		a.upd.mu.Unlock()
+		logLine("обновления: установщик не заменил Nimb за две минуты")
 	}()
 }
 
@@ -253,5 +379,31 @@ func (a *App) SendTestNotification() Result {
 	lastTest.mu.Unlock()
 	balloon(notice.TestTag, 2, notice.TestTitle, notice.TestText)
 	logLine("уведомления: показано тестовое уведомление")
+	return Result{OK: true}
+}
+
+// OpenUpdatePage opens the page of the offered release in the browser (only a page of this repository on GitHub).
+func (a *App) OpenUpdatePage() {
+	a.upd.mu.Lock()
+	rel := a.upd.release
+	a.upd.mu.Unlock()
+	if rel != nil && strings.HasPrefix(rel.PageURL, "https://github.com/") {
+		wruntime.BrowserOpenURL(a.ctx, rel.PageURL)
+	}
+}
+
+// CopyUpdateDetails puts what goes to the developer by hand on the clipboard: the versions, the system, the stage and the words of the error.
+func (a *App) CopyUpdateDetails() Result {
+	a.upd.mu.Lock()
+	rel, msg, stage := a.upd.release, a.upd.err, a.upd.failStage
+	a.upd.mu.Unlock()
+	to := "?"
+	if rel != nil {
+		to = rel.Version
+	}
+	text := "Nimb " + Version + " → " + to + "\nWindows " + windowsVersion() + "\nЭтап: " + stage.Title() + "\nОшибка: " + msg
+	if err := wruntime.ClipboardSetText(a.ctx, text); err != nil {
+		return Result{Error: "Не удалось скопировать."}
+	}
 	return Result{OK: true}
 }

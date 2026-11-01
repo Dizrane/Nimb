@@ -40,6 +40,8 @@ var All = []Target{
 	{"Grok", "api.x.ai", API, "/v1/models"},
 	{"ElevenLabs", "elevenlabs.io", Site, "/"},
 	{"ElevenLabs", "api.elevenlabs.io", API, "/v1/models"},
+	{"Perplexity", "www.perplexity.ai", Site, "/"},
+	{"Perplexity", "api.perplexity.ai", API, "/v1/models"},
 }
 
 // Services are the names of the services in the order of All, without repeats.

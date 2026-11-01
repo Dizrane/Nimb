@@ -3,9 +3,11 @@ import { drawRingStack } from './halo.js';
 import { IconView, playIcon, preloadIcons } from './icons.js';
 import { preload } from './art.js';
 import { api, logPage, SV, ORDER, esc } from './common.js';
-import { HomePage, AIPage, TelegramPage, MediaPage, SettingsPage, ReportPage, showSites } from './pages.js';
+import { HomePage, AIPage, TelegramPage, MediaPage, SettingsPage, ReportPage, toggleSites, toggleHelp } from './pages.js';
+import { openPopover, closePopover, isPopoverOpen } from './popover.js';
 import { Onboarding } from './onboarding.js';
 import { mountSky } from './sky.js';
+import { UpdateWindow } from './update.js';
 
 // The page of Nimb. All it knows comes from Go (window.go.main.App.*): GetState() every two seconds and the actions below.
 let S = null;                 // the state from Go
@@ -13,12 +15,12 @@ let page = 'home';            // home, ai, telegram, media, settings, report
 let current = null;           // the object of the page that is shown
 let onb = null;               // the first setup, while it is shown
 let rep = null;               // the report about a problem
-let help = { open: false, preview: null, loading: false }; // the window «Помогать тестированию» and the example of a report in it
 let testSent = false;         // the test notification was just sent: the button says so for 3 seconds
 let autostart = false;        // whether Nimb starts with Windows (read when the settings open)
 let prevOn = null;            // what worked at the last look, to play an icon when a service goes on
 const icons = {};             // the animated icons of the sidebar
 let rings = null;             // the three small rings of the home row
+let upw = null;               // the window of the update (js/update.js)
 let lightSky = () => {};      // lights the sky behind the window when a service is on (js/sky.js)
 
 const isOn = (k) => !!S[k].on;
@@ -44,7 +46,7 @@ function buildShell() {
     </nav>
     <main class="main"><div id="banner"></div><div id="content" style="flex:1;min-height:0;display:flex;flex-direction:column"></div></main>
     </div>
-    <div class="foot"><div class="bar"><span class="verline"><span id="version"></span><span id="upd"></span></span>
+    <div class="foot"><div class="bar"><span class="verline"><span id="version"></span><span id="upd"></span><span id="tag"></span></span>
       <button data-a="channel" data-f="channel" id="channel" title="Новости и релизы Nimb в Telegram: @NimbProject" aria-label="Канал Nimb в Telegram"><span>Канал в Telegram</span>${ARROW_UP_RIGHT}</button></div>
       <div id="uperr"></div></div>`;
 
@@ -66,17 +68,15 @@ function buildShell() {
 const ARROW_UP_RIGHT = '<svg viewBox="0 0 10 10" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 7.5l5-5M3 2.5h4.5V7"/></svg>';
 const ARROW_DOWN_CIRCLE = '<svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="6.5" fill="currentColor"/><path d="M7 3.6v5.6M4.7 7.1L7 9.4l2.3-2.3" fill="none" stroke="#ebebeb" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
-// «Версия 0.1.1 · проверено сегодня», as on the Mac. With a newer version at hand the line is only the version (and the button),
+// «Версия 0.1.1» (with « · —» when the check failed), as on the Mac. With a newer version at hand the line is only the version (and the button),
 // and while it is installed the line is only what goes on.
 function versionLine() {
   const u = S.update, version = `Версия ${S.version}`;
   if (u.installing) return '';
   if (u.available) return version;
   if (u.checking) return `${version} · проверяю…`;
-  if (u.failed) return `${version} · не удалось проверить`;
-  if (!u.checked) return version;
-  const at = new Date(u.checked * 1000), now = new Date();
-  return version + (at.toDateString() === now.toDateString() ? ' · проверено сегодня' : ` · проверено ${at.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}`);
+  if (u.failed) return `${version} · —`;
+  return version;
 }
 
 function updateShell() {
@@ -92,8 +92,17 @@ function updateShell() {
   const key = u.installing ? `i|${u.installing}` : u.available ? `a|${u.version}` : '';
   if (upd.dataset.key !== key) {
     upd.dataset.key = key;
-    upd.innerHTML = u.installing ? `<span class="upd busy"><span class="spin"></span>${esc(u.installing)}</span>`
+    upd.innerHTML = u.installing ? `<button class="upd busy" data-a="update" data-f="update" id="update" title="Открыть окно обновления"><span class="spin"></span>${esc(u.installing)}</button>`
       : u.available ? `<button class="upd" data-a="update" data-f="update" id="update">${ARROW_DOWN_CIRCLE}<span>Обновить до ${esc(u.version)}</span></button>` : '';
+  }
+  // «MOD» (a build that is changed or not from a release; its reports are paused) or «latest» (the last check found nothing newer): a tag
+  // beside the version, with a popover, as on the Mac.
+  const tag = document.getElementById('tag'), latest = !u.available && !u.installing && !u.checking && !u.failed && !!u.checked;
+  const kind = S.modified ? 'mod' : latest ? 'latest' : '';
+  if (tag.dataset.key !== kind) {
+    tag.dataset.key = kind;
+    tag.innerHTML = kind === 'mod' ? '<button class="tag mod" data-a="tag" data-f="tag" id="tagbtn" aria-label="Изменённая сборка">MOD</button>'
+      : kind === 'latest' ? '<button class="tag" data-a="tag" data-f="tag" id="tagbtn" aria-label="Последняя версия">latest</button>' : '';
   }
   const sel = page === 'report' ? 'settings' : page;
   for (const id of ['home', ...ORDER, 'settings']) document.getElementById(`row-${id}`).classList.toggle('sel', id === sel);
@@ -114,6 +123,7 @@ function updateShell() {
 // ---------------------------------------------------------------------------------------------------------------- pages
 
 function showPage(name) {
+  closePopover();
   if (current) current.destroy();
   page = name;
   const content = document.getElementById('content');
@@ -129,7 +139,9 @@ function render() {
   if (!S) return;
   updateShell();
   lightSky(effective() > 0);
-  current.update(S, { autostart, testSent, help });
+  current.update(S, { autostart, testSent });
+  if (S.update.show && upw) { upw.open(S); api().AckUpdateShow(); S.update.show = false; }
+  if (upw) upw.update(S);
   if (onb) onb.update(S, { autostart, testSent });
 }
 
@@ -232,7 +244,7 @@ document.addEventListener('click', async (e) => {
     case 'sw': await actions.toggle(v); break;
     case 'probe': await startProbe(false); break;
     case 'sitecheck': { S.sites.running = true; render(); try { await api().CheckSites(); } catch (e) { /* the state tells */ } await refresh(); watchProbe(); break; }
-    case 'det': if (current.toggleDetails) { current.toggleDetails(v); render(); } break;
+    case 'det': if (current.toggleDetails) current.toggleDetails(v, t); break;
     case 'onbbest': await startProbe(true); break;
     case 'prov': { S.ai.provider = v; render(); await api().SetProvider(v); await refresh(); break; }
     case 'openTg': { const r = await api().OpenTelegram(); if (!r.ok) note(r.error); break; }
@@ -240,9 +252,13 @@ document.addEventListener('click', async (e) => {
     case 'channel': api().OpenChannel(); break;
     case 'notify': { S.update.notify = !S.update.notify; render(); await api().SetNotify(S.update.notify); await refresh(); break; }
     case 'notifytest': { const r = await api().SendTestNotification(); if (r.ok) { testSent = true; render(); setTimeout(() => { testSent = false; render(); }, 3000); } break; }
-    case 'update': { S.update.installing = 'Загрузка…'; render(); await api().InstallUpdate(); await refresh(); break; }
+    case 'update': upw.open(S); break;
+    case 'updgo': { S.update.installing = 'Подготовка…'; S.update.started = true; render(); await api().InstallUpdate(); await refresh(); break; }
+    case 'updclose': upw.close(); break;
+    case 'updcopy': { const r = await api().CopyUpdateDetails(); t.textContent = r.ok ? 'Скопировано' : 'Не вышло'; setTimeout(() => { t.textContent = 'Скопировать'; }, 2000); break; }
+    case 'updpage': api().OpenUpdatePage(); break;
     case 'terms': api().OpenTerms(); break;
-    case 'sites': showSites(); break;
+    case 'sites': toggleSites(t); break;
     case 'quit': api().Quit(); break;
     case 'uninstall': api().Uninstall(); break;
     case 'autostart': { const r = await api().SetAutostart(!autostart); if (r.ok) autostart = !autostart; render(); break; }
@@ -250,13 +266,13 @@ document.addEventListener('click', async (e) => {
     case 'onbnext': onb.next(); render(); break;
     case 'onbclose': case 'onbfinish': await finishOnboarding(); break;
     case 'helptest': { S.help.on = !S.help.on; render(); await api().SetHelpTesting(S.help.on); await refresh(); break; }
-    case 'helpinfo': help = { open: true, preview: null, loading: false }; render(); break;
-    case 'helpclose': if (!t.classList.contains('pop-back') || e.target === t) { help.open = false; render(); } break;
-    case 'helppreview': {
-      help.loading = true; render();
-      try { help.preview = await api().HelpTestingPreview(); } catch (err) { help.preview = 'Не удалось собрать пример.'; }
-      help.loading = false; render(); break;
-    }
+    case 'helpinfo': toggleHelp(t); break;
+    case 'tag': openPopover(t, { width: 280, side: 'above', build: (el) => {
+      el.innerHTML = S.modified
+        ? `<div class="pv-title">Изменённая сборка</div><div class="pv-note">Приложение изменено или собрано не из официального выпуска. Отправка отчётов и помощь тестированию отключены. Разработчик не отвечает за изменённые сборки.<br><br>Если вы доработали что-то для себя, расскажите об этом разработчику в Telegram: хорошие идеи попадут в Nimb, и пользоваться ими смогут все.</div><button class="btn" id="pv-chat" style="margin-top:8px">Написать разработчику</button>`
+        : '<div class="pv-title">Оригинальная сборка</div><div class="pv-note">Всё хорошо. У вас последняя версия Nimb :3</div>';
+      el.querySelector('#pv-chat')?.addEventListener('click', () => api().OpenDeveloperChat());
+    } }); break;
     case 'report': await openReport(); break;
     case 'repcancel': case 'repclose': showPage('settings'); break;
     case 'repdetails': rep.details = !rep.details; await refreshPreview(); current.render(); break;
@@ -273,7 +289,7 @@ document.addEventListener('click', async (e) => {
 
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape' || onb) return;
-  if (help.open) { help.open = false; render(); return; }
+  if (isPopoverOpen()) return;
   if (page === 'report') showPage('settings'); else if (page !== 'home') showPage('home');
 });
 
@@ -301,6 +317,7 @@ window.addEventListener('load', async () => {
     }
   } catch (e) { /* no first setup */ }
   lightSky = mountSky();
+  upw = new UpdateWindow(actions);
   buildShell();
   logPage(`размер окна: страница видит ${innerWidth}×${innerHeight}, масштаб экрана ${Math.round(devicePixelRatio * 100)}%`);
   showPage(first);

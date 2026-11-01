@@ -9,7 +9,8 @@ export const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
 export class Fader {
   constructor(seconds = 1, value = 0) { this.from = value; this.target = value; this.started = -1e9; this.seconds = seconds; }
   value(t) { return this.from + (this.target - this.from) * smooth((t - this.started) / this.seconds); }
-  set(target, t) { if (target === this.target) return; this.from = this.value(t); this.target = target; this.started = t; }
+  /** `delay` is how long after `t` it starts (the figure comes up while the power button is on its way). */
+  set(target, t, delay = 0) { if (target === this.target) return; this.from = this.value(t); this.target = target; this.started = t + delay; }
 }
 
 /**

@@ -50,7 +50,7 @@ func DNS(f DNSFacts) ServiceCheck {
 		ours := 0
 		for _, a := range f.Adapters {
 			for _, p := range dnsx.Providers {
-				if dnsx.Same(a.NameServer, p.Servers()) {
+				if p.Matches(a.NameServer) {
 					ours++
 					break
 				}
@@ -64,7 +64,7 @@ func DNS(f DNSFacts) ServiceCheck {
 	}
 	set, v6, v6taken := 0, 0, 0
 	for _, a := range f.Adapters {
-		if dnsx.Same(a.NameServer, f.Active.Servers()) {
+		if f.Active.Matches(a.NameServer) {
 			set++
 		}
 		if a.V6 {

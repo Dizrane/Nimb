@@ -117,6 +117,7 @@ func TestFittedKeepsTheHeadAndTheFactsAndDropsTheOldestLines(t *testing.T) {
 }
 
 func TestSendPostsTheReportAndSaysWhyWhenItFails(t *testing.T) {
+	useKey(t)
 	var got map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
@@ -147,6 +148,7 @@ func TestSendPostsTheReportAndSaysWhyWhenItFails(t *testing.T) {
 }
 
 func TestALongReportLosesTheMiddleNotTheEnds(t *testing.T) {
+	useKey(t)
 	var got map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
@@ -191,7 +193,7 @@ func TestGenericNamesOfWindows(t *testing.T) {
 func TestPublicAddressesStayAsTheyAre(t *testing.T) {
 	e := env
 	e.Public = []string{"192.3.233.253", "107.175.76.134"}
-	got := Clean("ChatGPT · 192.3.233.253: 403; 107.175.76.134; роутер 192.168.1.1; провайдер "+dnsx.Providers[3].Addresses[0], e)
+	got := Clean("ChatGPT · 192.3.233.253: 403; 107.175.76.134; роутер 192.168.1.1; провайдер "+mustFind("geohide-us").Addresses[0], e)
 	want := "ChatGPT · 192.3.233.253: 403; 107.175.76.134; роутер ‹ip›; провайдер ‹GeoHide (US)›"
 	if got != want {
 		t.Errorf("got  %q\nwant %q", got, want)
@@ -225,6 +227,7 @@ func TestMACAddressesGo(t *testing.T) {
 
 // A report that goes by itself carries its cause and the number of the installation; a manual one carries neither.
 func TestAnAutomaticReportSaysWhyAndForWhom(t *testing.T) {
+	useKey(t)
 	var got map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
@@ -246,4 +249,18 @@ func TestAnAutomaticReportSaysWhyAndForWhom(t *testing.T) {
 	if _, has := got["auto"]; has || got["install"] != nil || got["trigger"] != nil {
 		t.Errorf("a manual report must not carry the marks of an automatic one: %v", got)
 	}
+}
+
+func mustFind(id string) dnsx.Provider {
+	p, ok := dnsx.Find(id)
+	if !ok {
+		panic("no provider " + id)
+	}
+	return p
+}
+
+// useKey makes this build an official one for the time of a test.
+func useKey(t *testing.T) {
+	SetKey([]byte("test-key"))
+	t.Cleanup(func() { SetKey(nil) })
 }
