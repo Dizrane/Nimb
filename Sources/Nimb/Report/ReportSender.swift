@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// Where reports go: a small relay that forwards them to the developer (`report-relay/` in the repository). With no address the
@@ -15,6 +16,17 @@ enum ReportConfig {
 
     /// Where a person can write by hand when the report cannot be sent: the developer in Telegram.
     static let developerHandle = "i17th"
+
+    /// Opens the chat with the developer: the Telegram app when it is there, the page of the chat otherwise.
+    @MainActor static func openDeveloperChat() {
+        let app = URL(string: "tg://resolve?domain=\(developerHandle)")
+        let web = URL(string: "https://t.me/\(developerHandle)")
+        if let app, NSWorkspace.shared.urlForApplication(toOpen: app) != nil {
+            NSWorkspace.shared.open(app)
+        } else if let web {
+            NSWorkspace.shared.open(web)
+        }
+    }
     /// One Telegram message takes 4096 characters.
     static let messageLimit = 4000
 }

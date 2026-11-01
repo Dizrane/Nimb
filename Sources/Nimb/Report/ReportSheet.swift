@@ -208,13 +208,7 @@ struct ReportSheet: View {
     private func writeToDeveloper() {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(DiagnosticReport.fitted(fullText, limit: ReportConfig.messageLimit), forType: .string)
-        let app = URL(string: "tg://resolve?domain=\(ReportConfig.developerHandle)")
-        let web = URL(string: "https://t.me/\(ReportConfig.developerHandle)")
-        if let app, NSWorkspace.shared.urlForApplication(toOpen: app) != nil {
-            NSWorkspace.shared.open(app)
-        } else if let web {
-            NSWorkspace.shared.open(web)
-        }
+        ReportConfig.openDeveloperChat()
         AppLog.shared.add("report", "отчёт \(id) скопирован для чата с разработчиком")
         state.askedToPaste = true
     }

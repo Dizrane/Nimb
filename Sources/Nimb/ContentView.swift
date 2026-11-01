@@ -1015,9 +1015,9 @@ private struct FooterBar: View {
                 HStack(spacing: 6) {
                     versionLine
                     if modified.value {
-                        pill("MOD", color: Theme.warn, title: "Изменённая сборка", note: "Приложение изменено или собрано не из официального выпуска. Отправка отчётов и помощь тестированию отключены. Разработчик не отвечает за изменённые сборки.")
+                        pill("MOD", color: Theme.warn, title: "Изменённая сборка", note: "Приложение изменено или собрано не из официального выпуска. Отправка отчётов и помощь тестированию отключены. Разработчик не отвечает за изменённые сборки.\n\nЕсли вы доработали что-то для себя, расскажите об этом разработчику в Telegram: хорошие идеи попадут в Nimb, и пользоваться ими смогут все.", button: ("Написать разработчику", ReportConfig.openDeveloperChat))
                     } else if looked.value && isLatest {
-                        pill("latest", color: Theme.textSecondary, title: "Оригинальная сборка", note: "Всё хорошо. У вас последняя версия Nimb :3")
+                        pill("latest", color: Theme.textSecondary, title: "Оригинальная сборка", note: "Всё хорошо. У вас последняя версия Nimb :3", button: nil)
                     }
                 }
                 .padding(.leading, 20)
@@ -1063,7 +1063,7 @@ private struct FooterBar: View {
 
     /// A small tag beside the version: «latest» (nothing to update) or «MOD» (a build that is changed or not from a release; its reports are
     /// paused). It opens a popover in the shape of every «i» of the program.
-    private func pill(_ text: String, color: Color, title: String?, note: String) -> some View {
+    private func pill(_ text: String, color: Color, title: String?, note: String, button: (title: String, action: () -> Void)?) -> some View {
         Button { pillInfo.value.toggle() } label: {
             Text(text)
                 .font(.system(size: 10, weight: .semibold))
@@ -1078,6 +1078,7 @@ private struct FooterBar: View {
             VStack(alignment: .leading, spacing: 6) {
                 if let title { Text(title).font(Typo.name) }
                 Text(note).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                if let button { OutlineButton(title: button.title, color: Theme.textPrimary, action: button.action).padding(.top, 2) }
             }
             .infoPanel(width: 280)
         }
