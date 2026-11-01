@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VERSION="${VERSION:-0.9.23}"
+VERSION="${VERSION:-0.9.24}"
 
 # The key that signs reports (see Sources/Nimb/Report/ReportSigner.swift) is kept outside the repository. With it the build is an official
 # one; without it (a build from the sources) the program sends no reports. The key is written into a source file for the time of the build only.
