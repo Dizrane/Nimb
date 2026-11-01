@@ -577,10 +577,14 @@ import Testing
     }
 
     @Test func theTunnelIsAdvisedToTelegramOnlyWhenItIsOffAndConnectionsKeepFailing() {
-        #expect(TelegramTunnelAdvice.shows(failures: 61, failuresRecently: true, tunnelIsOff: true))
-        #expect(!TelegramTunnelAdvice.shows(failures: 61, failuresRecently: true, tunnelIsOff: false), "the tunnel is on or being switched")
-        #expect(!TelegramTunnelAdvice.shows(failures: 61, failuresRecently: false, tunnelIsOff: true), "the errors have stopped")
-        #expect(!TelegramTunnelAdvice.shows(failures: 2, failuresRecently: true, tunnelIsOff: true), "a couple of errors are nothing")
+        #expect(TelegramTunnelAdvice.kind(failures: 61, reached: 300, failuresRecently: true, tunnelIsOff: true) == .partly)
+        #expect(TelegramTunnelAdvice.kind(failures: 61, reached: 300, failuresRecently: true, tunnelIsOff: false) == nil, "the tunnel is on or being switched")
+        #expect(TelegramTunnelAdvice.kind(failures: 61, reached: 300, failuresRecently: false, tunnelIsOff: true) == nil, "the errors have stopped")
+        #expect(TelegramTunnelAdvice.kind(failures: 2, reached: 300, failuresRecently: true, tunnelIsOff: true) == nil, "a couple of errors are nothing")
+        #expect(TelegramTunnelAdvice.kind(failures: 2, reached: 0, failuresRecently: true, tunnelIsOff: true) == .blocked, "nothing gets through: said at once")
+        #expect(TelegramTunnelAdvice.kind(failures: 1, reached: 0, failuresRecently: true, tunnelIsOff: true) == nil, "one failure is not yet a block")
+        #expect(TelegramTunnelAdvice.kind(failures: 9, reached: 0, failuresRecently: true, tunnelIsOff: false) == nil)
+        #expect(TelegramTunnelAdvice.words(.blocked) != TelegramTunnelAdvice.words(.partly))
     }
 
     @Test func theHelperOfTheTunnelIsReplacedWhenItIsNotTheOneOfThisApp() {

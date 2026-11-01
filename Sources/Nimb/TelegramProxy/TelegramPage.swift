@@ -1,14 +1,27 @@
 import SwiftUI
 
 /// When the proxy of Telegram is told to try the tunnel: some providers let only a part of the servers of Telegram through (the rest, where
-/// some files and pictures are kept, open only through the tunnel). The proxy works alone; this is only advice, and it goes away as soon as
-/// the tunnel is on or the errors stop.
+/// some files and pictures are kept, open only through the tunnel), and some let none through (then not a single connection of the proxy
+/// gets to Telegram, and it is said at once). The proxy works alone; this is only advice, and it goes away as soon as the tunnel is on or
+/// the errors stop.
 enum TelegramTunnelAdvice {
     /// How long without a new failure before the advice is withdrawn.
     static let quiet: TimeInterval = 600
 
-    static func shows(failures: Int, failuresRecently: Bool, tunnelIsOff: Bool) -> Bool {
-        tunnelIsOff && failuresRecently && failures >= 5
+    enum Kind: Equatable { case blocked, partly }
+
+    /// `reached` is the number of connections that got to Telegram (by the WebSocket or directly) since the proxy was started.
+    static func kind(failures: Int, reached: Int, failuresRecently: Bool, tunnelIsOff: Bool) -> Kind? {
+        guard tunnelIsOff, failuresRecently else { return nil }
+        if reached == 0 && failures >= 2 { return .blocked }
+        return failures >= 5 ? .partly : nil
+    }
+
+    static func words(_ kind: Kind) -> String {
+        switch kind {
+        case .blocked: return "Ваша сеть не пускает Telegram: прокси до его серверов не достаёт. Туннель «YouTube и Discord» их откроет."
+        case .partly: return "Часть файлов Telegram лежит на серверах, до которых ваша сеть не достаёт: прокси сам с этим не справится. Туннель «YouTube и Discord» их откроет."
+        }
     }
 }
 
@@ -37,8 +50,9 @@ struct TelegramPage: View {
                     if telegram.isRunning {
                         connectCard
                         if !background.enabled { backgroundHint }
-                        if TelegramTunnelAdvice.shows(failures: telegram.stats.failures, failuresRecently: telegram.failuresRecently, tunnelIsOff: warp.phase == .off) {
-                            tunnelAdvice
+                        if let kind = TelegramTunnelAdvice.kind(failures: telegram.stats.failures, reached: telegram.stats.webSocket + telegram.stats.directTCP,
+                                                                failuresRecently: telegram.failuresRecently, tunnelIsOff: warp.phase == .off) {
+                            tunnelAdvice(kind)
                         }
                         if telegram.wrongSecretRecently {
                             NoticeCard(lines: ["Telegram подключается с чужим ключом: в нём, похоже, указан другой прокси на этом порту. Нажмите «Открыть в Telegram» и подтвердите, а старый прокси удалите."], color: Theme.warn, symbol: "exclamationmark.triangle")
@@ -74,9 +88,9 @@ struct TelegramPage: View {
         .card()
     }
 
-    private var tunnelAdvice: some View {
+    private func tunnelAdvice(_ kind: TelegramTunnelAdvice.Kind) -> some View {
         HStack(alignment: .top, spacing: 10) {
-            Text("Часть файлов Telegram лежит на серверах, до которых ваша сеть не достаёт: прокси сам с этим не справится. Туннель «YouTube и Discord» их откроет.")
+            Text(TelegramTunnelAdvice.words(kind))
                 .font(Typo.small)
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
