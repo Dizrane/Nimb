@@ -584,10 +584,11 @@ import Testing
     }
 
     @Test func theHelperOfTheTunnelIsReplacedWhenItIsNotTheOneOfThisApp() {
-        #expect(WarpTunnelModel.helperNeedsReplacing(installed: 16, bundled: 18), "after an update")
-        #expect(WarpTunnelModel.helperNeedsReplacing(installed: 22, bundled: 18), "another build left its own")
-        #expect(WarpTunnelModel.helperNeedsReplacing(installed: nil, bundled: 18))
-        #expect(!WarpTunnelModel.helperNeedsReplacing(installed: 18, bundled: 18))
+        #expect(WarpTunnelModel.helperNeedsReplacing(installed: 16, bundled: 18, sameContent: false), "after an update")
+        #expect(WarpTunnelModel.helperNeedsReplacing(installed: 22, bundled: 18, sameContent: false), "another build left its own")
+        #expect(WarpTunnelModel.helperNeedsReplacing(installed: nil, bundled: 18, sameContent: false))
+        #expect(!WarpTunnelModel.helperNeedsReplacing(installed: 18, bundled: 18, sameContent: true))
+        #expect(WarpTunnelModel.helperNeedsReplacing(installed: 18, bundled: 18, sameContent: false), "the number of ours, the content of someone else's")
     }
 
     @Test func aHelperOfAnotherBuildMakesTheBuildNotOurs() {

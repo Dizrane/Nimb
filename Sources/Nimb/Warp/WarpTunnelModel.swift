@@ -498,13 +498,15 @@ final class WarpTunnelModel: ObservableObject {
 
     /// The installed helper is not the one inside this app (after an update of Nimb, or when another build left its own): it is replaced
     /// together with the start, in the same password prompt. The settings are left as they are. A newer one is replaced too: the app and its
-    /// helper go as a pair, and a report came from a Mac whose helper (version 22) was none of ours and left a dead tunnel for six hours.
-    nonisolated static func helperNeedsReplacing(installed: Int?, bundled: Int) -> Bool { (installed ?? 0) != bundled }
+    /// helper go as a pair, and a report came from a Mac whose helper (version 22) was none of ours and left a dead tunnel for six hours. So is
+    /// one with the number of ours but other content (a helper that was changed by hand): one start of the tunnel brings the original back.
+    nonisolated static func helperNeedsReplacing(installed: Int?, bundled: Int, sameContent: Bool) -> Bool { (installed ?? 0) != bundled || !sameContent }
 
     private var upgrade: (binary: URL, helper: URL)? {
-        guard let files = bundledFiles,
-              let bundled = Self.helperVersion(at: files.helper.path),
-              Self.helperNeedsReplacing(installed: Self.helperVersion(at: WarpPaths.helper), bundled: bundled) else { return nil }
+        guard let files = bundledFiles, let bundled = Self.helperVersion(at: files.helper.path) else { return nil }
+        let installed = FileManager.default.contents(atPath: WarpPaths.helper)
+        let sameContent = installed != nil && installed == (try? Data(contentsOf: files.helper))
+        guard Self.helperNeedsReplacing(installed: Self.helperVersion(at: WarpPaths.helper), bundled: bundled, sameContent: sameContent) else { return nil }
         return files
     }
 
