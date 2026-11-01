@@ -120,13 +120,23 @@ async function latestMac(env) {
   }
 }
 
+const hex = (bytes) => [...new Uint8Array(bytes)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+
 async function sha256Hex(text) {
-  const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", encode(text)));
-  return [...hash].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return hex(await crypto.subtle.digest("SHA-256", encode(text)));
 }
 
-// The Mac program signs "nimb1|id|app|platform|install|sha256(text)" with HMAC-SHA256 (a key that only the build of a release has, in hex
-// letters, as they are). The secret REPORT_KEY holds it; REPORT_KEY_PREV holds the one before, for the time when the key is changed.
+// The key of one version: HMAC-SHA256 of "nimb-key|<version>" under the master key, in hex letters (scripts/report_key.py makes the same one
+// for the build). The master key is in the secrets only; the program has the key of its own version, so what is taken out of a release signs
+// that version's reports and no other.
+async function versionKey(master, version) {
+  const imported = await crypto.subtle.importKey("raw", encode(master), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return hex(await crypto.subtle.sign("HMAC", imported, encode(`nimb-key|${version}`)));
+}
+
+// The Mac program signs "nimb1|id|app|platform|install|sha256(text)" with HMAC-SHA256 (the key of its version, which only the build of a
+// release has, in hex letters, as they are). The secret REPORT_KEY holds the master key that the keys of the versions come from;
+// REPORT_KEY_PREV holds the one before, for the time when the master key is changed.
 // The Windows build signs nothing yet, and the Mac versions of the time before the signature (UNSIGNED_UP_TO) are taken as they were.
 // With no key in the secrets a signed report cannot be checked, and it is turned away: a door that opens by a mistake is worse than a failure
 // that is seen.
@@ -141,8 +151,8 @@ async function signatureOk(data, env) {
   }
   const message = encode(["nimb1", data.id, data.app, data.platform, typeof data.install === "string" ? data.install : "", await sha256Hex(data.text)].join("|"));
   const signature = Uint8Array.from(data.sig.match(/../g), (pair) => parseInt(pair, 16));
-  for (const key of keys) {
-    const imported = await crypto.subtle.importKey("raw", encode(key), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
+  for (const master of keys) {
+    const imported = await crypto.subtle.importKey("raw", encode(await versionKey(master, data.app)), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
     if (await crypto.subtle.verify("HMAC", imported, signature, message)) return true;
   }
   return false;

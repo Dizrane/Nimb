@@ -138,17 +138,22 @@ assert.deepEqual(await (await find(kept, "secret-export-key")).json(), { ok: tru
   const told = [];
   globalThis.fetch = async (url, init) => { told.push(String(url)); return new Response("{}", { status: 200 }); };
   const crypto = await import("node:crypto");
-  const sign = (data, key = "test-key") => {
+  // The program signs with the key of its own version, which comes from the master key (scripts/report_key.py makes it for the build).
+  const versionKey = (master, version) => crypto.createHmac("sha256", master).update(`nimb-key|${version}`).digest("hex");
+  const signWith = (data, key) => {
     const hash = crypto.createHash("sha256").update(data.text, "utf8").digest("hex");
     const message = ["nimb1", data.id, data.app, data.platform, data.install ?? "", hash].join("|");
     return crypto.createHmac("sha256", key).update(message).digest("hex");
   };
+  const sign = (data, master = "test-key") => signWith(data, versionKey(master, data.app));
   let asked = 0;
   const strict = { ...env, REPORTS, REPORT_KEY: "test-key", LIMITER: { limit: async () => { asked++; return { success: true }; } } };
   const fresh = { ...good, id: "SG01AA", app: "0.9.23", text: "текст" };
 
   // The same line and key as the test of the program (Tests/NimbTests/ReportTests.swift): the two sides must give the same letters.
-  assert.equal(sign({ id: "AB12CD", app: "0.9.23", platform: "macos", install: "ABCD2345", text: "текст" }), "8d7d8304a9c38885b81822903a8d789248e7b4333623ae5aafadc6d7ceb580e1");
+  assert.equal(signWith({ id: "AB12CD", app: "0.9.23", platform: "macos", install: "ABCD2345", text: "текст" }, "test-key"), "8d7d8304a9c38885b81822903a8d789248e7b4333623ae5aafadc6d7ceb580e1");
+  // The key of a version, the same as the build script makes (scripts/test.sh runs the script against this value).
+  assert.equal(versionKey("test-master", "0.9.23"), "9297899018b3ede3fff74dc1a582516c01c52cb17aaa53aa593f5cdcd87c10b0");
 
   kv.clear();
   assert.equal((await post({ ...fresh, sig: sign(fresh) }, strict)).status, 200, "a signed report of a new version is taken");
@@ -165,6 +170,8 @@ assert.deepEqual(await (await find(kept, "secret-export-key")).json(), { ok: tru
   assert.equal((await post({ ...fresh, app: "0.9.24", sig: sign(fresh) }, strict)).status, 403, "so was the version");
   assert.equal((await post({ ...auto, install: "OTHER123", sig: sign(auto) }, strict)).status, 403, "and the installation");
   assert.equal((await post({ ...fresh, sig: sign(fresh, "other-key") }, strict)).status, 403, "a key that is not ours");
+  assert.equal((await post({ ...fresh, app: "0.9.24", sig: signWith({ ...fresh, app: "0.9.24" }, versionKey("test-key", "0.9.23")) }, strict)).status, 403, "the key of one version signs no other version");
+  assert.equal((await post({ ...fresh, sig: signWith(fresh, "test-key") }, strict)).status, 403, "the master key itself is no key of a version");
   assert.equal((await post({ ...fresh, app: "setup", sig: undefined }, strict)).status, 403, "a version that is no version needs a signature too");
   assert.equal((await post({ ...fresh, sig: sign(fresh) }, { ...strict, REPORT_KEY: undefined })).status, 403, "no key in the secrets: nothing signed is taken");
   assert.equal(told.length, 0, "nothing turned away reaches Telegram");
@@ -174,6 +181,8 @@ assert.deepEqual(await (await find(kept, "secret-export-key")).json(), { ok: tru
   const changing = { ...strict, REPORT_KEY: "new-key", REPORT_KEY_PREV: "test-key" };
   assert.equal((await post({ ...fresh, sig: sign(fresh) }, changing)).status, 200, "the key before it still works while the key is being changed");
   assert.equal((await post({ ...fresh, id: "SG03CC", sig: sign({ ...fresh, id: "SG03CC" }, "new-key") }, changing)).status, 200, "and the new one");
+  const next = { ...fresh, id: "SG04DD", app: "0.9.24" };
+  assert.equal((await post({ ...next, sig: sign(next) }, strict)).status, 200, "the next version has a key of its own, and the relay finds it by the version in the report");
 
   const old = { ...good, id: "OLD001", app: "0.9.22" };
   assert.equal((await post(old, strict)).status, 200, "a version from before the signature, as before");

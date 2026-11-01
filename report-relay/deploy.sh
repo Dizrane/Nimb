@@ -89,10 +89,12 @@ sleep 3
 # The check is signed the way the program signs its reports (when the key is there), so it goes the way a real one goes.
 BODY=$(python3 - "$REPORT_KEY_FILE" <<'PY'
 import hashlib, hmac, json, os, sys
+sys.path.insert(0, "../scripts")
+from report_key import version_key
 text = "Отчёт № SETUP1\n\nЧто случилось:\nПроверочный отчёт: ретранслятор работает."
 data = {"v": 1, "id": "SETUP1", "app": "setup", "platform": "macos", "text": text}
 if os.path.exists(sys.argv[1]):
-    key = open(sys.argv[1]).read().strip().encode()
+    key = version_key(open(sys.argv[1]).read().strip(), data["app"]).encode()
     message = "|".join(["nimb1", data["id"], data["app"], data["platform"], "", hashlib.sha256(text.encode()).hexdigest()])
     data["sig"] = hmac.new(key, message.encode(), hashlib.sha256).hexdigest()
 print(json.dumps(data, ensure_ascii=False))

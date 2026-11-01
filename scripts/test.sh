@@ -12,6 +12,13 @@ grep -v "ld: warning" "$log" | grep -E "✘|Test run|error:|Build complete" | cu
 rm -f "$log"
 echo "== Relay of reports"
 (cd report-relay && { [ -d node_modules ] || npm install --no-audit --no-fund >/dev/null; } && node test.mjs) || status=1
+echo "== Key of a version"
+# The build script and the relay (report-relay/test.mjs) must make the same key of a version from the master key.
+keyfile=$(mktemp)
+printf 'test-master\n' > "$keyfile"
+[ "$(python3 scripts/report_key.py derive "$keyfile" 0.9.23)" = "9297899018b3ede3fff74dc1a582516c01c52cb17aaa53aa593f5cdcd87c10b0" ] \
+    && echo "version key: ok" || { echo "version key: differs from the relay's"; status=1; }
+rm -f "$keyfile"
 echo "== Tunnel helper"
 ./scripts/test_tunnel.sh || status=1
 echo "== Installer script"

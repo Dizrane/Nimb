@@ -1,8 +1,10 @@
 import CryptoKit
 import Foundation
 
-/// The key that signs reports. It is not in the repository: the script of a release (`scripts/build_app.sh`) writes it into a file that sits next
-/// to this one for the time of the build and nowhere else, and the build is given `OFFICIAL_BUILD`. A build from the sources has no key, so the
+/// The key that signs reports: the key of this version, made from the master key by `scripts/report_key.py` (the relay makes the same one from the
+/// version a report names), so what is taken out of a release signs that version only. It is not in the repository: the script of a release
+/// (`scripts/build_app.sh`) writes it into a file that sits next to this one for the time of the build and nowhere else, and the build is given
+/// `OFFICIAL_BUILD`. A build from the sources has no key, so the
 /// relay would turn its reports away, and the program does not send them at all (see `BuildCheck`). In the program the key is not a line of
 /// text that a search of the file would show: the script mixes it with the version of the build, and it is told apart at the moment of use.
 /// That is no lock against a person who sets out to take it from a release (nothing in a program a person owns is); the lock is the relay's,

@@ -13,13 +13,9 @@ rm -f "$KEY_SOURCE"
 trap 'rm -f "$KEY_SOURCE"' EXIT
 OFFICIAL=()
 if [ -f "$REPORT_KEY_FILE" ]; then
-    # Mixed with the version of the build (see `ReportKey.unmixed`): the key is not a line of text in the program.
-    python3 - "$REPORT_KEY_FILE" "$VERSION" "$KEY_SOURCE" <<'PY'
-import sys
-key, pad = open(sys.argv[1]).read().strip().encode(), sys.argv[2].encode()
-mixed = [byte ^ pad[index % len(pad)] for index, byte in enumerate(key)]
-open(sys.argv[3], "w").write("#if OFFICIAL_BUILD\nlet officialReportKey: [UInt8] = [%s]\n#endif\n" % ", ".join(map(str, mixed)))
-PY
+    # Not the key itself but the key of this version, mixed with the version (see `scripts/report_key.py`, `ReportKey.unmixed`): a key taken
+    # out of a release signs that version only, and it is not a line of text in the program.
+    python3 scripts/report_key.py source "$REPORT_KEY_FILE" "$VERSION" "$KEY_SOURCE"
     OFFICIAL=(-Xswiftc -DOFFICIAL_BUILD)
 else
     echo "Note: no $REPORT_KEY_FILE: this build is not an official one and sends no reports." >&2
