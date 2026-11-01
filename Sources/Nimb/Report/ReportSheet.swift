@@ -125,12 +125,12 @@ struct ReportSheet: View {
                     .foregroundStyle(Theme.ok)
                     .fixedSize(horizontal: false, vertical: true)
             } else if case .failed(let message) = stage {
-                Text("\(message) Нажмите «Написать разработчику»: откроется личный чат с разработчиком, отчёт будет скопирован, останется вставить его и отправить.")
+                Text(ReportGate.isOpen ? "\(message) Нажмите «Написать разработчику»: откроется личный чат с разработчиком, отчёт будет скопирован, останется вставить его и отправить." : message)
                     .font(Typo.small)
                     .foregroundStyle(Theme.bad)
                     .fixedSize(horizontal: false, vertical: true)
             } else if !ReportConfig.canSend {
-                Text(BuildCheck.isOurs ? "Отправка из приложения не настроена. Нажмите «Написать разработчику»: откроется личный чат с разработчиком, отчёт будет скопирован." : ReportConfig.pausedWords)
+                Text(ReportGate.pausedWords ?? "Отправка из приложения не настроена. Нажмите «Написать разработчику»: откроется личный чат с разработчиком, отчёт будет скопирован.")
                     .font(Typo.small)
                     .foregroundStyle(Theme.warn)
                     .fixedSize(horizontal: false, vertical: true)
@@ -141,11 +141,11 @@ struct ReportSheet: View {
                 OutlineButton(title: "Отмена", color: Theme.textSecondary) { close() }
                 OutlineButton(title: "Скопировать", color: Theme.textPrimary, action: copy)
                     .disabled(facts.isEmpty)
-                if BuildCheck.isOurs && (!ReportConfig.canSend || failed) {
+                if ReportGate.isOpen && (!ReportConfig.canSend || failed) {
                     OutlineButton(title: "Написать разработчику", color: Theme.textPrimary, action: writeToDeveloper)
                         .disabled(facts.isEmpty)
                 }
-                if BuildCheck.isOurs {
+                if ReportGate.isOpen {
                     Button(action: send) {
                         HStack(spacing: 7) {
                             if stage == .sending { ProgressView().controlSize(.small).tint(.black) }

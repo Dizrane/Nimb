@@ -9,7 +9,7 @@ enum ReportConfig {
         return URL(string: "https://nimb-report.nimb-app.workers.dev/")
     }
 
-    static var canSend: Bool { endpoint != nil && BuildCheck.isOurs }
+    static var canSend: Bool { endpoint != nil && ReportGate.isOpen }
     /// The words for a window of a build that sends nothing.
     static let pausedWords = "Приложение изменено или собрано не из официального выпуска, поэтому тестирование приостановлено. Разработчик не отвечает за изменённые сборки."
 
@@ -32,7 +32,8 @@ enum ReportSender {
 
     /// `auto` is for a report that the program sends by itself («Помогать тестированию»): the cause and the random number of the installation.
     static func send(id: String, text: String, auto: (trigger: String, install: String)? = nil) async throws {
-        guard BuildCheck.isOurs, let key = ReportKey.data else { throw Failure(ReportConfig.pausedWords, refused: true) }
+        if let paused = ReportGate.pausedWords { throw Failure(paused, refused: true) }
+        guard let key = ReportKey.data else { throw Failure(ReportConfig.pausedWords, refused: true) }
         guard let endpoint = ReportConfig.endpoint else { throw Failure("Отправка из приложения пока не настроена.") }
         var body = text
         if body.count > limit { body = String(body.prefix(limit / 2)) + "\n…\n" + String(body.suffix(limit / 2)) }
@@ -48,8 +49,9 @@ enum ReportSender {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
         let response: URLResponse
+        let answer: Data
         do {
-            (_, response) = try await URLSession.shared.data(for: request)
+            (answer, response) = try await URLSession.shared.data(for: request)
         } catch let error as URLError where error.code == .timedOut {
             throw Failure("Сервер отчётов не ответил за 20 секунд.")
         } catch let error as URLError where error.code == .notConnectedToInternet {
@@ -60,7 +62,15 @@ enum ReportSender {
         guard let http = response as? HTTPURLResponse else { throw Failure("Сервер отчётов ответил непонятно.") }
         switch http.statusCode {
         case 200..<300: return
-        case 403: throw Failure(ReportConfig.pausedWords, refused: true)
+        case 403:
+            // The relay says why: «outdated» (a newer version is out, and it names it) or a signature that is not a release's.
+            let said = (try? JSONSerialization.jsonObject(with: answer)) as? [String: Any]
+            if said?["error"] as? String == "outdated" {
+                let latest = said?["latest"] as? String
+                if let latest { ReportFreshness.record(latest: latest) }
+                throw Failure(ReportGate.outdatedWords(latest: latest), refused: true)
+            }
+            throw Failure(ReportConfig.pausedWords, refused: true)
         case 429: throw Failure("Отчётов слишком много, попробуйте через несколько минут.")
         default: throw Failure("Сервер отчётов отказал (код \(http.statusCode)).")
         }

@@ -335,7 +335,7 @@ final class AutoReporter: ObservableObject {
 
     /// A look of the black box: a service that disagrees with what it should be, for long enough, is a cause.
     func observe(_ facts: BlackBoxLine.Facts) {
-        guard enabled, BuildCheck.isOurs else { return }
+        guard enabled, ReportGate.isOpen else { return }
         observeDNS(agrees: facts.dnsAgrees)
         if tracker.observe("telegram", agrees: facts.telegramAgrees) { notify(.mismatch(.telegram)) }
         if tracker.observe("tunnel", agrees: facts.tunnelAgrees) { notify(.mismatch(.tunnel)) }
@@ -419,7 +419,7 @@ final class AutoReporter: ObservableObject {
     /// A fault is written down for the report of the day; the first of the day also leaves a snapshot of the state, which the report would
     /// not see any more when it goes.
     func notify(_ trigger: AutoTrigger) {
-        guard enabled, BuildCheck.isOurs else { return }
+        guard enabled, ReportGate.isOpen else { return }
         let now = Date()
         let kept = DayCauses.recorded(causes(), key: trigger.key, title: trigger.title, at: now)
         UserDefaults.standard.set(try? JSONEncoder().encode(kept), forKey: Self.causesKey)

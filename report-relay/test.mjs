@@ -7,7 +7,7 @@ globalThis.fetch = async (url, init) => {
   sent.push({ url: String(url), form: init.body });
   return new Response(JSON.stringify({ ok: true }), { status: 200 });
 };
-const env = { BOT_TOKEN: "123:abc", CHAT_ID: "42" };
+const env = { BOT_TOKEN: "123:abc", CHAT_ID: "42", LATEST_MAC: "off" };
 const good = { v: 1, id: "AB12CD", app: "0.9.3", platform: "macos", text: "Отчёт № AB12CD\n\nЧто случилось:\nНе включается туннель\n\n— Программа —\nNimb 0.9.3" };
 const pending = [];
 const ctx = { waitUntil: (promise) => void pending.push(promise) };
@@ -181,6 +181,53 @@ assert.deepEqual(await (await find(kept, "secret-export-key")).json(), { ok: tru
   assert.equal((await post({ ...old, app: "0.9.23" }, strict)).status, 403);
   assert.equal((await post(old, { ...strict, UNSIGNED_UP_TO: "0.0.0" })).status, 403, "closed when the testers have moved on");
   assert.equal((await post({ ...good, id: "WIN001", platform: "windows", app: "0.2.3" }, strict)).status, 200, "the Windows build signs nothing yet");
+  kv.clear();
+}
+
+// Only the latest version of the Mac program reports: an older one is turned away (and told which one is the latest), before it is counted,
+// kept or sent anywhere.
+{
+  const told = [];
+  const github = (answer) => async (url, init) => {
+    told.push(String(url));
+    if (String(url).startsWith("https://api.github.com/")) return typeof answer === "function" ? answer() : new Response(JSON.stringify(answer), { status: 200 });
+    return new Response("{}", { status: 200 });
+  };
+  let asked = 0;
+  const open = { ...env, LATEST_MAC: undefined, UNSIGNED_UP_TO: "99.0.0", REPORTS, LIMITER: { limit: async () => { asked++; return { success: true }; } } };
+  const report = { ...good, id: "FR01AA", app: "0.9.22" };
+  kv.clear();
+
+  globalThis.fetch = github({ tag_name: "v0.9.23" });
+  let answer = await post(report, open);
+  assert.equal(answer.status, 403, "an older version is not taken");
+  assert.deepEqual(await answer.json(), { ok: false, error: "outdated", latest: "0.9.23" });
+  assert.equal(told.filter((url) => !url.startsWith("https://api.github.com/")).length, 0, "nothing reached Telegram");
+  assert.equal(kv.size, 0, "nor the storage");
+  assert.equal(asked, 0, "nor the count of the address");
+  assert.match(told[0], /^https:\/\/api\.github\.com\/repos\/Dizrane\/Nimb\/releases\/latest$/);
+
+  assert.equal((await post({ ...report, app: "0.9.23" }, open)).status, 200, "the latest one is taken");
+  assert.equal((await post({ ...report, id: "FR02BB", app: "0.9.24" }, open)).status, 200, "and one that is ahead of the latest (a build before its release)");
+  assert.equal((await post({ ...report, id: "FR03CC", platform: "windows", app: "0.1.0" }, open)).status, 200, "the Windows build has its own versions");
+  assert.equal((await post({ ...report, app: "0.9.9" }, open)).status, 403, "ten is more than nine: 0.9.9 is older than 0.9.23");
+
+  for (const [name, fetcher] of [
+    ["no answer", () => { throw new Error("offline"); }],
+    ["an error of GitHub", github(() => new Response("{}", { status: 403 }))],
+    ["something that is not json", github(() => new Response("<html>", { status: 200 }))],
+    ["a release of the Windows version made the latest", github({ tag_name: "windows-v0.2.3" })],
+    ["no tag", github({})],
+  ]) {
+    globalThis.fetch = fetcher;
+    assert.equal((await post({ ...report, id: "FR04DD" }, open)).status, 200, `${name}: no minimum, the report is taken`);
+  }
+
+  globalThis.fetch = github({ tag_name: "v9.9.9" });
+  assert.equal((await post(report, { ...open, LATEST_MAC: "off" })).status, 200, "the check can be turned off");
+  assert.equal((await post(report, { ...open, LATEST_MAC: "0.9.23" })).status, 403, "or set by hand, and GitHub is not asked then");
+  assert.equal((await post(report, { ...open, LATEST_MAC: "0.9.22" })).status, 200);
+  assert.equal((await post({ ...report, app: "0.9.21" }, { ...open, LATEST_MAC: "0.9.22" })).status, 403);
   kv.clear();
 }
 

@@ -613,6 +613,17 @@ import Testing
         #expect(ReportSigner.signature(of: message, key: Data("test-key".utf8)) == "8d7d8304a9c38885b81822903a8d789248e7b4333623ae5aafadc6d7ceb580e1")
     }
 
+    @Test func onlyTheLatestVersionMayReport() {
+        #expect(ReportFreshness.isOutdated(current: "0.9.22", latest: "0.9.23"))
+        #expect(ReportFreshness.isOutdated(current: "0.9.9", latest: "0.9.10"), "ten is more than nine")
+        #expect(!ReportFreshness.isOutdated(current: "0.9.23", latest: "0.9.23"))
+        #expect(!ReportFreshness.isOutdated(current: "0.9.24", latest: "0.9.23"), "a build before its release is not old")
+        #expect(!ReportFreshness.isOutdated(current: "0.9.22", latest: nil), "nothing is known: no answer of the update check yet")
+        let words = ReportGate.outdatedWords(latest: "0.9.23")
+        #expect(words.contains("0.9.23") && words.contains("Обновите Nimb"))
+        #expect(!ReportGate.outdatedWords(latest: nil).contains("  "))
+    }
+
     @Test func theKeyIsMixedWithTheVersionAndComesBackWithIt() {
         let key = Array("0123456789abcdef0123456789abcdef".utf8)
         let mixed = ReportKey.unmixed(key, withVersion: "0.9.23")

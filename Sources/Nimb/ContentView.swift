@@ -323,6 +323,7 @@ final class UpdateViewModel: ObservableObject {
         Task {
             do {
                 let release = try await Updater.latestRelease()
+                ReportFreshness.record(latest: release.version)
                 lastChecked = Date()
                 lastCheckFailed = false
                 failedInARow = 0

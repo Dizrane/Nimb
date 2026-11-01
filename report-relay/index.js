@@ -14,6 +14,7 @@ const EXPORT_LIMIT = 200;
 // The last version of the Mac program that signs nothing (0.9.22 and older). When the testers have all moved on, set the variable
 // UNSIGNED_UP_TO to 0.0.0 and nothing unsigned is taken from a Mac any more.
 const UNSIGNED_UP_TO = "0.9.22";
+const LATEST_RELEASE = "https://api.github.com/repos/Dizrane/Nimb/releases/latest";
 
 const reply = (body, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -43,6 +44,9 @@ export default {
       typeof data.text === "string" && data.text.length > 0;
     if (!valid) return reply({ ok: false, error: "bad report" }, 400);
     if (!(await signatureOk(data, env))) return reply({ ok: false, error: "unsigned" }, 403);
+    // A report of the Mac is taken only from the latest version: what an older one says is mended already, and the program tells its person to update.
+    const latest = data.platform === "macos" ? await latestMac(env) : null;
+    if (latest && isOlder(data.app, latest)) return reply({ ok: false, error: "outdated", latest }, 403);
     // What an automatic report says about itself: the cause and the random number of the installation, both in a plain form.
     const auto = data.auto === true;
     data.trigger = auto && typeof data.trigger === "string" && /^[A-Za-z0-9:\-]{1,40}$/.test(data.trigger) ? data.trigger : "";
@@ -86,6 +90,34 @@ function isUnsignedTime(app, limit) {
   if (!have || !last) return false;
   for (let i = 0; i < 3; i++) if (have[i] !== last[i]) return have[i] < last[i];
   return true;
+}
+
+function isOlder(app, limit) {
+  const have = versionParts(app);
+  const last = versionParts(limit);
+  if (!have || !last) return false;
+  for (let i = 0; i < 3; i++) if (have[i] !== last[i]) return have[i] < last[i];
+  return false;
+}
+
+// The latest version of the Mac program: the latest release of the repository (the Windows ones are pre-releases and never are). GitHub
+// answers once in ten minutes to a place of Cloudflare, the rest comes from its cache. Whatever goes wrong (no answer, a tag that is no plain
+// version) means no minimum: a report is better kept than turned away for a fault of the check. The variable LATEST_MAC sets the version by
+// hand ("off" turns the check off).
+async function latestMac(env) {
+  if (env.LATEST_MAC) return versionParts(env.LATEST_MAC) ? env.LATEST_MAC : null;
+  try {
+    const response = await fetch(LATEST_RELEASE, {
+      headers: { "user-agent": "nimb-report-relay", accept: "application/vnd.github+json" },
+      cf: { cacheTtl: 600, cacheEverything: true },
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!response.ok) return null;
+    const match = /^v(\d+\.\d+\.\d+)$/.exec(String((await response.json()).tag_name));
+    return match ? match[1] : null;
+  } catch {
+    return null;
+  }
 }
 
 async function sha256Hex(text) {
