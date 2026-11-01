@@ -197,6 +197,8 @@ assert.deepEqual(await (await find(kept, "secret-export-key")).json(), { ok: tru
 // kept or sent anywhere.
 {
   const told = [];
+  // The releases as GitHub lists them: a Mac one has a tag `vX.Y.Z` and the archive.
+  const rel = (tag, extra = {}) => ({ tag_name: tag, draft: false, prerelease: false, assets: [{ name: "Nimb-1.zip" }], ...extra });
   const github = (answer) => async (url, init) => {
     told.push(String(url));
     if (String(url).startsWith("https://api.github.com/")) return typeof answer === "function" ? answer() : new Response(JSON.stringify(answer), { status: 200 });
@@ -207,14 +209,14 @@ assert.deepEqual(await (await find(kept, "secret-export-key")).json(), { ok: tru
   const report = { ...good, id: "FR01AA", app: "0.9.22" };
   kv.clear();
 
-  globalThis.fetch = github({ tag_name: "v0.9.23" });
+  globalThis.fetch = github([rel("windows-v0.3.0", { prerelease: true }), rel("v0.9.23"), rel("v0.9.22")]);
   let answer = await post(report, open);
   assert.equal(answer.status, 403, "an older version is not taken");
   assert.deepEqual(await answer.json(), { ok: false, error: "outdated", latest: "0.9.23" });
   assert.equal(told.filter((url) => !url.startsWith("https://api.github.com/")).length, 0, "nothing reached Telegram");
   assert.equal(kv.size, 0, "nor the storage");
   assert.equal(asked, 0, "nor the count of the address");
-  assert.match(told[0], /^https:\/\/api\.github\.com\/repos\/Dizrane\/Nimb\/releases\/latest$/);
+  assert.match(told[0], /^https:\/\/api\.github\.com\/repos\/Dizrane\/Nimb\/releases\?per_page=20$/);
 
   assert.equal((await post({ ...report, app: "0.9.23" }, open)).status, 200, "the latest one is taken");
   assert.equal((await post({ ...report, id: "FR02BB", app: "0.9.24" }, open)).status, 200, "and one that is ahead of the latest (a build before its release)");
@@ -225,14 +227,20 @@ assert.deepEqual(await (await find(kept, "secret-export-key")).json(), { ok: tru
     ["no answer", () => { throw new Error("offline"); }],
     ["an error of GitHub", github(() => new Response("{}", { status: 403 }))],
     ["something that is not json", github(() => new Response("<html>", { status: 200 }))],
-    ["a release of the Windows version made the latest", github({ tag_name: "windows-v0.2.3" })],
-    ["no tag", github({})],
+    ["no release for the Mac in the list", github([rel("windows-v0.3.0")])],
+    ["not a list", github({})],
   ]) {
     globalThis.fetch = fetcher;
     assert.equal((await post({ ...report, id: "FR04DD" }, open)).status, 200, `${name}: no minimum, the report is taken`);
   }
 
-  globalThis.fetch = github({ tag_name: "v9.9.9" });
+  // The Windows release is made the latest one, newer than the Mac ones, and a Mac one is not mistaken for it. Drafts, pre-releases and a
+  // release without the archive are not the latest; the highest version is, wherever it stands in the list.
+  globalThis.fetch = github([rel("windows-v0.4.0"), rel("v0.9.30", { draft: true }), rel("v0.9.29", { prerelease: true }), rel("v0.9.28", { assets: [] }), rel("v0.9.9"), rel("v0.9.23"), rel("v0.9.10")]);
+  assert.equal((await post(report, open)).status, 403, "0.9.22 is older than 0.9.23, the highest that counts");
+  assert.equal((await post({ ...report, id: "FR05EE", app: "0.9.23" }, open)).status, 200);
+
+  globalThis.fetch = github([rel("v9.9.9")]);
   assert.equal((await post(report, { ...open, LATEST_MAC: "off" })).status, 200, "the check can be turned off");
   assert.equal((await post(report, { ...open, LATEST_MAC: "0.9.23" })).status, 403, "or set by hand, and GitHub is not asked then");
   assert.equal((await post(report, { ...open, LATEST_MAC: "0.9.22" })).status, 200);

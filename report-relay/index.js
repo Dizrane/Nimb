@@ -14,7 +14,7 @@ const EXPORT_LIMIT = 200;
 // The last version of the Mac program that signs nothing (0.9.22 and older). When the testers have all moved on, set the variable
 // UNSIGNED_UP_TO to 0.0.0 and nothing unsigned is taken from a Mac any more.
 const UNSIGNED_UP_TO = "0.9.22";
-const LATEST_RELEASE = "https://api.github.com/repos/Dizrane/Nimb/releases/latest";
+const RELEASES = "https://api.github.com/repos/Dizrane/Nimb/releases?per_page=20";
 
 const reply = (body, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -100,21 +100,30 @@ function isOlder(app, limit) {
   return false;
 }
 
-// The latest version of the Mac program: the latest release of the repository (the Windows ones are pre-releases and never are). GitHub
-// answers once in ten minutes to a place of Cloudflare, the rest comes from its cache. Whatever goes wrong (no answer, a tag that is no plain
-// version) means no minimum: a report is better kept than turned away for a fault of the check. The variable LATEST_MAC sets the version by
-// hand ("off" turns the check off).
+// The latest version of the Mac program: the highest of the releases for the Mac among the last twenty of the repository, picked the way the
+// program picks it (Updater.newestForMac): published, not a pre-release, a tag `vX.Y.Z` (the Windows ones are `windows-v…`) and the archive
+// Nimb-*.zip in it. GitHub answers once in ten minutes to a place of Cloudflare, the rest comes from its cache. Whatever goes wrong (no
+// answer, no such release) means no minimum: a report is better kept than turned away for a fault of the check. The variable LATEST_MAC sets
+// the version by hand ("off" turns the check off).
 async function latestMac(env) {
   if (env.LATEST_MAC) return versionParts(env.LATEST_MAC) ? env.LATEST_MAC : null;
   try {
-    const response = await fetch(LATEST_RELEASE, {
+    const response = await fetch(RELEASES, {
       headers: { "user-agent": "nimb-report-relay", accept: "application/vnd.github+json" },
       cf: { cacheTtl: 600, cacheEverything: true },
       signal: AbortSignal.timeout(3000),
     });
     if (!response.ok) return null;
-    const match = /^v(\d+\.\d+\.\d+)$/.exec(String((await response.json()).tag_name));
-    return match ? match[1] : null;
+    const releases = await response.json();
+    if (!Array.isArray(releases)) return null;
+    let best = null;
+    for (const release of releases) {
+      const match = /^v(\d+\.\d+\.\d+)$/.exec(String(release?.tag_name));
+      const archive = Array.isArray(release?.assets) && release.assets.some((asset) => /^Nimb.*\.zip$/.test(String(asset?.name)));
+      if (!match || !archive || release.draft === true || release.prerelease === true) continue;
+      if (!best || isOlder(best, match[1])) best = match[1];
+    }
+    return best;
   } catch {
     return null;
   }
