@@ -1002,14 +1002,25 @@ struct NoticeCard: View {
 private struct FooterBar: View {
     @ObservedObject var updates: UpdateViewModel
     let canInstall: Bool
+    /// This build is not ours (see `BuildCheck`); looked at once, off the main thread: it reads the whole app.
+    @StateObject private var modified = Flag()
+    @StateObject private var looked = Flag()
+    @StateObject private var pillInfo = Flag()
 
     private static let channel = URL(string: "https://t.me/NimbProject")!
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
-                versionLine
-                    .padding(.leading, 20)
+                HStack(spacing: 6) {
+                    versionLine
+                    if modified.value {
+                        pill("MOD", color: Theme.warn, title: "Изменённая сборка", note: "Приложение изменено или собрано не из официального выпуска. Отправка отчётов и помощь тестированию отключены. Разработчик не отвечает за изменённые сборки.")
+                    } else if looked.value && isLatest {
+                        pill("latest", color: Theme.textSecondary, title: "Оригинальная сборка", note: "Всё хорошо. У вас последняя версия Nimb :3")
+                    }
+                }
+                .padding(.leading, 20)
                 Spacer(minLength: 8)
                 // The whole right half of the bar is the button: a small icon is hard to hit.
                 Button { NSWorkspace.shared.open(Self.channel) } label: {
@@ -1044,9 +1055,43 @@ private struct FooterBar: View {
         }
         .background(Color.black.opacity(0.28))
         .overlay(alignment: .top) { Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1) }
+        .task {
+            modified.value = await Task.detached { BuildCheck.problem != nil }.value
+            looked.value = true
+        }
     }
 
-    /// «Версия 0.9.0 · latest» (« · —» if the check failed), or the offer of a newer version.
+    /// A small tag beside the version: «latest» (nothing to update) or «MOD» (a build that is changed or not from a release; its reports are
+    /// paused). It opens a popover in the shape of every «i» of the program.
+    private func pill(_ text: String, color: Color, title: String?, note: String) -> some View {
+        Button { pillInfo.value.toggle() } label: {
+            Text(text)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(color)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(color.opacity(color == Theme.warn ? 1 : 0.5), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(text == "MOD" ? "Изменённая сборка" : "Последняя версия")
+        .popover(isPresented: $pillInfo.value, arrowEdge: .top) {
+            VStack(alignment: .leading, spacing: 6) {
+                if let title { Text(title).font(Typo.name) }
+                Text(note).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            .infoPanel(width: 280)
+        }
+    }
+
+    /// The last check of updates found nothing newer.
+    private var isLatest: Bool {
+        switch updates.state {
+        case .checking, .installing, .available: return false
+        default: return !updates.lastCheckFailed && updates.lastChecked != nil
+        }
+    }
+
+    /// «Версия 0.9.0» (with « · —» if the check failed; «latest» or «MOD» is a tag beside it), or the offer of a newer version.
     @ViewBuilder
     private var versionLine: some View {
         switch updates.state {
@@ -1083,6 +1128,6 @@ private struct FooterBar: View {
         let version = "Версия \(Updater.currentVersion)"
         if case .checking = updates.state { return version + " · проверяю…" }
         if updates.lastCheckFailed { return version + " · —" }
-        return updates.lastChecked == nil ? version : version + " · latest"
+        return version
     }
 }
