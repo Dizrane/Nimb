@@ -148,6 +148,15 @@ func (a *App) OpenUpdateWindow() {
 	a.ShowWindow()
 }
 
+// balloonClicked: a click on the notification of an update opens the window of the update, a click on any other brings the window forward.
+func (a *App) balloonClicked(id uint32) {
+	if id == balloonUpdate {
+		a.OpenUpdateWindow()
+		return
+	}
+	a.ShowWindow()
+}
+
 // updateInterval is ten minutes; NIMB_UPDATE_INTERVAL (seconds, at least 5) is for trying it out.
 func updateInterval() time.Duration {
 	if n, err := strconv.Atoi(os.Getenv("NIMB_UPDATE_INTERVAL")); err == nil && n >= 5 {
@@ -241,7 +250,7 @@ func (a *App) checkUpdate() {
 	a.logCheck("обновления: вышла версия " + rel.Version)
 	if set := a.settings.get(); !set.UpdateNotifyOff && update.ShouldTell(rel.Version, set.UpdateTold) && (!windowInFront() || notice.ShowsInFront(notice.UpdateTag)) {
 		a.settings.update(func(s *Settings) { s.UpdateTold = rel.Version })
-		balloon(notice.UpdateTag, 1, "Nimb", "Вышла новая версия "+rel.Version+". Откройте Nimb и нажмите «Обновить».")
+		balloon(notice.UpdateTag, balloonUpdate, "Nimb", "Вышла новая версия "+rel.Version+". Откройте Nimb и нажмите «Обновить».")
 	}
 }
 
@@ -377,7 +386,7 @@ func (a *App) SendTestNotification() Result {
 	}
 	lastTest.at = time.Now()
 	lastTest.mu.Unlock()
-	balloon(notice.TestTag, 2, notice.TestTitle, notice.TestText)
+	balloon(notice.TestTag, balloonTest, notice.TestTitle, notice.TestText)
 	logLine("уведомления: показано тестовое уведомление")
 	return Result{OK: true}
 }

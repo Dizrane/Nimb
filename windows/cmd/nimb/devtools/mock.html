@@ -1,57 +1,40 @@
 <!doctype html>
 <!-- The page of Nimb in an ordinary browser, with a pretend Go side: for trying the interface quickly (no Windows needed).
-     Serve the folder cmd/nimb (python3 -m http.server) and open /devtools/mock.html . -->
+     Serve the folder cmd/nimb (python3 -m http.server) and open /devtools/mock.html ; add ?update (or ?steps, ?fail) for the update window. -->
 <html lang="ru"><head><meta charset="utf-8"><title>Nimb (mock)</title>
-<base href="../frontend/dist/">
-<link rel="stylesheet" href="style.css">
-<style>html,body{max-width:1100px;max-height:680px;margin:0 auto;border:1px solid #333}</style>
-</head><body><div id="app"></div>
+<base href="../frontend/dist/"><link rel="stylesheet" href="style.css">
+<style>html,body{margin:0}</style></head><body><div id="sky" aria-hidden="true"></div><div id="app"></div>
 <script>
+const q = new URLSearchParams(location.search);
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-const M = { update: { available: location.search.includes('update'), version: '0.2.0', notify: true }, probe: { running: false, phase: '', done: 0, total: 0, reports: [], best: '' }, ai: false, tg: false, media: false, provider: 'geohide-eu', busy: {}, err: {} };
-const providers = [['geohide-eu', 'GeoHide (EU)'], ['comss', 'Comss.one'], ['geohide', 'GeoHide (RU)'], ['geohide-us', 'GeoHide (US)']];
+const has = (k) => q.has(k);
+const M = { ai: has('ai'), tg: has('tg'), media: has('media'), provider: 'geohide-eu', busy: {}, probe: { running: false, phase: '', done: 0, total: 0, reports: [], best: '' } };
+const names = ['ChatGPT','Claude','Gemini','Grok','ElevenLabs'];
 const svc = (name, status, site, api) => ({ name, status, site, api });
-const names = ['ChatGPT', 'Claude', 'Gemini', 'Grok', 'ElevenLabs'];
 const REPORTS = [
-  { id: 'geohide-eu', working: 4, total: 5, median: 0.44, services: names.map((n) => svc(n, n === 'Gemini' ? 'unstable' : 'works', '6/7', '7/7')), refusals: ['Gemini · 37.221.93.141: перенаправление на www.google.com/sorry'], dead: [] },
-  { id: 'comss', working: 3, total: 5, median: 0.47, services: names.map((n) => svc(n, n === 'ChatGPT' || n === 'Claude' || n === 'Grok' ? 'works' : 'unstable', '4/4', '3/4')), refusals: [], dead: ['34.8.184.191'] },
-  { id: 'geohide', working: 0, total: 5, median: 0.51, services: names.map((n) => svc(n, 'unstable', '1/4', '1/4')), refusals: [], dead: ['159.194.200.33', '193.233.112.67'] },
-  { id: 'geohide-us', working: 0, total: 5, median: 1.3, services: names.map((n) => svc(n, 'down', '0/4', '0/4')), refusals: [], dead: ['107.175.76.134', '192.3.233.253'] },
+ { id:'geohide-eu', working:4, total:5, median:0.44, services:names.map(n=>svc(n,n==='Gemini'?'unstable':'works','6/7','7/7')), refusals:['Gemini · 37.221.93.141: перенаправление'], dead:[] },
+ { id:'comss', working:3, total:5, median:0.9, services:names.map(n=>svc(n,n==='Grok'?'down':'works','4/4','3/4')), refusals:[], dead:['34.8.184.191'] },
+ { id:'geohide', working:0, total:5, median:null, services:names.map(n=>svc(n,'blocked','1/4','1/4')), refusals:[], dead:['159.194.200.33'] },
+ { id:'geohide-us', working:0, total:5, median:1.3, services:names.map(n=>svc(n,'down','0/4','0/4')), refusals:[], dead:[] },
 ];
-async function probe(enable) {
-  M.probe = { running: true, phase: 'addresses', done: 0, total: 0, reports: [], best: '' };
-  await wait(1200); M.probe.phase = 'requests'; M.probe.total = 120;
-  for (let i = 0; i < 120; i += 6) { M.probe.done = i; await wait(150); }
-  M.probe.reports = REPORTS; M.probe.best = 'geohide-eu';
-  if (enable) { M.probe.phase = 'enabling'; await wait(800); M.provider = 'geohide-eu'; M.ai = true; }
-  M.probe.running = false;
-}
-const toggle = (k, name, ms) => async (on) => { M.busy[name] = true; await wait(ms); M[k] = on; delete M.busy[name]; return { ok: true }; };
+if (has('probed')) { M.probe.reports = REPORTS; M.probe.best = 'geohide-eu'; }
+const upd = { available: has('update'), version:'0.3.1', current:'0.3.0', notes:['Подсказка на странице Telegram: если сеть его не пускает, включите «YouTube и Discord»','**Окно обновления** с этапами'], pageUrl:'x', started: has('steps')||has('fail'), stages:[{title:'Загрузка',state:'done'},{title:'Проверка подписи',state:has('fail')?'failed':'running'},{title:'Установка',state:'pending'},{title:'Перезапуск',state:'pending'}], fraction:.4, line:'Загружаю… 4 МБ из 10', failedStage:has('fail')?'Проверка подписи':'', error:has('fail')?'Подпись не совпала':'', restarting:false, show:false, notify:true, checking:false, failed:false, checked: has('nolatest')?0:Date.now()/1000, installing:'' };
+const sites = { running:false, checks: has('sites') ? [
+ { name:'YouTube', verdict:'works', result:'открывается', probes:[{name:'Страница',host:'www.youtube.com',summary:'200 · 0.4 с',answered:true},{name:'Видео',host:'rr1.googlevideo.com',summary:'200 · 0.6 с',answered:true}] },
+ { name:'Discord', verdict:'partial', result:'частично', probes:[{name:'Страница',host:'discord.com',summary:'200',answered:true},{name:'Файлы',host:'cdn.discordapp.com',summary:'нет ответа',answered:false}] } ] : [] };
 window.go = { main: { App: {
-  GetState: async () => ({
-    version: '0.1.0', serviceOk: !location.search.includes('noservice'), serviceError: 'Служба Nimb не запущена. Переустановите Nimb или запустите службу «Nimb: помощник».',
-    ai: { on: M.ai, provider: M.provider, busy: !!M.busy.ai, warnings: [] }, telegram: { on: M.tg, busy: !!M.busy.telegram, port: 1443, link: 'tg://proxy?server=127.0.0.1&port=1443&secret=dd00', stats: { Total: 14, Active: 3, BytesUp: 1200000, BytesDown: 8400000 } },
-    media: { on: M.media, busy: !!M.busy.media, handshakeAgo: 3 },
-    providers: providers.map(([id, name]) => ({ id, name })),
-    probe: M.probe, update: M.update,
-  }),
-  SetAI: toggle('ai', 'ai', 600), SetTelegram: toggle('tg', 'telegram', 300), SetMedia: toggle('media', 'media', 1500),
-  SetAll: async (on) => { await Promise.all([toggle('ai', 'ai', 600)(on), toggle('tg', 'telegram', 300)(on), toggle('media', 'media', 1500)(on)]); return { ok: true }; },
-  SetProvider: async (id) => { M.provider = id; return { ok: true }; },
-  // the check of the providers: progress, then the same numbers as the real check showed once
-  SetNotify: async (on) => { M.update.notify = on; }, SendTestNotification: async () => ({ ok: true }),
-  InstallUpdate: async () => { M.update = { available: true, version: '0.2.0', installing: 'Загрузка…' }; await wait(1500); M.update.installing = 'Установка…'; return { ok: true }; },
-  ProbeStart: async () => { probe(false); return { ok: true }; }, EnableBest: async () => { probe(true); return { ok: true }; },
-  Onboarded: async () => localStorage.getItem('onb') === '1', FinishOnboarding: async () => localStorage.setItem('onb', '1'),
-  RestartOnboarding: async () => localStorage.removeItem('onb'), OpenTerms: () => {},
-  GetAutostart: async () => localStorage.getItem('auto') === '1', SetAutostart: async (on) => { localStorage.setItem('auto', on ? '1' : '0'); return { ok: true }; },
-  ReportPrepare: async () => { await wait(600); return { id: 'AB12CD', facts: '— Программа —\nNimb для Windows 0.1.0\n\n— Сервисы —\nНейросети: выключено' }; },
-  ReportPreview: async (d, c) => `Отчёт № AB12CD\n\nЧто случилось:\n${d || '(не описано)'}${c ? '\n\nКак ответить: ' + c : ''}\n\n— Программа —\nNimb для Windows 0.1.0`,
-  ReportSend: async () => { await wait(800); return location.search.includes('fail') ? { ok: false, error: 'Не удалось соединиться с сервером отчётов.' } : { ok: true }; },
-  ReportCopy: async () => ({ ok: true }), ReportWrite: async () => ({ ok: true }),
-  OpenTelegram: async () => ({ ok: true }), CopyLink: async () => ({ ok: true }), OpenChannel: () => {}, Uninstall: async () => ({ ok: true }), Quit: () => {}, Log: () => {},
-  InitialPage: async () => new URLSearchParams(location.search).get('page') || 'home',
-} } };
-</script>
-<script type="module" src="js/main.js"></script>
-</body></html>
+ GetState: async () => ({ version:'0.3.0', modified: has('mod'), serviceOk: !has('noservice'), serviceError:'Служба Nimb не запущена. Переустановите Nimb.',
+  ai:{ on:M.ai, provider:M.provider, busy:!!M.busy.ai, warnings: has('warn')?['DNS-провайдер не отвечает на этом подключении.']:[], error: has('err')?'Не удалось применить DNS':'' },
+  telegram:{ on:M.tg, busy:!!M.busy.telegram, port:1443, link:'tg://x', stats:{}, wrongKeyRecently:has('wrongkey'), tunnelAdvice: has('advice')?'Похоже, сеть не пускает Telegram. Включите «YouTube и Discord».':'', error:'' },
+  media:{ on:M.media, busy:!!M.busy.media, handshakeAgo:3, error:'' },
+  providers:[['geohide-eu','GeoHide (EU)'],['comss','Comss.one'],['geohide','GeoHide (RU)'],['geohide-us','GeoHide (US)'],['xbox','XBOX DNS'],['malw','malw.link']].map(([id,name])=>({id,name})),
+  probe:M.probe, update:upd, sites, help:{ on:has('help'), count:3, last:Math.floor(Date.now()/1000)-3600, paused:'', pausedWords:'' } }),
+ SetAI: async (on)=>{M.busy.ai=1;await wait(500);M.ai=on;delete M.busy.ai;return{ok:true}}, SetTelegram: async (on)=>{M.tg=on;return{ok:true}}, SetMedia: async (on)=>{M.busy.media=1;await wait(900);M.media=on;delete M.busy.media;return{ok:true}},
+ SetAll: async (on)=>{M.ai=M.tg=M.media=on;return{ok:true}}, SetProvider: async(id)=>{M.provider=id;return{ok:true}},
+ ProbeStart: async()=>{M.probe.reports=REPORTS;M.probe.best='geohide-eu';return{ok:true}}, EnableBest: async()=>{return{ok:true}},
+ Onboarded: async()=>!has('onb'), FinishOnboarding: async()=>{}, RestartOnboarding: async()=>{}, OpenTerms(){},
+ GetAutostart: async()=>true, SetAutostart: async()=>({ok:true}), SetNotify: async()=>{}, SendTestNotification: async()=>({ok:true}), SetHelpTesting: async()=>({ok:true}), HelpTestingPreview: async()=>'Отчёт № AB12CD\n— Программа —\nNimb 0.3.0',
+ ReportPrepare: async()=>({id:'AB12CD'}), ReportPreview: async()=>'Отчёт № AB12CD\n\n— Программа —\nNimb для Windows 0.3.0', ReportSend: async()=>({ok:true}), ReportCopy: async()=>({ok:true}), ReportWrite: async()=>({ok:true}),
+ OpenTelegram: async()=>({ok:true}), CopyLink: async()=>({ok:true}), OpenChannel(){}, Uninstall: async()=>({ok:true}), Quit(){}, Log(){}, CheckSites: async()=>({ok:true}), InstallUpdate: async()=>({ok:true}), OpenUpdatePage(){}, AckUpdateShow(){}, CopyUpdateDetails: async()=>({ok:true}), OpenDeveloperChat(){},
+ InitialPage: async()=>q.get('page')||'home' } } };
+</script><script type="module" src="js/main.js"></script></body></html>

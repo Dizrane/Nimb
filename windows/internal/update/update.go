@@ -8,7 +8,9 @@ package update
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -37,6 +39,7 @@ type Release struct {
 	AssetName string
 	URL       string // of the installer
 	SHA256    string // from the description of the release; empty when it is not there
+	SigURL    string // of the signature (`<installer name>.sig`, an asset next to the installer); empty when the release has none
 	PageURL   string
 	Notes     string // the description of the release (empty when it came from the page of the release)
 }
@@ -92,7 +95,13 @@ func newest(list []ghRelease, arch string) (Release, bool) {
 		if asset == nil || (found && !IsNewer(version, best.Version)) {
 			continue
 		}
-		best = Release{Version: version, AssetName: name, URL: asset.URL, SHA256: SHA256For(name, r.Body), PageURL: r.PageURL, Notes: r.Body}
+		var sig string
+		for _, a := range r.Assets {
+			if a.Name == name+".sig" {
+				sig = a.URL
+			}
+		}
+		best = Release{Version: version, AssetName: name, URL: asset.URL, SigURL: sig, SHA256: SHA256For(name, r.Body), PageURL: r.PageURL, Notes: r.Body}
 		found = true
 	}
 	return best, found
@@ -178,6 +187,8 @@ func IsDue(lastTry, now time.Time, interval time.Duration) bool {
 type Client struct {
 	Arch string // "amd64" or "arm64"
 	HTTP *http.Client
+	// Keys are the public keys (Ed25519, base64) that an installer must be signed with; see TrustedKeys.
+	Keys []string
 	// base is the place of GitHub; empty means the real one. See Override.
 	base string
 }
@@ -199,7 +210,12 @@ func Override(env string) string {
 
 // NewClient is a client for this computer's architecture.
 func NewClient(arch string) *Client {
-	return &Client{Arch: arch, HTTP: &http.Client{Timeout: 15 * time.Second}, base: Override(os.Getenv("NIMB_UPDATE_URL"))}
+	c := &Client{Arch: arch, HTTP: &http.Client{Timeout: 15 * time.Second}, base: Override(os.Getenv("NIMB_UPDATE_URL")), Keys: TrustedKeys}
+	// A stand-in for GitHub on this computer (see Override) is signed with a key of its own: it is told the same way, and only then.
+	if extra := strings.TrimSpace(os.Getenv("NIMB_UPDATE_KEY")); c.base != "" && extra != "" {
+		c.Keys = append(append([]string(nil), TrustedKeys...), extra)
+	}
+	return c
 }
 
 func (c *Client) api() string {
@@ -297,7 +313,11 @@ func (c *Client) latestFromPage(ctx context.Context) (Release, error) {
 	if !strings.Contains(string(html), name) {
 		return Release{}, errors.New("На странице релиза нет файла " + name + ".")
 	}
-	return Release{Version: version, AssetName: name, URL: c.web() + "/" + Repository + "/releases/download/" + tag + "/" + name,
+	var sig string
+	if strings.Contains(string(html), name+".sig") {
+		sig = c.web() + "/" + Repository + "/releases/download/" + tag + "/" + name + ".sig"
+	}
+	return Release{Version: version, AssetName: name, URL: c.web() + "/" + Repository + "/releases/download/" + tag + "/" + name, SigURL: sig,
 		SHA256: SHA256For(name, string(html)), PageURL: page}, nil
 }
 
@@ -334,7 +354,7 @@ func (s Stage) Title() string {
 	case StageDownload:
 		return "Загрузка"
 	case StageCheck:
-		return "Проверка файла"
+		return "Проверка подписи"
 	}
 	return "Установка"
 }
@@ -401,8 +421,8 @@ func WhatsNew(notes string) []string {
 
 var reNumbered = regexp.MustCompile(`^\d+\.\s+`)
 
-// Download brings the installer into dir and checks it against the hash of the release. Without a hash nothing is downloaded: the
-// installer has no signature yet, so the hash is the only check. The file is deleted if the hash does not match.
+// Download brings the installer into dir and checks it: the signature first (the `.sig` asset next to it), then the hash of the release. Without
+// a hash nothing is downloaded. The file is deleted if either check fails.
 func (c *Client) Download(ctx context.Context, rel Release, dir string, status func(string)) (path string, err error) {
 	return c.Fetch(ctx, rel, dir, Hooks{Stage: func(s Stage, state string) {
 		if state != "running" {
@@ -479,10 +499,51 @@ func (c *Client) Fetch(ctx context.Context, rel Release, dir string, h Hooks) (p
 	}
 	h.stage(StageDownload, "done")
 	h.stage(StageCheck, "running")
+	// The signature first: the hash in the notes lives in the same place as the installer (whoever can change the one can change the other),
+	// and the installer is started with the rights of an administrator. The hash stays as the second check.
+	if rel.SigURL == "" {
+		os.Remove(path)
+		return "", stageErr(StageCheck, "У этого релиза нет подписи, установка отменена. Скачайте обновление вручную со страницы релиза.")
+	}
+	if !c.allowedURL(rel.SigURL) {
+		os.Remove(path)
+		return "", stageErr(StageCheck, "Адрес подписи не с GitHub, установка отменена.")
+	}
+	text, status, err := c.get(ctx, rel.SigURL, "")
+	if err != nil || status != 200 {
+		os.Remove(path)
+		return "", stageErr(StageCheck, "Не удалось скачать подпись обновления, установка отменена.")
+	}
+	installer, err := os.ReadFile(path)
+	if err != nil || !IsSigned(installer, string(text), c.Keys) {
+		os.Remove(path)
+		return "", stageErr(StageCheck, "Подпись не подошла: это обновление сделано не автором Nimb. Установка отменена.")
+	}
 	if hex.EncodeToString(sum.Sum(nil)) != strings.ToLower(rel.SHA256) {
 		os.Remove(path)
 		return "", stageErr(StageCheck, "SHA-256 скачанного файла не совпадает с указанным в релизе. Установка отменена.")
 	}
 	h.stage(StageCheck, "done")
 	return path, nil
+}
+
+// TrustedKeys are the public keys that the installers of updates are signed with (Ed25519, 32 bytes, base64): the same as
+// Updater.trustedKeys of the Mac (a test compares them). The private one stays with the maker of the releases, off the net
+// (scripts/sign_release.swift signs a file and writes `<file>.sig`). More than one is allowed, so that a key can be replaced: the program
+// with the new key goes out first.
+var TrustedKeys = []string{"A8Hv9MEsL+jtyYnniwH1PART5CiHUZqgJofpqRz/ttE="}
+
+// IsSigned says whether signature (the text of the `.sig` file: base64) is a signature of data made by one of the keys.
+func IsSigned(data []byte, signature string, keys []string) bool {
+	sig, err := base64.StdEncoding.DecodeString(strings.TrimSpace(signature))
+	if err != nil || len(sig) != ed25519.SignatureSize {
+		return false
+	}
+	for _, k := range keys {
+		raw, err := base64.StdEncoding.DecodeString(k)
+		if err == nil && len(raw) == ed25519.PublicKeySize && ed25519.Verify(raw, data, sig) {
+			return true
+		}
+	}
+	return false
 }

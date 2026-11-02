@@ -84,6 +84,7 @@ func (a *App) startup(ctx context.Context) {
 	var upgradedFrom string
 	a.previousEndedBadly, upgradedFrom = beginSession(Version, previousLastLine)
 	a.watchSessionEnd()
+	balloonClick = a.balloonClicked
 	hideTitleBarIcon()
 	startPulse()
 	logLine(fmt.Sprintf("запуск Nimb %s (процесс %d)", Version, os.Getpid()))

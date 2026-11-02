@@ -1,7 +1,8 @@
 #!/bin/bash
 # Builds the installers of Nimb for Windows on a Mac: ./build.sh [arm64] [amd64]  (both by default).
 # Needs: go, the wails CLI (go install github.com/wailsapp/wails/v2/cmd/wails@v2.17.0), makensis (brew install nsis).
-# The result is in build/windows/ at the root of the repository (it is not stored in git): Nimb-Setup-<version>-<arch>.exe and SHA256.txt.
+# The result is in build/windows/ at the root of the repository (it is not stored in git): Nimb-Setup-<version>-<arch>.exe, its .sig (when the
+# signing key is there) and SHA256.txt.
 set -euo pipefail
 export LC_ALL=en_US.UTF-8                     # makensis of Homebrew dies in the plain C locale (std::bad_alloc)
 cd "$(dirname "$0")/.."                      # windows/
@@ -43,4 +44,13 @@ for ARCH in "${ARCHES[@]}"; do
   makensis -V2 -DARCH="$ARCH" -DVERSION="$VERSION" -DSRC="$STAGE" -DICON="$PWD/installer/nimb.ico" \
     -DOUTFILE="$OUT/Nimb-Setup-$VERSION-$ARCH.exe" installer/nimb.nsi
 done
+# The updater of Nimb installs only what its maker signed (Ed25519, the same key as the Mac: Updater.trustedKeys, update/update.go TrustedKeys):
+# <installer>.sig goes into the release next to the installer. The private key is outside the repository; without it no update can be signed,
+# and a release without .sig is refused by the updater of 0.3.1 and later (the older ones check the hash only).
+SIGNING_KEY_FILE="${RELEASE_SIGNING_KEY_FILE:-$HOME/.config/nimb/release-signing.key}"
+if [ -f "$SIGNING_KEY_FILE" ]; then
+  for EXE in "$OUT"/Nimb-Setup-"$VERSION"-*.exe; do swift "$ROOT/scripts/sign_release.swift" sign "$EXE" >/dev/null; done
+else
+  echo "Note: no $SIGNING_KEY_FILE: the installers are not signed, and the updater of 0.3.1 and later refuses an update without a signature." >&2
+fi
 (cd "$OUT" && shasum -a 256 Nimb-Setup-"$VERSION"-*.exe | tee SHA256.txt)

@@ -11,6 +11,15 @@ const NOTICE_SIGN = {
   warn: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.1" aria-hidden="true"><path d="M8 1.8l6.4 11.2H1.6z" stroke-linejoin="round"/><path d="M8 6.4v3.2M8 11.2v.1" stroke-linecap="round"/></svg>',
 };
 const notice = (text, tone = 'bad') => (text ? `<div class="card ${tone}" role="alert"><div class="note-in"><span class="note-sign ${tone}">${NOTICE_SIGN[tone] || NOTICE_SIGN.bad}</span><div class="note-text">${esc(text)}</div></div></div>` : '');
+// Several notices of one page are one card with a line for each (the card takes the colour of the worst), so that a warning and an error
+// together still fit the smallest window.
+const noticeLine = (text, tone) => `<div class="note-in"><span class="note-sign ${tone}">${NOTICE_SIGN[tone] || NOTICE_SIGN.bad}</span><div class="note-text">${esc(text)}</div></div>`;
+const notices = (list) => {
+  const shown = list.filter(([text]) => text);
+  if (shown.length < 2) return shown.map(([text, tone]) => notice(text, tone)).join('');
+  const tone = shown.some(([, t]) => t === 'bad') ? 'bad' : 'warn';
+  return `<div class="card ${tone} multi" role="alert">${shown.map(([text, t]) => noticeLine(text, t)).join('')}</div>`;
+};
 
 /** Lets a page keep its own html and skip the work when nothing it shows has changed. */
 function same(page, key, value) { const j = JSON.stringify(value); if (page[key] === j) return true; page[key] = j; return false; }
@@ -120,9 +129,9 @@ export class AIPage {
       const pills = r ? `<div class="pills">${r.services.map(pill).join('')}</div>` : '';
       return `<div class="provc ${sel ? 'sel' : ''} ${locked ? 'dim' : ''} ${two ? 'c' : ''} ${r ? 'has' : ''}">${row}${two ? '' : info}${second}${pills}</div>`;
     }).join('');
-    const warnings = (a.warnings || []).map((w) => notice(w, 'warn')).join('');
+    const warnings = notices([...(a.warnings || []).map((w) => [w, 'warn']), [a.error, 'bad']]);
     setHTML(this.right, `<div class="prov-head"><div class="label">DNS-провайдеры</div>${button}</div>${banner}
-      <div class="grid ${two ? 'two-up' : ''}" role="radiogroup" aria-label="DNS-провайдеры">${cards}</div>${warnings}${notice(a.error)}`);
+      <div class="grid ${two ? 'two-up' : ''}" role="radiogroup" aria-label="DNS-провайдеры">${cards}</div>${warnings}`);
   }
   destroy() { this.hero.destroy(); }
 }

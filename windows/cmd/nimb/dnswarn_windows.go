@@ -74,7 +74,7 @@ func (a *App) askReach(p dnsx.Provider) {
 	}
 	// Once for as long as it lasts, and again when it comes back after a time of working (as on the Mac).
 	if tell && !a.settings.get().UpdateNotifyOff {
-		balloon(notice.DNSTag, 3, "В этой сети DNS Nimb не отвечает", "Адреса могут не открываться. Откройте Nimb и выключите «Нейросети».")
+		balloon(notice.DNSTag, balloonDNS, "В этой сети DNS Nimb не отвечает", "Адреса могут не открываться. Откройте Nimb и выключите «Нейросети».")
 	}
 }
 

@@ -2,7 +2,9 @@ package update
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -11,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -151,10 +154,17 @@ type fake struct {
 	apiStatus int
 	feed      bool
 	asked     map[string]int
+	// The signature: the fake signs the bytes of `signed` (the installer it started with) with a key of its own, and leaves the signature out
+	// when noSig is set.
+	pub    ed25519.PublicKey
+	priv   ed25519.PrivateKey
+	signed []byte
+	noSig  bool
 }
 
 func newFake(t *testing.T, installer []byte, apiStatus int) *fake {
-	f := &fake{installer: installer, apiStatus: apiStatus, asked: map[string]int{}}
+	f := &fake{installer: installer, apiStatus: apiStatus, asked: map[string]int{}, signed: installer}
+	f.pub, f.priv, _ = ed25519.GenerateKey(nil)
 	sum := sha256.Sum256(installer)
 	body := hex.EncodeToString(sum[:]) + "  Nimb-Setup-0.1.5-amd64.exe\n"
 	mux := http.NewServeMux()
@@ -166,10 +176,13 @@ func newFake(t *testing.T, installer []byte, apiStatus int) *fake {
 			w.WriteHeader(f.apiStatus)
 			return
 		}
+		assets := []ghAsset{{Name: "Nimb-Setup-0.1.5-amd64.exe", URL: f.srv.URL + "/download/Nimb-Setup-0.1.5-amd64.exe"}}
+		if !f.noSig {
+			assets = append(assets, ghAsset{Name: "Nimb-Setup-0.1.5-amd64.exe.sig", URL: f.srv.URL + "/download/Nimb-Setup-0.1.5-amd64.exe.sig"})
+		}
 		list := []ghRelease{
 			rel("v0.9.10", "", "Nimb-0.9.10.zip"),
-			{Tag: "windows-v0.1.5", Body: body, PageURL: f.srv.URL + "/page", Prerelease: true,
-				Assets: []ghAsset{{Name: "Nimb-Setup-0.1.5-amd64.exe", URL: f.srv.URL + "/download/Nimb-Setup-0.1.5-amd64.exe"}}},
+			{Tag: "windows-v0.1.5", Body: body, PageURL: f.srv.URL + "/page", Prerelease: true, Assets: assets},
 		}
 		json.NewEncoder(w).Encode(list)
 	})
@@ -179,16 +192,26 @@ func newFake(t *testing.T, installer []byte, apiStatus int) *fake {
 	})
 	mux.HandleFunc("/"+Repository+"/releases/tag/windows-v0.1.5", func(w http.ResponseWriter, r *http.Request) {
 		f.asked["page"]++
-		fmt.Fprintf(w, "<html><a href=\"/x/Nimb-Setup-0.1.5-amd64.exe\">Nimb-Setup-0.1.5-amd64.exe</a><p>%s</p></html>", body)
+		sig := ""
+		if !f.noSig {
+			sig = `<a href="/x/Nimb-Setup-0.1.5-amd64.exe.sig">Nimb-Setup-0.1.5-amd64.exe.sig</a>`
+		}
+		fmt.Fprintf(w, "<html><a href=\"/x/Nimb-Setup-0.1.5-amd64.exe\">Nimb-Setup-0.1.5-amd64.exe</a>%s<p>%s</p></html>", sig, body)
 	})
 	mux.HandleFunc("/"+Repository+"/releases/download/windows-v0.1.5/Nimb-Setup-0.1.5-amd64.exe", func(w http.ResponseWriter, r *http.Request) { w.Write(f.installer) })
 	mux.HandleFunc("/download/Nimb-Setup-0.1.5-amd64.exe", func(w http.ResponseWriter, r *http.Request) { w.Write(f.installer) })
+	signature := func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, base64.StdEncoding.EncodeToString(ed25519.Sign(f.priv, f.signed)))
+	}
+	mux.HandleFunc("/download/Nimb-Setup-0.1.5-amd64.exe.sig", signature)
+	mux.HandleFunc("/"+Repository+"/releases/download/windows-v0.1.5/Nimb-Setup-0.1.5-amd64.exe.sig", signature)
 	return f
 }
 
 func (f *fake) client() *Client {
 	c := NewClient("amd64")
 	c.base = f.srv.URL
+	c.Keys = []string{base64.StdEncoding.EncodeToString(f.pub)}
 	return c
 }
 
@@ -246,6 +269,7 @@ func TestDownloadChecksTheHash(t *testing.T) {
 	dir := t.TempDir()
 	// a file that is not the one of the release
 	f.installer = []byte("something else")
+	f.signed = f.installer // signed by the maker, but not the file of the release: only the hash is wrong
 	var said []string
 	if _, err := c.Download(context.Background(), r, dir, func(s string) { said = append(said, s) }); err == nil || !strings.Contains(err.Error(), "SHA-256") {
 		t.Fatalf("err = %v", err)
@@ -258,6 +282,7 @@ func TestDownloadChecksTheHash(t *testing.T) {
 	}
 	// the right one
 	f.installer = []byte("the installer")
+	f.signed = f.installer
 	path, err := c.Download(context.Background(), r, dir, func(string) {})
 	if err != nil || filepath.Base(path) != "Nimb-Setup-0.1.5-amd64.exe" {
 		t.Fatalf("%q %v", path, err)
@@ -360,7 +385,7 @@ func TestTheStagesAddUpToOneAndAFailureNamesItsStage(t *testing.T) {
 	if !errors.As(err, &se) || se.Stage != StageCheck || !se.Stage.IsOurs() {
 		t.Fatalf("err = %#v", err)
 	}
-	if got := strings.Join(seen, ","); got != "Подготовка:running,Подготовка:done,Загрузка:running,Загрузка:done,Проверка файла:running" {
+	if got := strings.Join(seen, ","); got != "Подготовка:running,Подготовка:done,Загрузка:running,Загрузка:done,Проверка подписи:running" {
 		t.Errorf("stages: %s", got)
 	}
 	if bytes != int64(len("something else")) {
@@ -370,5 +395,100 @@ func TestTheStagesAddUpToOneAndAFailureNamesItsStage(t *testing.T) {
 	noHash.SHA256 = ""
 	if _, err := c.Fetch(context.Background(), noHash, t.TempDir(), Hooks{}); !errors.As(err, &se) || se.Stage != StagePrepare {
 		t.Errorf("no hash is a failure of the preparation: %v", err)
+	}
+}
+
+// RFC 8032, the second test of Ed25519: the same signature that CryptoKit of the Mac makes and checks.
+func TestASignatureOfEd25519IsTheOneOfTheMac(t *testing.T) {
+	public, _ := hex.DecodeString("3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c")
+	signature, _ := hex.DecodeString("92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00")
+	keys := []string{base64.StdEncoding.EncodeToString(public)}
+	text := base64.StdEncoding.EncodeToString(signature) + "\n" // a .sig file ends with a line break at most
+	if !IsSigned([]byte{0x72}, text, keys) {
+		t.Fatal("the signature of the standard does not hold")
+	}
+	if IsSigned([]byte{0x73}, text, keys) {
+		t.Error("another file is not signed by it")
+	}
+	bad := append([]byte(nil), signature...)
+	bad[0] ^= 1
+	if IsSigned([]byte{0x72}, base64.StdEncoding.EncodeToString(bad), keys) {
+		t.Error("a signature that was changed is not one")
+	}
+	if IsSigned([]byte{0x72}, text, nil) || IsSigned([]byte{0x72}, "not base64!", keys) || IsSigned([]byte{0x72}, "", keys) || IsSigned([]byte{0x72}, text, []string{"AAAA", "x"}) {
+		t.Error("no key, no text, a key of the wrong size: nothing is signed")
+	}
+}
+
+func TestAnInstallerNeedsASignatureOfItsMaker(t *testing.T) {
+	f := newFake(t, []byte("the installer"), 200)
+	c := f.client()
+	r, err := c.Latest(context.Background())
+	if err != nil || r.SigURL == "" {
+		t.Fatalf("%+v %v", r, err)
+	}
+	if path, err := c.Download(context.Background(), r, t.TempDir(), func(string) {}); err != nil || path == "" {
+		t.Fatalf("signed and right: %v", err)
+	}
+	var se *StageError
+	// a file that was changed after it was signed (the hash of the notes is changed with it by whoever can change the release)
+	f.installer = []byte("another installer")
+	other := sha256.Sum256(f.installer)
+	r.SHA256 = hex.EncodeToString(other[:])
+	dir := t.TempDir()
+	if _, err := c.Download(context.Background(), r, dir, func(string) {}); !errors.As(err, &se) || se.Stage != StageCheck || !strings.Contains(err.Error(), "Подпись не подошла") {
+		t.Fatalf("a changed file: %v", err)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Errorf("the file that failed stays: %v", entries)
+	}
+	// a signature that another key made
+	f.installer = []byte("the installer")
+	otherPub, _, _ := ed25519.GenerateKey(nil)
+	c.Keys = []string{base64.StdEncoding.EncodeToString(otherPub)}
+	r.SHA256 = hex.EncodeToString(func() []byte { h := sha256.Sum256(f.installer); return h[:] }())
+	if _, err := c.Download(context.Background(), r, t.TempDir(), func(string) {}); err == nil || !strings.Contains(err.Error(), "Подпись не подошла") {
+		t.Errorf("a signature of another key: %v", err)
+	}
+	// a release that has no signature (the page of the release and the API)
+	for _, status := range []int{200, 403} {
+		g := newFake(t, []byte("the installer"), status)
+		g.noSig = true
+		gc := g.client()
+		gr, err := gc.Latest(context.Background())
+		if err != nil || gr.SigURL != "" {
+			t.Fatalf("status %d: %+v %v", status, gr, err)
+		}
+		if _, err := gc.Download(context.Background(), gr, t.TempDir(), func(string) {}); !errors.As(err, &se) || se.Stage != StageCheck || !strings.Contains(err.Error(), "нет подписи") {
+			t.Errorf("status %d, no signature: %v", status, err)
+		}
+	}
+	// the page of the release names the signature, the API refused
+	h := newFake(t, []byte("the installer"), 403)
+	hr, err := h.client().Latest(context.Background())
+	if err != nil || !strings.HasSuffix(hr.SigURL, "/Nimb-Setup-0.1.5-amd64.exe.sig") {
+		t.Errorf("the signature from the page: %+v %v", hr, err)
+	}
+	if _, err := h.client().Download(context.Background(), hr, t.TempDir(), func(string) {}); err != nil {
+		t.Errorf("from the pages: %v", err)
+	}
+}
+
+// The keys that updates are signed with are the ones of the Mac app: a different list in the two apps would be a quiet mistake.
+func TestTheTrustedKeysAreTheOnesOfTheMacApp(t *testing.T) {
+	raw, err := os.ReadFile("../../../Sources/Nimb/Updater.swift")
+	if err != nil {
+		t.Skip("the repository root is not here")
+	}
+	m := regexp.MustCompile(`static let trustedKeys = \[([^\]]*)\]`).FindStringSubmatch(string(raw))
+	if m == nil {
+		t.Fatal("no trustedKeys in the Mac app")
+	}
+	var mac []string
+	for _, k := range regexp.MustCompile(`"([^"]+)"`).FindAllStringSubmatch(m[1], -1) {
+		mac = append(mac, k[1])
+	}
+	if strings.Join(mac, ",") != strings.Join(TrustedKeys, ",") {
+		t.Errorf("the Mac trusts %v, here %v", mac, TrustedKeys)
 	}
 }
