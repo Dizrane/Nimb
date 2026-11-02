@@ -180,7 +180,8 @@ textarea:focus,input[type=text]:focus{outline:none;border-color:rgba(255,255,255
    channel, its words at the right edge with 20 after them. An installation that did not work has its words under the bar. */
 .foot{flex:none;background:rgba(0,0,0,.28);border-top:1px solid rgba(255,255,255,.08);font-size:12px;color:var(--t2)}
 .foot .bar{height:42px;display:flex;align-items:center;justify-content:space-between;padding-left:20px}
-.foot .verline{display:flex;align-items:center;gap:10px;min-width:0}
+.foot .verline{display:flex;align-items:center;gap:6px;min-width:0}
+.foot .verline>:empty{display:none}
 .foot #channel{width:280px;height:100%;flex:none;display:flex;align-items:center;justify-content:flex-end;gap:7px;padding-right:20px;font-weight:500;color:var(--t2)}
 .foot #channel:hover{color:#fff}.foot #channel:active{opacity:.88}
 .foot .upd{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:7px;font-size:12px;font-weight:600;color:rgba(0,0,0,.85);background:rgba(255,255,255,.92)}
