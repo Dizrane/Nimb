@@ -62,6 +62,7 @@ make_bundle() {
     <key>CFBundleVersion</key><string>${VERSION}</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>NSHighResolutionCapable</key><true/>
+    <key>NSFocusStatusUsageDescription</key><string>Nimb не будет играть звук уведомления, пока у вас включён режим «Не беспокоить» или другой режим фокусирования.</string>
 </dict>
 </plist>
 PLIST

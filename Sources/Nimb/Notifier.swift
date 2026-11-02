@@ -1,4 +1,5 @@
 import AppKit
+import Intents
 import SwiftUI
 import UserNotifications
 
@@ -89,7 +90,8 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
     private func post(_ content: UNNotificationContent, identifier: String, failure: String) {
         guard let center else { return }
         center.removeDeliveredNotifications(withIdentifiers: [identifier])
-        if soundSetting != .disabled && Self.showsBanner(identifier: identifier, appIsActive: NSApp.isActive) { playSound() }
+        FocusStatus.askIfNeeded()
+        if Self.playsSound(soundSetting: soundSetting, bannerShown: Self.showsBanner(identifier: identifier, appIsActive: NSApp.isActive), focus: FocusStatus.current) { playSound() }
         center.add(UNNotificationRequest(identifier: identifier, content: content, trigger: nil)) { error in
             if let error { AppLog.shared.add("notifications", "\(failure): \(error.localizedDescription)") }
         }
@@ -147,6 +149,13 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
         identifier == testIdentifier || !appIsActive
     }
 
+    /// Nimb plays its own sound, which the system does not hold back, so it holds it back itself: no sound while a Focus («Не беспокоить»
+    /// and the others) is on, as the banner is not shown then either. When the person has not let Nimb see the Focus (`unknown`), the sound
+    /// plays as before.
+    nonisolated static func playsSound(soundSetting: UNNotificationSetting, bannerShown: Bool, focus: FocusStatus.State) -> Bool {
+        soundSetting != .disabled && bannerShown && focus != .on
+    }
+
     // MARK: UNUserNotificationCenterDelegate
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
@@ -164,6 +173,25 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
                 AppDelegate.showMainWindow()
             }
         }
+    }
+}
+
+/// Whether a Focus mode («Не беспокоить» and the others) is on. macOS tells only those programs that the person has allowed to see it
+/// (a question the system asks once); until then the state is unknown.
+enum FocusStatus {
+    enum State { case on, off, unknown }
+
+    static var current: State {
+        let center = INFocusStatusCenter.default
+        guard center.authorizationStatus == .authorized, let focused = center.focusStatus.isFocused else { return .unknown }
+        return focused ? .on : .off
+    }
+
+    /// Asks the system once, when a notification is about to be shown: the person knows what Nimb is doing then.
+    static func askIfNeeded() {
+        let center = INFocusStatusCenter.default
+        guard center.authorizationStatus == .notDetermined else { return }
+        center.requestAuthorization { _ in }
     }
 }
 
