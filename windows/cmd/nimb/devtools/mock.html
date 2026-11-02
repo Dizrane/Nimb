@@ -30,7 +30,7 @@ window.go = { main: { App: {
   telegram:{ on:M.tg, busy:!!M.busy.telegram, port:1443, link:'tg://x', stats:{}, wrongKeyRecently:has('wrongkey'), tunnelAdvice: has('advice')?'Похоже, сеть не пускает Telegram. Включите «YouTube и Discord».':'', error:'' },
   media:{ on:M.media, busy:!!M.busy.media, handshakeAgo:3, error:'' },
   providers:[['comss','Comss.one'],['geohide-eu','GeoHide (EU)'],['geohide','GeoHide (RU)'],['geohide-us','GeoHide (US)'],['magicdns','MagicDNS'],['malwlink','malw.link']].map(([id,name])=>({id,name})),
-  background:M.bg, probe:M.probe, update:upd, sites, help:{ on:has('help'), count:3, last:Math.floor(Date.now()/1000)-3600, paused:'', pausedWords:'' } }),
+  background:M.bg, probe:M.probe, update:upd, sites, help:{ on:has('help') && !has('mod'), count:3, last:Math.floor(Date.now()/1000)-3600, paused: has('mod') ? 'Тестирование приостановлено: сборка изменена.' : '', pausedWords:'' } }),
  SetAI: async (on)=>{M.busy.ai=1;await wait(500);M.ai=on;delete M.busy.ai;return{ok:true}}, SetTelegram: async (on)=>{M.tg=on;return{ok:true}}, SetMedia: async (on)=>{M.busy.media=1;await wait(900);M.media=on;delete M.busy.media;return{ok:true}},
  SetAll: async (on)=>{M.ai=M.tg=M.media=on;return{ok:true}}, SetProvider: async(id)=>{M.provider=id;return{ok:true}},
  ProbeStart: async()=>{M.probe.reports=REPORTS;M.probe.best='geohide-eu';return{ok:true}}, EnableBest: async()=>{return{ok:true}},

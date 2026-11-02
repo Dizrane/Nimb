@@ -275,7 +275,7 @@ function helpRow(S) {
   return `<div class="hr"></div><div class="rowline"><div class="grow"><div class="nm-line"><span class="nm">Помогать тестированию</span>
     <button class="info" data-a="helpinfo" data-f="helpinfo" id="helpinfo" aria-label="Что такое «Помогать тестированию»" title="Что это и что отправляется">${INFO_CIRCLE}</button></div>
     <div class="sm">${detail}</div></div>
-    <button class="pill ${h.on ? 'on' : ''}" role="switch" aria-checked="${!!h.on}" aria-label="Помогать тестированию" data-a="helptest" data-f="helptest" id="helptest"></button></div>`;
+    <button class="pill ${h.on ? 'on' : ''}" role="switch" aria-checked="${!!h.on}" aria-label="Помогать тестированию" data-a="helptest" data-f="helptest" id="helptest" ${S.modified ? 'disabled' : ''}></button></div>`;
 }
 
 /** What the switch does, in a few short points; the report as it would go now stands in their place (HelpTestingInfo of the Mac). */

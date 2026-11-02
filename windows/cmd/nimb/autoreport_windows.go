@@ -454,7 +454,7 @@ type HelpView struct {
 func (a *App) helpView() HelpView {
 	s := a.settings.get()
 	words, short := a.reportsPaused()
-	return HelpView{On: s.HelpTesting, Count: s.HelpCount, Last: s.HelpLast, Paused: short, PausedWords: words}
+	return HelpView{On: buildcheck.HelpShownOn(s.HelpTesting, buildProblem()), Count: s.HelpCount, Last: s.HelpLast, Paused: short, PausedWords: words}
 }
 
 func newInstallID() string {
@@ -464,6 +464,11 @@ func newInstallID() string {
 // SetHelpTesting turns «Помогать тестированию» on or off. On: a new random number of the installation, and the first digest in a day. Off:
 // the number and everything that was counted are wiped, and the reports that waited are dropped.
 func (a *App) SetHelpTesting(on bool) Result {
+	// A build that is not ours sends nothing, so the switch cannot be turned on there (the page shows it off and disabled; this is for a page that is bypassed).
+	if on && !buildcheck.HelpAllowed(buildProblem()) {
+		logLine("тестирование: не включено: сборка изменена")
+		return Result{Error: buildcheck.PausedShort}
+	}
 	if on == a.settings.get().HelpTesting {
 		return Result{OK: true}
 	}

@@ -46,3 +46,22 @@ func TestOnlyTheNamesOfFilesNextToTheProgramAreLooked(t *testing.T) {
 		t.Error("words")
 	}
 }
+
+func TestTheHelpSwitchIsOffInABuildThatIsNotOurs(t *testing.T) {
+	ours, changed := Problem(true, "", t.TempDir()), Problem(false, "", t.TempDir())
+	if !HelpAllowed(ours) || HelpAllowed(changed) {
+		t.Fatalf("allowed in ours %q, in a changed build %q", ours, changed)
+	}
+	if !HelpShownOn(true, ours) || HelpShownOn(false, ours) {
+		t.Fatal("in our build the switch shows what is saved")
+	}
+	if HelpShownOn(true, changed) || HelpShownOn(false, changed) {
+		t.Fatal("a changed build shows the switch off, what was saved or not")
+	}
+	// the saved value is only read, never written: a value taken in one build is shown again when the build is ours again
+	saved := true
+	_ = HelpShownOn(saved, changed)
+	if !saved || !HelpShownOn(saved, ours) {
+		t.Fatal("the saved value must stay")
+	}
+}

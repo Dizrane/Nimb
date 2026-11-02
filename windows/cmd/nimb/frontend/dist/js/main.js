@@ -267,7 +267,7 @@ document.addEventListener('click', async (e) => {
     case 'onboard': await api().RestartOnboarding(); onb = new Onboarding(actions); render(); break;
     case 'onbnext': onb.next(); render(); break;
     case 'onbclose': case 'onbfinish': await finishOnboarding(); break;
-    case 'helptest': { S.help.on = !S.help.on; render(); await api().SetHelpTesting(S.help.on); await refresh(); break; }
+    case 'helptest': { if (S.modified) break; S.help.on = !S.help.on; render(); await api().SetHelpTesting(S.help.on); await refresh(); break; }
     case 'helpinfo': toggleHelp(t); break;
     case 'tag': openPopover(t, { width: 280, side: 'above', build: (el) => {
       el.innerHTML = S.modified

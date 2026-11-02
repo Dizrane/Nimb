@@ -48,6 +48,14 @@ func Problem(hasKey bool, files, dir string) string {
 	return ""
 }
 
+// HelpAllowed says whether «Помогать тестированию» may be turned on: only in a build of ours (a changed build sends no report, so a switch
+// that could be turned on there would do nothing). problem is what Problem said.
+func HelpAllowed(problem string) bool { return problem == "" }
+
+// HelpShownOn is what the switch shows: the saved value, but off in a build that is not ours. The saved value itself is not touched, so that
+// when the build is ours again the switch stands as it was.
+func HelpShownOn(saved bool, problem string) bool { return saved && problem == "" }
+
 // sumOf is the SHA-256 of a file, in hex.
 func sumOf(path string) (string, error) {
 	f, err := os.Open(path)
