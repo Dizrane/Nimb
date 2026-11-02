@@ -629,6 +629,10 @@ import Testing
         #expect(!ReportGate.outdatedWords(latest: nil).contains("  "))
     }
 
+    @Test func aChangedBuildSaysSoOnTheLineOfTheSwitch() {
+        #expect(ReportGate.shortWords(modified: true) == "Тестирование приостановлено: сборка изменена.")
+    }
+
     @Test func theKeyIsMixedWithTheVersionAndComesBackWithIt() {
         let key = Array("0123456789abcdef0123456789abcdef".utf8)
         let mixed = ReportKey.unmixed(key, withVersion: "0.9.23")

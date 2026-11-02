@@ -33,8 +33,11 @@ enum ReportGate {
     }
 
     /// The same in a few words, for the line of the switch.
-    static var shortWords: String? {
-        if BuildCheck.problem != nil { return "Тестирование приостановлено: сборка изменена." }
+    static var shortWords: String? { shortWords(modified: BuildCheck.problem != nil) }
+
+    /// `modified` is what `BuildCheck` found, for a caller that has asked it already (it reads the whole app).
+    static func shortWords(modified: Bool) -> String? {
+        if modified { return "Тестирование приостановлено: сборка изменена." }
         if ReportFreshness.newer != nil { return "Тестирование приостановлено: есть новая версия." }
         return nil
     }

@@ -5,15 +5,17 @@ struct HelpTestingRow: View {
     @ObservedObject private var reporter = AutoReporter.shared
     @StateObject private var info = Flag()
 
-    private var detail: String {
-        if let paused = ReportGate.shortWords { return paused }
+    private func detail(modified: Bool) -> String {
+        if let paused = ReportGate.shortWords(modified: modified) { return paused }
         guard reporter.enabled else { return "Раз в сутки сам отправит сводку, если разрешите." }
         guard let last = reporter.lastSent else { return "Включено. Пока ничего не отправлено." }
         return "Отправлено: \(reporter.sentCount), последний \(AutoReporter.lastWords(last))."
     }
 
     var body: some View {
-        HStack(spacing: Space.m) {
+        // A changed build sends nothing (see `BuildCheck`), so the switch is off and cannot be turned on: it would be an empty promise.
+        let modified = BuildCheck.problem != nil
+        return HStack(spacing: Space.m) {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text("Помогать тестированию")
@@ -29,13 +31,13 @@ struct HelpTestingRow: View {
                     .accessibilityLabel("Что такое «Помогать тестированию»")
                     .popover(isPresented: $info.value, arrowEdge: .trailing) { HelpTestingInfo() }
                 }
-                Text(detail)
+                Text(detail(modified: modified))
                     .font(Typo.small)
                     .foregroundStyle(Theme.textSecondary)
                     .lineLimit(1)
             }
             Spacer(minLength: Space.s)
-            PillSwitch(label: "Помогать тестированию", isOn: reporter.enabled) { reporter.setEnabled(!reporter.enabled) }
+            PillSwitch(label: "Помогать тестированию", isOn: reporter.enabled && !modified, disabled: modified) { reporter.setEnabled(!reporter.enabled) }
         }
     }
 }
