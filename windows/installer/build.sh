@@ -14,6 +14,7 @@ CACHE="$ROOT/build/windows-cache"
 mkdir -p "$OUT" "$CACHE"
 REPORT_KEY_FILE="${REPORT_KEY_FILE:-$HOME/.config/nimb/report.key}"
 ARCHES=("$@"); [ ${#ARCHES[@]} -eq 0 ] && ARCHES=(arm64 amd64)
+UNKEYED=""
 
 # wintun.dll of the Wintun project, taken from its own site and checked against the sum that was looked at by hand.
 WINTUN_ZIP_SHA=07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51
@@ -30,15 +31,22 @@ for ARCH in "${ARCHES[@]}"; do
   # it (a build from the sources) the program sends no reports and says «MOD». The key is made for this version and mixed with its number,
   # and goes to the linker only. The program also learns the sums of the files that the service is made of (what stands next to it on a
   # computer must be these), so that a replaced service or wintun.dll makes the build «not ours».
-  LDFLAGS="-s -w"
+  LDFLAGS="-s -w"; KEYED=no
   if [ -f "$REPORT_KEY_FILE" ]; then
     MIXED=$(go run ./tools/reportkey mixed "$REPORT_KEY_FILE" "$VERSION")
     FILES="nimb-svc.exe=$(shasum -a 256 "$STAGE/nimb-svc.exe" | cut -d' ' -f1);wintun.dll=$(shasum -a 256 "$STAGE/wintun.dll" | cut -d' ' -f1)"
-    LDFLAGS="$LDFLAGS -X main.officialReportKey=$MIXED -X main.officialFiles=$FILES"
+    LDFLAGS="$LDFLAGS -X main.officialReportKey=$MIXED -X main.officialFiles=$FILES"; KEYED=yes
   else
     echo "Note: no $REPORT_KEY_FILE: this build is not an official one and sends no reports." >&2
   fi
   (cd cmd/nimb && "$WAILS" build -platform "windows/$ARCH" -s -skipbindings -trimpath -ldflags "$LDFLAGS" -o Nimb.exe >/dev/null && cp build/bin/Nimb.exe "$STAGE/Nimb.exe")
+  # What is in the finished Nimb.exe: the strings given to the linker (-X) stand in the file as they are, so the key and the sums can be looked
+  # for. The sums must be those of the very files that go into the installer, or the program would call its own build «not ours».
+  if [ "$KEYED" = yes ]; then
+    grep -aqF "$MIXED" "$STAGE/Nimb.exe" && grep -aqF "$FILES" "$STAGE/Nimb.exe" || { echo "STOP: Nimb.exe ($ARCH) has no key or no right sums of nimb-svc.exe / wintun.dll inside" >&2; exit 1; }
+  else
+    UNKEYED="$UNKEYED $ARCH"
+  fi
   cp "$ROOT/LICENSE" "$STAGE/LICENSE"
   cp THIRD-PARTY-NOTICES.md "$STAGE/THIRD-PARTY-NOTICES.md"
   makensis -V2 -DARCH="$ARCH" -DVERSION="$VERSION" -DSRC="$STAGE" -DICON="$PWD/installer/nimb.ico" \
@@ -54,3 +62,15 @@ else
   echo "Note: no $SIGNING_KEY_FILE: the installers are not signed, and the updater of 0.3.1 and later refuses an update without a signature." >&2
 fi
 (cd "$OUT" && shasum -a 256 Nimb-Setup-"$VERSION"-*.exe | tee SHA256.txt)
+if [ -n "$UNKEYED" ]; then
+  {
+    echo
+    echo "################################################################"
+    echo "#  СБОРКА БЕЗ КЛЮЧА (${UNKEYED# }): БУДЕТ «MOD», ОТЧЁТЫ НЕ УЙДУТ"
+    echo "#  Нет файла $REPORT_KEY_FILE"
+    echo "#  Для выпуска собирайте на Mac владельца, где этот файл есть."
+    echo "################################################################"
+  } >&2
+else
+  echo "Сборка с ключом: без «MOD» (проверено: ключ и суммы nimb-svc.exe и wintun.dll внутри Nimb.exe, для $(echo "${ARCHES[@]}"))"
+fi

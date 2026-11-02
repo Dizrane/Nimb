@@ -1,5 +1,6 @@
 import { Animator, Fader, makeCanvas, begin, now, smooth, clamp } from './anim.js';
 import { Gate } from './gate.js';
+import { morph } from './common.js';
 import { drawHalo, drawSparkle } from './halo.js';
 import { PowerButton } from './power.js';
 
@@ -78,6 +79,16 @@ export class PlanetHero {
   /** `on` is whether Smart DNS works; `region` is 'eu', 'ru' or 'us'. */
   update({ on, busy, region, disabled, title, providerName, subtitle, label }) {
     const t = now();
+    if (!this.shown) {
+      // The page was just opened: the planet stands as it is (lit, turned to its region, the button where it belongs), nothing comes up or
+      // turns on the way in. Only a change that happens while the page is open is played.
+      this.shown = true;
+      this.from = this.to = REGIONS[region].view; this.region = region; this.turnStarted = -1e9;
+      this.litF = new Fader(1.2, on ? 1 : 0);
+      this.satFrom = 0; this.satTarget = on ? 1 : 0; this.satStarted = -1e9;
+      this.power.setOn(on, true);
+      this.on = on;
+    }
     if (region !== this.region) {
       this.from = this.center(t); this.to = REGIONS[region].view; this.turnStarted = t; this.region = region; this.keep(this.turnDuration);
     }
@@ -85,7 +96,7 @@ export class PlanetHero {
     this.on = on; this.busy = busy; this.disabled = disabled;
     this.btn.disabled = disabled; this.btn.setAttribute('aria-label', label);
     if (this.titleEl.textContent !== title) this.titleEl.textContent = title;
-    this.statusEl.innerHTML = on && !busy ? `<span class="dot"></span><span>${providerName}</span>` : `<span style="font-size:13px;font-weight:400;color:var(--t2)">${subtitle}</span>`;
+    morph(this.statusEl, on && !busy ? `<span class="who"><span class="dot"></span><span>${providerName}</span></span>` : `<span style="font-size:13px;font-weight:400;color:var(--t2)">${subtitle}</span>`);
     this.power.setBusy(busy);
     this.anim.invalidate();
   }

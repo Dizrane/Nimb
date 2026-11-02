@@ -65,7 +65,9 @@ canvas{display:block}
 .pg{flex:1;min-height:0;overflow:hidden;position:relative}
 .pg-in{height:100%}
 .two{display:flex;align-items:center;gap:24px;padding:8px var(--page);min-height:100%}
-.two .left{width:320px;flex:none}
+.two .left{width:320px;flex:none;position:relative}
+/* the notices of the page of the AI stand under the planet (the planet does not move when one comes), so that the list of six providers has all the height */
+.lnotes{position:absolute;left:0;right:0;top:100%;margin-top:8px;text-align:left}
 .two .right{flex:1;min-width:0;display:flex;flex-direction:column;gap:var(--gap)}
 .banner{margin:12px var(--page) 0;padding:9px 12px;border-radius:12px;font-size:12px;color:#ffb4ae;background:rgba(255,89,82,.1);border:1px solid rgba(255,89,82,.4);user-select:text}
 
@@ -78,6 +80,7 @@ canvas{display:block}
 .hero h2{font:400 31px/1.15 var(--serif);margin:6px 0 0;color:var(--t1);text-shadow:0 1px 8px rgba(0,0,0,.55)}
 .hero .sub{font-size:13px;color:var(--t2);max-width:320px;min-height:54px;margin-top:6px}
 .hero .status-line{max-width:320px;text-align:center;display:flex;justify-content:center;align-items:flex-start;gap:7px;min-height:54px;font-size:15px;font-weight:500;margin-top:6px}
+.hero .status-line .who{display:inline-flex;align-items:center;gap:7px;line-height:20px;height:20px}
 .dot{width:6px;height:6px;border-radius:50%;background:var(--ok);flex:none}
 .pwr{position:absolute;box-sizing:border-box;border-style:solid;border-radius:50%;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;color:#fff;pointer-events:none}
 .pwr svg{display:block}
@@ -91,6 +94,7 @@ canvas{display:block}
 .card{padding:14px;border-radius:14px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.16)}
 .card .nm{font-size:15px;line-height:1.25;font-weight:500;color:var(--t1)}
 .card .sm{font-size:12px;line-height:1.25;color:var(--t2);margin-top:3px}
+#note:empty{display:none}
 .card.multi{padding:12px 14px}.card.multi .note-in+.note-in{margin-top:6px}
 .card.warn{border-color:rgba(255,199,51,.3);background:rgba(255,199,51,.04)}
 .card.bad{border-color:rgba(255,89,82,.3);background:rgba(255,89,82,.04)}
@@ -118,7 +122,7 @@ canvas{display:block}
 .provc:hover{border-color:rgba(255,255,255,.24)}
 .provc.sel{border-color:rgba(255,255,255,.5);background:rgba(255,255,255,.07)}
 .provc.dim{opacity:.6}
-.prov{display:flex;align-items:center;gap:8px;width:100%;padding:10px 14px;border-radius:12px}
+.prov{display:flex;align-items:center;gap:8px;width:100%;padding:8px 14px;border-radius:12px}
 .provc.has .prov{padding-bottom:0}
 .provc.c .prov{padding-bottom:0}
 .prov:disabled{cursor:default}
@@ -128,14 +132,14 @@ canvas{display:block}
 .prov .ispace{width:20px;flex:none}
 .provc .info{position:absolute;right:38px;top:9px;width:20px;height:22px;display:flex;align-items:center;justify-content:center;color:var(--t2)}
 .provc .info:hover{color:#fff}
-.provc .r2{display:flex;align-items:center;gap:8px;padding:4px 14px 0;min-height:20px;cursor:default}
+.provc .r2{display:flex;align-items:center;gap:8px;padding:2px 14px 0;min-height:20px;cursor:default}
 .provc .r2 .on{color:var(--ok);font-size:12.5px;font-weight:500;white-space:nowrap}
 .provc .r2 .info{position:static;flex:none}
-.provc .pills{display:grid;grid-template-columns:1fr 1fr;gap:5px;padding:7px 14px 10px}
+.provc .pills{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:6px 14px 9px}
 .speed{display:inline-flex;align-items:center;gap:6px}
 .speed .bars{display:inline-flex;align-items:flex-end;gap:1.5px;height:12px}.speed .bars i{width:2.5px;border-radius:.5px;display:block}
 .speed .t1{color:var(--t1);opacity:.9;font:500 12px var(--sans);font-variant-numeric:tabular-nums}
-.svc{display:flex;align-items:center;gap:5px;padding:3px 8px;border-radius:6px;font-size:11px;font-weight:500;color:var(--t1);border:1px solid}
+.svc{display:flex;align-items:center;gap:5px;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:500;color:var(--t1);border:1px solid}
 .svc.works{color:var(--t1);background:rgba(48,209,89,.07);border-color:rgba(48,209,89,.28)}.svc.works svg{color:var(--ok)}
 .svc.unstable{background:rgba(255,199,51,.07);border-color:rgba(255,199,51,.28)}.svc.unstable svg{color:var(--warn)}
 .svc.down,.svc.blocked{background:rgba(255,89,82,.07);border-color:rgba(255,89,82,.28)}.svc.down svg,.svc.blocked svg{color:var(--bad)}

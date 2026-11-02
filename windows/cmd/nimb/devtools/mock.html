@@ -9,7 +9,7 @@ const q = new URLSearchParams(location.search);
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const has = (k) => q.has(k);
 const M = { ai: has('ai'), tg: has('tg'), media: has('media'), provider: 'geohide-eu', busy: {}, probe: { running: false, phase: '', done: 0, total: 0, reports: [], best: '' } };
-const names = ['ChatGPT','Claude','Gemini','Grok','ElevenLabs'];
+const names = has('full') ? ['ChatGPT','Claude','Gemini','Grok','ElevenLabs','Perplexity'] : ['ChatGPT','Claude','Gemini','Grok','ElevenLabs'];
 const svc = (name, status, site, api) => ({ name, status, site, api });
 const REPORTS = [
  { id:'geohide-eu', working:4, total:5, median:0.44, services:names.map(n=>svc(n,n==='Gemini'?'unstable':'works','6/7','7/7')), refusals:['Gemini · 37.221.93.141: перенаправление'], dead:[] },
@@ -17,6 +17,8 @@ const REPORTS = [
  { id:'geohide', working:0, total:5, median:null, services:names.map(n=>svc(n,'blocked','1/4','1/4')), refusals:[], dead:['159.194.200.33'] },
  { id:'geohide-us', working:0, total:5, median:1.3, services:names.map(n=>svc(n,'down','0/4','0/4')), refusals:[], dead:[] },
 ];
+// ?full: the real list (six providers, six services in each, a long line of the recommendation), the most that the page has to carry
+if (has('full')) { for (const [id, working] of [['magicdns', 5], ['malwlink', 2]]) REPORTS.push({ id, working, total: 6, median: 0.7, services: names.map((n) => svc(n, working > 3 || n === 'Claude' ? 'works' : 'unstable', '4/4', '3/4')), refusals: [], dead: [] }); }
 if (has('probed')) { M.probe.reports = REPORTS; M.probe.best = 'geohide-eu'; }
 const upd = { available: has('update'), version:'0.3.1', current:'0.3.0', notes:['Подсказка на странице Telegram: если сеть его не пускает, включите «YouTube и Discord»','**Окно обновления** с этапами'], pageUrl:'x', started: has('steps')||has('fail'), stages:[{title:'Загрузка',state:'done'},{title:'Проверка подписи',state:has('fail')?'failed':'running'},{title:'Установка',state:'pending'},{title:'Перезапуск',state:'pending'}], fraction:.4, line:'Загружаю… 4 МБ из 10', failedStage:has('fail')?'Проверка подписи':'', error:has('fail')?'Подпись не совпала':'', restarting:false, show:false, notify:true, checking:false, failed:false, checked: has('nolatest')?0:Date.now()/1000, installing:'' };
 const sites = { running:false, checks: has('sites') ? [
@@ -27,7 +29,7 @@ window.go = { main: { App: {
   ai:{ on:M.ai, provider:M.provider, busy:!!M.busy.ai, warnings: has('warn')?['DNS-провайдер не отвечает на этом подключении.']:[], error: has('err')?'Не удалось применить DNS':'' },
   telegram:{ on:M.tg, busy:!!M.busy.telegram, port:1443, link:'tg://x', stats:{}, wrongKeyRecently:has('wrongkey'), tunnelAdvice: has('advice')?'Похоже, сеть не пускает Telegram. Включите «YouTube и Discord».':'', error:'' },
   media:{ on:M.media, busy:!!M.busy.media, handshakeAgo:3, error:'' },
-  providers:[['geohide-eu','GeoHide (EU)'],['comss','Comss.one'],['geohide','GeoHide (RU)'],['geohide-us','GeoHide (US)'],['xbox','XBOX DNS'],['malw','malw.link']].map(([id,name])=>({id,name})),
+  providers:[['comss','Comss.one'],['geohide-eu','GeoHide (EU)'],['geohide','GeoHide (RU)'],['geohide-us','GeoHide (US)'],['magicdns','MagicDNS'],['malwlink','malw.link']].map(([id,name])=>({id,name})),
   probe:M.probe, update:upd, sites, help:{ on:has('help'), count:3, last:Math.floor(Date.now()/1000)-3600, paused:'', pausedWords:'' } }),
  SetAI: async (on)=>{M.busy.ai=1;await wait(500);M.ai=on;delete M.busy.ai;return{ok:true}}, SetTelegram: async (on)=>{M.tg=on;return{ok:true}}, SetMedia: async (on)=>{M.busy.media=1;await wait(900);M.media=on;delete M.busy.media;return{ok:true}},
  SetAll: async (on)=>{M.ai=M.tg=M.media=on;return{ok:true}}, SetProvider: async(id)=>{M.provider=id;return{ok:true}},

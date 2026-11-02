@@ -87,6 +87,8 @@ export class AIPage {
     this.hero = new PlanetHero(() => this.actions.toggle('ai'));
     root.querySelector('#slot').appendChild(this.hero.el);
     this.right = root.querySelector('#right');
+    this.lnotes = document.createElement('div'); this.lnotes.className = 'lnotes';
+    root.querySelector('#slot').appendChild(this.lnotes);
   }
   toggleDetails(id, anchor) {
     const r = (this.S.probe.reports || []).find((x) => x.id === id), p = this.S.providers.find((x) => x.id === id);
@@ -131,7 +133,8 @@ export class AIPage {
     }).join('');
     const warnings = notices([...(a.warnings || []).map((w) => [w, 'warn']), [a.error, 'bad']]);
     setHTML(this.right, `<div class="prov-head"><div class="label">DNS-провайдеры</div>${button}</div>${banner}
-      <div class="grid ${two ? 'two-up' : ''}" role="radiogroup" aria-label="DNS-провайдеры">${cards}</div>${warnings}`);
+      <div class="grid ${two ? 'two-up' : ''}" role="radiogroup" aria-label="DNS-провайдеры">${cards}</div>`);
+    setHTML(this.lnotes, warnings);
   }
   destroy() { this.hero.destroy(); }
 }
@@ -161,7 +164,7 @@ export class TelegramPage {
           <div style="display:flex;justify-content:flex-end;gap:8px">
             <button class="btn" data-a="copy" data-f="copy" id="copy">Скопировать ссылку</button>
             <button class="btn" data-a="openTg" data-f="open" id="open">Открыть в Telegram</button></div>
-          <div id="note" class="sm" style="text-align:right;min-height:16px"></div></div>`
+          <div id="note" class="sm" style="text-align:right"></div></div>`
       : `<div class="card"><div class="nm">Как это работает</div><div class="sm">Включите прокси и подтвердите окно «Добавить прокси» в Telegram.</div></div>`;
     // As on the Mac: only while it goes on; it goes away by itself ten seconds after the last connection with another key.
     const wrongKey = t.on && t.wrongKeyRecently ? notice('Telegram подключается с чужим ключом: в нём, похоже, указан другой прокси на этом порту. Нажмите «Открыть в Telegram» и подтвердите, а старый прокси удалите.', 'warn') : '';

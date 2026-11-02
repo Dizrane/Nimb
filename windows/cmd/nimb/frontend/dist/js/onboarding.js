@@ -133,7 +133,7 @@ export class Onboarding {
     this.el.querySelector('#onbclose').style.display = step > 0 && step < LAST ? '' : 'none';
     let dots = '';
     for (let i = 0; i <= LAST; i++) dots += `<i class="${i === step ? 'now' : i < step ? 'past' : ''}"></i>`;
-    this.el.querySelector('#onb-dots').innerHTML = `<div class="dots" role="img" aria-label="Шаг ${step + 1} из ${LAST + 1}">${dots}</div>`;
+    morph(this.el.querySelector('#onb-dots'), `<div class="dots" role="img" aria-label="Шаг ${step + 1} из ${LAST + 1}">${dots}</div>`);
     if (this.iconStep !== step) {
       if (this.icon) this.icon.destroy();
       const kind = ['welcome', 'ai', 'telegram', 'media', 'gear'][step];

@@ -1,5 +1,6 @@
 import { Animator, Fader, makeCanvas, begin, now } from './anim.js';
 import { Gate } from './gate.js';
+import { morph } from './common.js';
 import { drawHalo, drawSparkle } from './halo.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -57,7 +58,7 @@ export class HomeHero {
     if (this.title.textContent !== title) this.title.textContent = title;
     if (this.sub.textContent !== sub) this.sub.textContent = sub;
     this.button.disabled = s.busy;
-    this.button.innerHTML = `${s.running ? '<span class="spin"></span>' : ''}<span>${s.all ? 'Выключить всё' : 'Включить всё'}</span>`;
+    morph(this.button, `${s.running ? '<span class="spin"></span>' : ''}<span>${s.all ? 'Выключить всё' : 'Включить всё'}</span>`);
   }
 
   draw(t) {

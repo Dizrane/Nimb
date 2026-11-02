@@ -2,7 +2,7 @@ import { Animator, makeCanvas, begin, now } from './anim.js';
 import { drawRingStack } from './halo.js';
 import { IconView, playIcon, preloadIcons } from './icons.js';
 import { preload } from './art.js';
-import { api, logPage, SV, ORDER, esc } from './common.js';
+import { api, logPage, SV, ORDER, esc, morph } from './common.js';
 import { HomePage, AIPage, TelegramPage, MediaPage, SettingsPage, ReportPage, toggleSites, toggleHelp } from './pages.js';
 import { openPopover, closePopover, isPopoverOpen } from './popover.js';
 import { Onboarding } from './onboarding.js';
@@ -112,8 +112,8 @@ function updateShell() {
     const key = `${busy}|${on}|${disabled}`;
     if (slot.dataset.key !== key) {
       slot.dataset.key = key;
-      slot.innerHTML = busy ? '<span class="pending"><span class="spin"></span></span>'
-        : `<button class="pill ${on ? 'on' : ''}" role="switch" aria-checked="${on}" aria-label="${SV[k].title}" data-a="sw" data-v="${k}" data-f="sw-${k}" id="sw-${k}" ${disabled ? 'disabled' : ''}></button>`;
+      morph(slot, busy ? '<span class="pending"><span class="spin"></span></span>'
+        : `<button class="pill ${on ? 'on' : ''}" role="switch" aria-checked="${on}" aria-label="${SV[k].title}" data-a="sw" data-v="${k}" data-f="sw-${k}" id="sw-${k}" ${disabled ? 'disabled' : ''}></button>`);
     }
     icons[k].invalidate();
   }
@@ -238,7 +238,8 @@ document.addEventListener('click', async (e) => {
   if (!t || t.disabled) return;
   const v = t.dataset.v;
   switch (t.dataset.a) {
-    case 'nav': showPage(v); break;
+    // The gear of the settings turns when the settings open (and at a press on its row), as on the Mac.
+    case 'nav': showPage(v); if (v === 'settings') playIcon('gear'); break;
     // A press on the icon of a service plays it only while the service is on (a service that is off does nothing); the gear always.
     case 'play': if (v === 'settings') playIcon('gear'); else if (S[v].on) playIcon(SV[v].icon); break;
     case 'sw': await actions.toggle(v); break;

@@ -71,7 +71,8 @@ export class PowerButton {
     s.borderColor = `rgba(255,255,255,${ring})`;
     s.boxShadow = `0 6px 12px rgba(0,0,0,${0.4 * (1 - travel)}), 0 0 ${size * 0.14}px rgba(255,255,255,${0.55 * flare + 0.12 * glow})`;
     const glyphSize = 40 - 23 * travel;
-    const key = `${this.busy}|${Math.round(glyphSize)}`;
+    // The spinner is made once for each of its two sizes: made again at every pixel of the way it would start turning from nothing each time.
+    const key = this.busy ? `busy|${travel < 0.5}` : `glyph|${Math.round(glyphSize)}`;
     if (this.state !== key) {
       this.state = key;
       this.el.innerHTML = this.busy ? `<span class="spin" style="width:${travel < 0.5 ? 20 : 14}px;height:${travel < 0.5 ? 20 : 14}px"></span>` : SVG(1.2 + 0.5 * travel);

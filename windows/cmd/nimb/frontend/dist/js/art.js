@@ -12,7 +12,8 @@ export function img(path) {
   if (!e) {
     const im = new Image();
     e = { im, ok: false };
-    im.onload = () => { e.ok = true; notify(); };
+    // decode() makes the picture ready to draw before the page is told, or the first drawImage of it would decode it in the middle of a frame
+    im.onload = () => { (im.decode ? im.decode() : Promise.resolve()).catch(() => {}).then(() => { e.ok = true; notify(); }); };
     im.src = `art/${path}`;
     cache.set(path, e);
   }
