@@ -5,6 +5,7 @@ import { drawHalo, drawSparkle } from './halo.js';
 import { Wanderer } from './wander.js';
 import { drawMedia } from './media.js';
 import { PowerButton } from './power.js';
+import { setText } from './common.js';
 
 export const POWER = '<svg viewBox="0 0 24 24" aria-hidden="true"><path class="power-icon" d="M12 3.5v8.2M7 6.9a7.6 7.6 0 1 0 10 0"/></svg>';
 
@@ -60,8 +61,8 @@ export class Stage {
     this.on = on; this.busy = busy; this.disabled = disabled;
     this.btn.disabled = disabled; this.btn.setAttribute('aria-label', label);
     this.power.setBusy(busy);
-    if (this.titleEl.textContent !== title) this.titleEl.textContent = title;
-    if (this.subEl.textContent !== subtitle) this.subEl.textContent = subtitle;
+    setText(this.titleEl, title, 350);
+    setText(this.subEl, subtitle, 350);
     this.anim.invalidate();
   }
 

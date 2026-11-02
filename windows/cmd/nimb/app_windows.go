@@ -112,8 +112,30 @@ func (a *App) startup(ctx context.Context) {
 	startTray(a)
 }
 
-// beforeClose: closing the window hides it (HideWindowOnClose); Nimb goes on working from the tray.
-func (a *App) beforeClose(ctx context.Context) bool { return false }
+// beforeClose: with the working in the background on, closing the window hides it (HideWindowOnClose) and Nimb goes on working from the
+// tray; with it off, closing the window quits Nimb as «Выйти» of the menu of the icon does (it asks when an update is being installed;
+// if the person says no, the window stays). The question is asked off the thread of the window, which is told at once that the close is taken.
+func (a *App) beforeClose(ctx context.Context) bool {
+	if a.settings.get().ClosingQuits() {
+		go a.quitFrom("закрытие окна при выключенной работе в фоне")
+		return true
+	}
+	return false
+}
+
+// FrameLog says whether the page should tour itself and count its frames (NIMB_FRAMELOG=1, for trying the smoothness on a real machine).
+func (a *App) FrameLog() bool { return os.Getenv("NIMB_FRAMELOG") == "1" }
+
+// SetBackground turns the working in the background on or off.
+func (a *App) SetBackground(on bool) Result {
+	a.settings.update(func(s *Settings) { s.Enable(on) })
+	if on {
+		logLine("работа в фоне: включена (закрытие окна оставляет Nimb у часов)")
+	} else {
+		logLine("работа в фоне: выключена (закрытие окна завершает Nimb)")
+	}
+	return Result{OK: true}
+}
 
 func (a *App) secondInstance(options.SecondInstanceData) { a.ShowWindow() }
 
@@ -204,6 +226,8 @@ type State struct {
 	Update    UpdateView `json:"update"`
 	Sites     SiteView   `json:"sites"`
 	Help      HelpView   `json:"help"`
+	// Background: closing the window keeps Nimb at the clock (on) or quits it (off).
+	Background bool `json:"background"`
 }
 
 func providerList() []Provider {
@@ -224,6 +248,7 @@ func (a *App) GetState() State {
 	st.Update = a.upd.view()
 	st.Sites = a.sites.view()
 	st.Help = a.helpView()
+	st.Background = a.settings.get().Enabled()
 	st.Update.Notify = !a.settings.get().UpdateNotifyOff
 	st.AI.Warnings = []string{}
 	set := a.settings.get()

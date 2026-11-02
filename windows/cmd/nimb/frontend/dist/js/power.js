@@ -20,7 +20,7 @@ export class PowerButton {
   constructor(height) {
     this.H = height;
     this.el = document.createElement('div'); this.el.className = 'pwr';
-    this.progress = 0; this.target = 0; this.hover = 0; this.hoverTarget = 0; this.busy = false;
+    this.progress = 0; this.target = 0; this.hover = 0; this.hoverTarget = 0; this.hoverFrom = 0; this.hoverAt = 0; this.busy = false;
     this.last = 0; this.raf = 0; this.glyph = ''; this.state = '';
     this.draw();
     this.onVis = () => this.kick();
@@ -33,7 +33,11 @@ export class PowerButton {
     this.kick();
   }
   setBusy(busy) { if (busy !== this.busy) { this.busy = busy; this.draw(); } }
-  setHover(h) { this.hoverTarget = h ? 1 : 0; this.kick(); }
+  setHover(h) {
+    const target = h ? 1 : 0;
+    if (target === this.hoverTarget) return;
+    this.hoverFrom = this.hover; this.hoverTarget = target; this.hoverAt = performance.now(); this.kick();
+  }
   kick() { if (!this.raf) { this.last = performance.now(); this.raf = requestAnimationFrame((t) => this.frame(t)); } }
   frame(ts) {
     this.raf = 0;
@@ -47,9 +51,10 @@ export class PowerButton {
       }
     }
     if (this.hover !== this.hoverTarget) {
-      const k = Math.min(dt / 0.45, 1);
-      this.hover += (this.hoverTarget - this.hover) * k;
-      if (Math.abs(this.hover - this.hoverTarget) < 0.01) this.hover = this.hoverTarget;
+      // easeInOut over 0.45 s, as on the Mac (not a chase of the target, which starts fast and ends slowly)
+      const u = Math.min((ts - this.hoverAt) / 450, 1);
+      this.hover = this.hoverFrom + (this.hoverTarget - this.hoverFrom) * ease(u);
+      if (u >= 1) this.hover = this.hoverTarget;
     }
     this.draw();
     if (this.progress !== this.target || this.hover !== this.hoverTarget) this.raf = requestAnimationFrame((t) => this.frame(t));

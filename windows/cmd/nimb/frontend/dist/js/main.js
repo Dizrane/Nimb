@@ -262,6 +262,7 @@ document.addEventListener('click', async (e) => {
     case 'sites': toggleSites(t); break;
     case 'quit': api().Quit(); break;
     case 'uninstall': api().Uninstall(); break;
+    case 'background': { S.background = !S.background; render(); await api().SetBackground(S.background); await refresh(); break; }
     case 'autostart': { const r = await api().SetAutostart(!autostart); if (r.ok) autostart = !autostart; render(); break; }
     case 'onboard': await api().RestartOnboarding(); onb = new Onboarding(actions); render(); break;
     case 'onbnext': onb.next(); render(); break;
@@ -324,6 +325,7 @@ window.addEventListener('load', async () => {
   showPage(first);
   if (firstSetup) { onb = new Onboarding(actions); render(); }
   preloadIcons();
+  try { if (await api().FrameLog()) (await import('./frametest.js')).runFrameTest(); } catch (e) { /* no tour */ }
   setInterval(() => { if (document.visibilityState === 'visible') refresh(); }, 2000);
   window.addEventListener('focus', refresh);
 });

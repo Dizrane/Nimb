@@ -1,6 +1,6 @@
 import { Animator, Fader, makeCanvas, begin, now } from './anim.js';
 import { Gate } from './gate.js';
-import { morph } from './common.js';
+import { morph, setText } from './common.js';
 import { drawHalo, drawSparkle } from './halo.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -55,8 +55,8 @@ export class HomeHero {
     const title = s.busy ? 'Подождите' : s.all ? 'Всё включено' : s.count === 0 ? 'Выключено' : 'Включено частично';
     const sub = s.busy ? 'Секунду, переключаю сервисы.' : s.all ? 'Нейросети, Telegram, YouTube и Discord работают.'
       : s.count === 0 ? 'Одна кнопка включает нейросети, Telegram, YouTube и Discord.' : 'Включите остальное кнопкой или переключателями.';
-    if (this.title.textContent !== title) this.title.textContent = title;
-    if (this.sub.textContent !== sub) this.sub.textContent = sub;
+    setText(this.title, title, 350);
+    setText(this.sub, sub, 350);
     this.button.disabled = s.busy;
     morph(this.button, `${s.running ? '<span class="spin"></span>' : ''}<span>${s.all ? 'Выключить всё' : 'Включить всё'}</span>`);
   }

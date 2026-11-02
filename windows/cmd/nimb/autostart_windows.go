@@ -14,7 +14,8 @@ import (
 
 const runKey = `Software\Microsoft\Windows\CurrentVersion\Run`
 
-// The command that starts Nimb with Windows: the exe of this copy, quietly (to the tray, no window).
+// The command that starts Nimb with Windows: the exe of this copy, with --hidden. Whether the window then stays hidden (to the tray) is
+// decided at the start by the setting «Работа в фоне» (internal/background): with it off the window opens.
 func autostartCommand() string {
 	exe, err := os.Executable()
 	if err != nil {

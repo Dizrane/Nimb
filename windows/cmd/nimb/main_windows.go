@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
-	"slices"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/logger"
@@ -44,7 +43,7 @@ func main() {
 		OnStartup:         app.startup,
 		OnBeforeClose:     app.beforeClose,
 		HideWindowOnClose: true,
-		StartHidden:       slices.Contains(os.Args[1:], "--hidden"),
+		StartHidden:       app.settings.get().StartsHidden(os.Args[1:]),
 		OnShutdown: func(context.Context) {
 			logExit("приложение закрывается (Wails вызвал OnShutdown)")
 			endSession()

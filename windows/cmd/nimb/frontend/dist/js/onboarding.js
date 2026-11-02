@@ -3,7 +3,7 @@ import { Gate } from './gate.js';
 import { img, preload } from './art.js';
 import { drawHalo, drawSparkle } from './halo.js';
 import { KINDS, SCAN, player, playIcon } from './icons.js';
-import { esc, setHTML } from './common.js';
+import { esc, setHTML, morph, fadeIn } from './common.js';
 import { notifyCard } from './pages.js';
 
 const LAST = 4;
@@ -125,8 +125,15 @@ export class Onboarding {
     this.el.innerHTML = '<button class="link onb-close" data-a="onbclose" data-f="onbclose" id="onbclose" style="display:none">Закрыть</button><div class="onb-col"><div id="onb-dots"></div><div id="onb-icon" class="onb-icon"></div><div id="onb-body" style="display:contents"></div></div>';
     document.body.appendChild(this.el);
   }
-  next() { this.step += 1; this.iconStep = -1; }
-  destroy() { if (this.icon) this.icon.destroy(); this.el.remove(); }
+  next() { this.step += 1; this.iconStep = -1; this.stepChanged = true; }
+  /** The set-up goes away softly (easeInOut 0.3 of the Mac), its picture at once. */
+  destroy() {
+    if (this.icon) this.icon.destroy();
+    const el = this.el;
+    if (!el.animate || matchMedia('(prefers-reduced-motion: reduce)').matches) { el.remove(); return; }
+    el.style.pointerEvents = 'none';
+    el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 300, easing: 'ease-in-out', fill: 'forwards' }).onfinish = () => el.remove();
+  }
 
   update(S, extra) {
     const step = this.step;
@@ -144,6 +151,7 @@ export class Onboarding {
       this.iconStep = step;
     }
     setHTML(this.el.querySelector('#onb-body'), this.body(S, extra));
+    if (this.stepChanged) { this.stepChanged = false; fadeIn(this.el.querySelector('.onb-col'), 250); } // easeInOut 0.25 of the Mac
     this.fit();
   }
 

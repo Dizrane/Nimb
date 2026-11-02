@@ -8,7 +8,7 @@
 const q = new URLSearchParams(location.search);
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const has = (k) => q.has(k);
-const M = { ai: has('ai'), tg: has('tg'), media: has('media'), provider: 'geohide-eu', busy: {}, probe: { running: false, phase: '', done: 0, total: 0, reports: [], best: '' } };
+const M = { bg: !has('nobg'), ai: has('ai'), tg: has('tg'), media: has('media'), provider: 'geohide-eu', busy: {}, probe: { running: false, phase: '', done: 0, total: 0, reports: [], best: '' } };
 const names = has('full') ? ['ChatGPT','Claude','Gemini','Grok','ElevenLabs','Perplexity'] : ['ChatGPT','Claude','Gemini','Grok','ElevenLabs'];
 const svc = (name, status, site, api) => ({ name, status, site, api });
 const REPORTS = [
@@ -30,12 +30,12 @@ window.go = { main: { App: {
   telegram:{ on:M.tg, busy:!!M.busy.telegram, port:1443, link:'tg://x', stats:{}, wrongKeyRecently:has('wrongkey'), tunnelAdvice: has('advice')?'Похоже, сеть не пускает Telegram. Включите «YouTube и Discord».':'', error:'' },
   media:{ on:M.media, busy:!!M.busy.media, handshakeAgo:3, error:'' },
   providers:[['comss','Comss.one'],['geohide-eu','GeoHide (EU)'],['geohide','GeoHide (RU)'],['geohide-us','GeoHide (US)'],['magicdns','MagicDNS'],['malwlink','malw.link']].map(([id,name])=>({id,name})),
-  probe:M.probe, update:upd, sites, help:{ on:has('help'), count:3, last:Math.floor(Date.now()/1000)-3600, paused:'', pausedWords:'' } }),
+  background:M.bg, probe:M.probe, update:upd, sites, help:{ on:has('help'), count:3, last:Math.floor(Date.now()/1000)-3600, paused:'', pausedWords:'' } }),
  SetAI: async (on)=>{M.busy.ai=1;await wait(500);M.ai=on;delete M.busy.ai;return{ok:true}}, SetTelegram: async (on)=>{M.tg=on;return{ok:true}}, SetMedia: async (on)=>{M.busy.media=1;await wait(900);M.media=on;delete M.busy.media;return{ok:true}},
  SetAll: async (on)=>{M.ai=M.tg=M.media=on;return{ok:true}}, SetProvider: async(id)=>{M.provider=id;return{ok:true}},
  ProbeStart: async()=>{M.probe.reports=REPORTS;M.probe.best='geohide-eu';return{ok:true}}, EnableBest: async()=>{return{ok:true}},
  Onboarded: async()=>!has('onb'), FinishOnboarding: async()=>{}, RestartOnboarding: async()=>{}, OpenTerms(){},
- GetAutostart: async()=>true, SetAutostart: async()=>({ok:true}), SetNotify: async()=>{}, SendTestNotification: async()=>({ok:true}), SetHelpTesting: async()=>({ok:true}), HelpTestingPreview: async()=>'Отчёт № AB12CD\n— Программа —\nNimb 0.3.0',
+ SetBackground: async(on)=>{ M.bg=on; return {ok:true}; }, GetAutostart: async()=>true, SetAutostart: async()=>({ok:true}), SetNotify: async()=>{}, SendTestNotification: async()=>({ok:true}), SetHelpTesting: async()=>({ok:true}), HelpTestingPreview: async()=>'Отчёт № AB12CD\n— Программа —\nNimb 0.3.0',
  ReportPrepare: async()=>({id:'AB12CD'}), ReportPreview: async()=>'Отчёт № AB12CD\n\n— Программа —\nNimb для Windows 0.3.0', ReportSend: async()=>({ok:true}), ReportCopy: async()=>({ok:true}), ReportWrite: async()=>({ok:true}),
  OpenTelegram: async()=>({ok:true}), CopyLink: async()=>({ok:true}), OpenChannel(){}, Uninstall: async()=>({ok:true}), Quit(){}, Log(){}, CheckSites: async()=>({ok:true}), InstallUpdate: async()=>({ok:true}), OpenUpdatePage(){}, AckUpdateShow(){}, CopyUpdateDetails: async()=>({ok:true}), OpenDeveloperChat(){},
  InitialPage: async()=>q.get('page')||'home' } } };

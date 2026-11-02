@@ -1,6 +1,6 @@
 import { Animator, Fader, makeCanvas, begin, now, smooth, clamp } from './anim.js';
 import { Gate } from './gate.js';
-import { morph } from './common.js';
+import { morph, setText, fadeIn } from './common.js';
 import { drawHalo, drawSparkle } from './halo.js';
 import { PowerButton } from './power.js';
 
@@ -80,13 +80,13 @@ export class PlanetHero {
   update({ on, busy, region, disabled, title, providerName, subtitle, label }) {
     const t = now();
     if (!this.shown) {
-      // The page was just opened: the planet stands as it is (lit, turned to its region, the button where it belongs), nothing comes up or
-      // turns on the way in. Only a change that happens while the page is open is played.
+      // The page was just opened (HeroState.init of the Mac): the planet is not turned (the region is where it belongs), the button
+      // stands where it belongs at once, and with Smart DNS already on the planet comes up once, 0.5 s later, as at a switch-on.
       this.shown = true;
       this.from = this.to = REGIONS[region].view; this.region = region; this.turnStarted = -1e9;
-      this.litF = new Fader(1.2, on ? 1 : 0);
-      this.satFrom = 0; this.satTarget = on ? 1 : 0; this.satStarted = -1e9;
+      this.litF = new Fader(1.2, 0); this.satFrom = 0; this.satTarget = 0; this.satStarted = -1e9;
       this.power.setOn(on, true);
+      if (on) this.applyLit(true, true);
       this.on = on;
     }
     if (region !== this.region) {
@@ -95,7 +95,10 @@ export class PlanetHero {
     if (on !== this.on) this.applyLit(on, false);
     this.on = on; this.busy = busy; this.disabled = disabled;
     this.btn.disabled = disabled; this.btn.setAttribute('aria-label', label);
-    if (this.titleEl.textContent !== title) this.titleEl.textContent = title;
+    setText(this.titleEl, title, 350);
+    const mode = on && !busy ? `who|${providerName}` : `sub|${subtitle}`;
+    if (this.statusMode !== undefined && this.statusMode !== mode) fadeIn(this.statusEl, 450); // easeInOut 0.45 of the Mac (`model.mode`)
+    this.statusMode = mode;
     morph(this.statusEl, on && !busy ? `<span class="who"><span class="dot"></span><span>${providerName}</span></span>` : `<span style="font-size:13px;font-weight:400;color:var(--t2)">${subtitle}</span>`);
     this.power.setBusy(busy);
     this.anim.invalidate();
@@ -108,7 +111,7 @@ export class PlanetHero {
     this.litF.set(on ? 1 : 0, t, delay);
     this.satTarget = on ? 1 : 0; this.satStarted = t + delay;
     this.power.setOn(on, initial);
-    if (!initial) this.keep(delay + (on ? 0.25 + 2.6 + 0.2 : 1.4));
+    this.keep(delay + (on ? 0.25 + 2.6 + 0.2 : 1.4));
   }
 
   draw(t) {

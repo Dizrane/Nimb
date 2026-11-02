@@ -11,11 +11,14 @@ import (
 	"sync"
 
 	"github.com/Dizrane/Nimb/windows/internal/autoreport"
+	"github.com/Dizrane/Nimb/windows/internal/background"
 )
 
 // Settings are what the window remembers between runs. They hold no keys of the tunnel (those stay with the service) and nothing
 // about the person.
 type Settings struct {
+	// The working in the background (on until turned off, see internal/background): what closing the window does.
+	background.Mode
 	// TelegramSecret is the key of the local proxy (32 hex digits); Telegram Desktop remembers it with the link.
 	TelegramSecret string `json:"telegramSecret"`
 	TelegramPort   int    `json:"telegramPort"`

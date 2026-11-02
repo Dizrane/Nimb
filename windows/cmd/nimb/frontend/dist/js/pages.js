@@ -117,10 +117,14 @@ export class AIPage {
     const locked = pr.running || a.busy;
     // After the check the cards stand two by two (as far as the width lets them) and all have the same two lines at the top: the name and
     // the choice, then «активен» and the speed. Before it each card is one line.
-    const two = pr.reports.length > 0; // after the check the cards stand two by two, as on the Mac
+    const two = pr.reports.length > 0;
+    // The pills of a check that has just come fade in (the Mac: easeInOut 0.5 on the count of the reports); a page opened with them shows them at once.
+    if (this.hadReports === false && two) this.appear = true;
+    if (!two) this.appear = false;
+    this.hadReports = two; // after the check the cards stand two by two, as on the Mac
     const cards = S.providers.map((p) => {
       const sel = p.id === a.provider, r = view[p.id], isBest = best && best.id === p.id, active = sel && a.on;
-      const radio = `<span class="radio" style="border-color:rgba(255,255,255,${sel ? 0.9 : 0.28})">${sel ? '<i></i>' : ''}</span>`;
+      const radio = `<span class="radio" style="border-color:rgba(255,255,255,${sel ? 0.9 : 0.28})"><i style="opacity:${sel ? 1 : 0}"></i></span>`;
       const gem = isBest ? '<span class="gem" title="Лучший по итогам проверки">◆</span>' : '';
       const row = `<button class="prov" role="radio" aria-checked="${sel}" data-a="prov" data-v="${p.id}" data-f="prov-${p.id}" id="prov-${p.id}" ${locked ? 'disabled' : ''}>
         <span class="nm">${esc(p.name)}</span>${two ? '' : gem + (active ? '<span class="on">· активен</span>' : '')}<span class="grow"></span>${two ? gem : (r ? speed(r.median ?? null) + '<span class="ispace"></span>' : '')}${radio}</button>`;
@@ -133,7 +137,7 @@ export class AIPage {
     }).join('');
     const warnings = notices([...(a.warnings || []).map((w) => [w, 'warn']), [a.error, 'bad']]);
     setHTML(this.right, `<div class="prov-head"><div class="label">DNS-провайдеры</div>${button}</div>${banner}
-      <div class="grid ${two ? 'two-up' : ''}" role="radiogroup" aria-label="DNS-провайдеры">${cards}</div>`);
+      <div class="grid ${two ? 'two-up' : ''} ${this.appear ? 'appear' : ''}" role="radiogroup" aria-label="DNS-провайдеры">${cards}</div>`);
     setHTML(this.lnotes, warnings);
   }
   destroy() { this.hero.destroy(); }
@@ -306,14 +310,14 @@ export class SettingsPage {
   constructor(actions) { this.actions = actions; }
   mount(root) { root.innerHTML = shell('Настройки', '<div class="settings" id="body"></div>'); this.body = root.querySelector('#body'); }
   update(S, extra) {
-    if (same(this, 'rj', [extra.autostart, S.version, S.update.notify, extra.testSent, S.ai.error, S.media.error, S.help])) return;
+    if (same(this, 'rj', [S.background, extra.autostart, S.version, S.update.notify, extra.testSent, S.ai.error, S.media.error, S.help])) return;
     const card = (title, text, button, top = false) => `<div class="card row ${top ? 'top' : ''}"><div class="grow"><div class="nm">${title}</div>${text ? `<div class="sm">${text}</div>` : ''}</div>${button}</div>`;
     const group = (title, ...cards) => `<div class="group"><div class="label">${title}</div><div class="cards">${cards.join('')}</div></div>`;
     // The columns of the Mac (SettingsView.swift); the block «Пароль администратора» is not here (the service has the rights), so Помощь
     // stands over Удаление in the right column.
     setHTML(this.body, `<div class="col">${group('Работа',
-        card('Работа в фоне', 'Закрытие окна не выключает Nimb: он остаётся у часов. Выйти можно из меню значка или кнопкой справа.', '<button class="btn" data-a="quit" data-f="quit" id="quit">Выйти из Nimb</button>'),
-        card('Запускать вместе с Windows', '', `<button class="pill ${extra.autostart ? 'on' : ''}" role="switch" aria-checked="${extra.autostart}" aria-label="Запускать вместе с Windows" data-a="autostart" data-f="autostart" id="autostart"></button>`, true),
+        card('Работать в фоне', 'Nimb остаётся у часов, когда окно закрыто.', `<button class="pill ${S.background ? 'on' : ''}" role="switch" aria-checked="${S.background}" aria-label="Работать в фоне" data-a="background" data-f="background" id="background"></button>`, true),
+        card('Запускать вместе с Windows', 'Nimb откроется сам при входе в систему. Если включена работа в фоне, окно не откроется: останется значок у часов.', `<button class="pill ${extra.autostart ? 'on' : ''}" role="switch" aria-checked="${extra.autostart}" aria-label="Запускать вместе с Windows" data-a="autostart" data-f="autostart" id="autostart"></button>`, true),
         notifyCard(S, extra))}</div>
       <div class="col">${group('Помощь',
         `<div class="card stack12"><div class="rowline"><div class="grow"><div class="nm">Сообщить о проблеме</div><div class="sm">Отчёт придёт разработчику. Паролей и адресов в нём нет.</div></div><button class="btn" data-a="report" data-f="report" id="report">Отправить…</button></div>${helpRow(S)}</div>`,

@@ -10,6 +10,30 @@ export const SV = {
 };
 export const ORDER = ['ai', 'telegram', 'media'];
 
+/** The curve of a spring (SwiftUI .spring(response:dampingFraction:)) as a CSS easing, and how long it takes to settle, in ms. */
+export function spring(response = 0.38, damping = 0.82) {
+  const wn = 2 * Math.PI / response, wd = wn * Math.sqrt(1 - damping * damping), k = damping * wn;
+  const seconds = Math.log(1000) / k, n = 40, pts = [];
+  for (let i = 0; i <= n; i++) {
+    const t = seconds * i / n;
+    pts.push((1 - Math.exp(-k * t) * (Math.cos(wd * t) + (k / wd) * Math.sin(wd * t))).toFixed(4));
+  }
+  return { easing: `linear(${pts.join(',')})`, duration: Math.round(seconds * 1000) };
+}
+
+/** A soft change of what stands in `el` (the cross-fade of a text that the Mac does with contentTransition(.opacity)). */
+export function fadeIn(el, ms) {
+  if (!el.animate || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: ms, easing: 'ease-in-out' });
+}
+/** Sets the text of `el`; a text that changes while it is shown fades in, the first one just stands there. */
+export function setText(el, text, ms = 350) {
+  if (el.textContent === text) return;
+  const shown = el.__set;
+  el.textContent = text; el.__set = true;
+  if (shown) fadeIn(el, ms);
+}
+
 /** Makes the children of `to` look like those of `from`, changing only what differs: a node that is already there stays (a spinner goes on
  * turning, a switch moves to its new place instead of being made again at the end, a bar grows), where setting innerHTML would make every
  * node again and every animation and transition would start from nothing at each look at the state. */

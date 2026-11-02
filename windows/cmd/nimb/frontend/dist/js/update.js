@@ -1,4 +1,4 @@
-import { esc, api } from './common.js';
+import { esc, api, spring } from './common.js';
 
 // The window of the update (UpdateWindow.swift): what is new in the version, and then the installation step by step, so that a failure says
 // where it stopped. It stands over the page; closing it while an installation goes only hides it, the installation goes on, and a failure
@@ -77,7 +77,29 @@ export class UpdateWindow {
       body = `<div class="us-plain">${u.checking ? 'Проверяю обновления…' : 'Установлена последняя версия.'}</div>`;
       buttons = '<span class="grow"></span><button class="btn" data-a="updclose" data-f="updclose" id="updclose">Закрыть</button>';
     }
+    const again = !!this.el.firstElementChild, before = this.drawn || {};
+    const oldHeight = again ? this.el.firstElementChild.getBoundingClientRect().height : 0;
     this.el.innerHTML = `<div class="upw" role="dialog" aria-label="Обновление Nimb">${head}<div class="us-body">${body}</div><div class="us-buttons">${buttons}</div></div>`;
+    this.drawn = { phase, states: u.stages.map((s) => s.state), fail: !!u.failedStage, restarting: !!u.restarting };
+    const calm = !this.el.animate || matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (again && !calm) {
+      if (before.phase !== phase) {
+        // A change of phase: the body and the buttons come in with a short rise (opacity and 6 points, easeInOut 0.28 of the Mac).
+        for (const n of this.el.querySelectorAll('.us-body, .us-buttons')) n.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 280, easing: 'ease-in-out' });
+      } else {
+        // The same phase: what changed in the steps moves with the spring of the Mac (.spring(response: 0.38, dampingFraction: 0.82)): a new mark
+        // grows from 0.4 and fades in, the box of a failure comes down 6 points, the line of the restart fades in.
+        const sp = spring(0.38, 0.82);
+        this.el.querySelectorAll('.us-step').forEach((row, i) => {
+          if (before.states && before.states[i] !== u.stages[i].state) row.querySelector('.us-mark').firstElementChild?.animate([{ opacity: 0, transform: 'scale(.4)' }, { opacity: 1, transform: 'none' }], sp);
+        });
+        if (u.failedStage && !before.fail) this.el.querySelector('.us-fail')?.animate([{ opacity: 0, transform: 'translateY(-6px)' }, { opacity: 1, transform: 'none' }], sp);
+        if (u.restarting && !before.restarting) this.el.querySelector('.us-restart')?.animate([{ opacity: 0 }, { opacity: 1 }], sp);
+        // The card grows or shrinks with the same spring (the Mac animates the whole column of the steps), not at once.
+        const card = this.el.firstElementChild, height = card.getBoundingClientRect().height;
+        if (Math.abs(height - oldHeight) > 1) card.animate([{ height: `${oldHeight}px`, overflow: 'hidden' }, { height: `${height}px`, overflow: 'hidden' }], sp);
+      }
+    }
     const first = this.el.querySelector('#updgo:not([disabled]), #updclose');
     if (first && document.activeElement === document.body) first.focus();
   }
