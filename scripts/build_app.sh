@@ -33,7 +33,6 @@ make_bundle() {
     cp Resources/AppIconActive.icns "$app/Contents/Resources/AppIconActive.icns"
     cp Resources/world.json "$app/Contents/Resources/world.json"
     cp Resources/telegram.png "$app/Contents/Resources/telegram.png"
-    cp Resources/notification.mp3 "$app/Contents/Resources/notification.mp3"
     cp Resources/nimb-tunnel.sh "$app/Contents/Resources/nimb-tunnel.sh"
     cp Resources/warp-preset.conf "$app/Contents/Resources/warp-preset.conf"
     # The pictures of the interface (art-studio/deliver): only what the app draws, not the sources and the masters.
@@ -62,7 +61,6 @@ make_bundle() {
     <key>CFBundleVersion</key><string>${VERSION}</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>NSHighResolutionCapable</key><true/>
-    <key>NSFocusStatusUsageDescription</key><string>Nimb не будет играть звук уведомления, пока у вас включён режим «Не беспокоить» или другой режим фокусирования.</string>
 </dict>
 </plist>
 PLIST

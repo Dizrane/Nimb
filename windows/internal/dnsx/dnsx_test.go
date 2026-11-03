@@ -209,12 +209,3 @@ func TestIPv6ServersOfTheNetworkThatReturnAreTakenOver(t *testing.T) {
 		t.Fatalf("write=%+v backup=%+v", write, b.Adapters)
 	}
 }
-
-func TestUnreachableWarningOnlyWhenTheProviderIsSilentAndTheInternetWorks(t *testing.T) {
-	if w := UnreachableWarning("GeoHide (EU)", false, true); !strings.HasPrefix(w, UnreachablePrefix) || !strings.Contains(w, "«GeoHide (EU)»") {
-		t.Errorf("%q", w)
-	}
-	if UnreachableWarning("x", true, true) != "" || UnreachableWarning("x", false, false) != "" || UnreachableWarning("x", true, false) != "" {
-		t.Error("an answering provider, or no internet at all, is no such warning")
-	}
-}

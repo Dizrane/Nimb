@@ -248,17 +248,3 @@ func (b *Backup) Restore(now []Adapter) (write []Adapter, skipped []string) {
 	}
 	return write, skipped
 }
-
-// UnreachablePrefix starts the warning for a network that lets no DNS through but its own (a university, an office): the notification looks
-// for it at the start of a warning.
-const UnreachablePrefix = "В этой сети DNS"
-
-// UnreachableWarning is the warning for such a network: the provider chosen in Nimb does not answer at all while the internet itself works,
-// so with its DNS set no name resolves and nothing opens. Empty when it answers, and when the internet is gone (that is another trouble, and it
-// has its own words).
-func UnreachableWarning(providerName string, providerAnswers, internetWorks bool) string {
-	if providerAnswers || !internetWorks {
-		return ""
-	}
-	return UnreachablePrefix + " «" + providerName + "» не отвечает: так бывает в сетях вуза или офиса, которые пропускают только свой DNS. Пока он включён, адреса могут не открываться совсем. Выключите «Нейросети» или смените сеть."
-}

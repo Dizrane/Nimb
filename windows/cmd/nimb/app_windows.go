@@ -60,7 +60,6 @@ type App struct {
 	wrongKey   tgproxy.RecentCount // the connections of Telegram that came with another key
 	failures   tgproxy.RecentCount // the connections that did not get to Telegram
 
-	reach dnsReach    // whether the provider answers in this network (dnswarn_windows.go)
 	probe probeState  // the check of the providers
 	upd   updateState // the look for a new version
 	sites siteState   // the check of YouTube and Discord
@@ -280,11 +279,6 @@ func (a *App) GetState() State {
 			st.AI.Provider = resp.DNS.Provider
 			if hint := a.browserHint(); hint != "" {
 				st.AI.Warnings = append(st.AI.Warnings, hint)
-			}
-			if p, ok := dnsx.Find(resp.DNS.Provider); ok {
-				if unreachable := a.unreachableWarning(p); unreachable != "" {
-					st.AI.Warnings = append([]string{unreachable}, st.AI.Warnings...)
-				}
 			}
 		}
 		if resp.Tunnel != nil {

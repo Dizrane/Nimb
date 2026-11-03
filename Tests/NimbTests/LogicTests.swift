@@ -432,23 +432,6 @@ import Testing
     }
 }
 
-@Suite struct NotifierSoundTests {
-    @Test func noSoundWhileAFocusIsOn() {
-        #expect(!Notifier.playsSound(soundSetting: .enabled, bannerShown: true, focus: .on))
-        #expect(!Notifier.playsSound(soundSetting: .notSupported, bannerShown: true, focus: .on))
-    }
-
-    @Test func soundPlaysWhenNoFocusOrNotKnown() {
-        #expect(Notifier.playsSound(soundSetting: .enabled, bannerShown: true, focus: .off))
-        #expect(Notifier.playsSound(soundSetting: .notSupported, bannerShown: true, focus: .unknown))
-    }
-
-    @Test func noSoundWithoutABannerOrWhenTheSystemSoundIsOff() {
-        #expect(!Notifier.playsSound(soundSetting: .enabled, bannerShown: false, focus: .off))
-        #expect(!Notifier.playsSound(soundSetting: .disabled, bannerShown: true, focus: .off))
-    }
-}
-
 @Suite struct UpdateNoticeTests {
     @Test func theFirstTimeTellsAboutTheVersion() {
         #expect(UpdateNotice.shouldTell(version: "0.9.6", lastTold: nil))

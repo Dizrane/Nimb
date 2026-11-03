@@ -7,7 +7,6 @@ package notice
 const (
 	TestTag   = "nimb-test"
 	UpdateTag = "nimb-update"
-	DNSTag    = "nimb-dns" // the DNS of the provider does not answer in this network
 )
 
 // The words of the test notification.

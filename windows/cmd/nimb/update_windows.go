@@ -5,6 +5,8 @@ package main
 import (
 	"context"
 	"errors"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -415,4 +417,15 @@ func (a *App) CopyUpdateDetails() Result {
 		return Result{Error: "Не удалось скопировать."}
 	}
 	return Result{OK: true}
+}
+
+// internetWorks asks Cloudflare by its address, with no DNS: any answer of the server counts.
+func internetWorks() bool {
+	client := &http.Client{Timeout: 4 * time.Second, Transport: &http.Transport{Proxy: nil, DisableKeepAlives: true, DialContext: (&net.Dialer{Timeout: 3 * time.Second}).DialContext}}
+	resp, err := client.Get("https://1.1.1.1/")
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return true
 }

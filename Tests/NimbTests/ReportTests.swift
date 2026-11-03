@@ -579,15 +579,6 @@ import Testing
         #expect(WarpTunnelModel.friendly(DNSError.failed("нет сокета")) == "нет сокета")
     }
 
-    @Test func theWarningOfAStrictNetworkComesOnlyWhenTheProviderIsSilentAndTheInternetWorks() {
-        let text = DNSManager.unreachableWarning(providerName: "GeoHide (EU)", providerAnswers: false, internetWorks: true)
-        #expect(text?.hasPrefix(DNSManager.unreachablePrefix) == true)
-        #expect(text?.contains("GeoHide (EU)") == true)
-        #expect(text?.contains("Выключите «Нейросети»") == true)
-        #expect(DNSManager.unreachableWarning(providerName: "GeoHide (EU)", providerAnswers: true, internetWorks: true) == nil)
-        #expect(DNSManager.unreachableWarning(providerName: "GeoHide (EU)", providerAnswers: false, internetWorks: false) == nil, "no internet is another trouble")
-    }
-
     @Test func theTunnelIsAdvisedToTelegramOnlyWhenItIsOffAndConnectionsKeepFailing() {
         #expect(TelegramTunnelAdvice.kind(failures: 61, reached: 300, failuresRecently: true, tunnelIsOff: true) == .partly)
         #expect(TelegramTunnelAdvice.kind(failures: 61, reached: 300, failuresRecently: true, tunnelIsOff: false) == nil, "the tunnel is on or being switched")

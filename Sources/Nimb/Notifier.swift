@@ -1,5 +1,4 @@
 import AppKit
-import Intents
 import SwiftUI
 import UserNotifications
 
@@ -53,18 +52,39 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
                     self.soundSetting = settings.soundSetting
                     AppLog.shared.add("notifications", "звук уведомлений в системе: \(settings.soundSetting == .enabled ? "включён" : settings.soundSetting == .disabled ? "выключен" : "не предусмотрен")")
                 }
+                self.askForSoundIfMissing()
             }
         }
+    }
+
+    private var soundAsked = false
+
+    /// A permission that was given when only the banner was asked for has no sound. Once per start Nimb asks again with the sound in the
+    /// options: the system may add it without a question (it asks nothing when the permission already exists).
+    private func askForSoundIfMissing() {
+        guard let center, isOn, soundSetting == .notSupported, !soundAsked else { return }
+        soundAsked = true
+        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            Task { @MainActor in
+                AppLog.shared.add("notifications", "повторный запрос со звуком: \(granted ? "разрешено" : "не разрешено")")
+                self.refresh()
+            }
+        }
+    }
+
+    /// The page of the notifications in the system settings: only the person can allow them, and turn the sound on.
+    func openSystemSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") { NSWorkspace.shared.open(url) }
     }
 
     /// The switch was turned on: ask, or, if the person has refused once, show where it is allowed (the system asks only once).
     private func ask() {
         guard let center, !isAllowed else { return }
         if status == .denied {
-            if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") { NSWorkspace.shared.open(url) }
+            openSystemSettings()
             return
         }
-        center.requestAuthorization(options: [.alert]) { granted, error in
+        center.requestAuthorization(options: [.alert, .sound]) { granted, error in
             Task { @MainActor in
                 self.refresh()
                 AppLog.shared.add("notifications", granted ? "уведомления разрешены" : "уведомления не разрешены" + (error.map { " (\($0.localizedDescription))" } ?? ""))
@@ -87,43 +107,14 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     /// One identifier for all notifications of a kind: a newer one takes the place of the older one in the Notification Centre, so there is
     /// never a pile. The older one is taken out first: a notification that only replaces another in place comes without banner and sound.
-    private func post(_ content: UNNotificationContent, identifier: String, failure: String) {
+    /// The sound is the system's own, the same as in other programs: macOS holds it back by itself while a Focus («Не беспокоить») is on.
+    private func post(_ content: UNMutableNotificationContent, identifier: String, failure: String) {
         guard let center else { return }
         center.removeDeliveredNotifications(withIdentifiers: [identifier])
-        FocusStatus.askIfNeeded()
-        if Self.playsSound(soundSetting: soundSetting, bannerShown: Self.showsBanner(identifier: identifier, appIsActive: NSApp.isActive), focus: FocusStatus.current) { playSound() }
+        content.sound = .default
         center.add(UNNotificationRequest(identifier: identifier, content: content, trigger: nil)) { error in
             if let error { AppLog.shared.add("notifications", "\(failure): \(error.localizedDescription)") }
         }
-    }
-
-    private var sound: NSSound?
-
-    /// Nimb's own sound, the same for everyone: the system one cannot be had by those who gave the permission before it was asked for (the
-    /// settings do not even show the line), and its files must be of a few formats. A sound that the person turned off in the settings stays off.
-    private func playSound() {
-        guard let url = Bundle.main.url(forResource: "notification", withExtension: "mp3"), let next = NSSound(contentsOf: url, byReference: true) else {
-            NSSound.beep()
-            return
-        }
-        sound = next
-        next.play()
-    }
-
-    private var dnsTold = false
-
-    /// The network lets no DNS through but its own (see `DNSManager.unreachableWarning`): the person is told once for as long as it lasts, and
-    /// again when it comes back after a time of working. Called at every look of the black box with what the page shows.
-    func dnsWarning(_ warnings: [String]) {
-        let present = warnings.contains { $0.hasPrefix(DNSManager.unreachablePrefix) }
-        guard present else { dnsTold = false; return }
-        guard !dnsTold, let center, isOn else { return }
-        dnsTold = true
-        let content = UNMutableNotificationContent()
-        content.title = "В этой сети DNS Nimb не отвечает"
-        content.body = "Адреса могут не открываться. Откройте Nimb и выключите «Нейросети»."
-        post(content, identifier: "nimb-dns", failure: "уведомление о DNS не показано")
-        AppLog.shared.add("notifications", "показал уведомление: DNS не отвечает в этой сети")
     }
 
     /// The button of the test is idle for a moment after a press, so it cannot be pressed in a rush.
@@ -149,13 +140,6 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
         identifier == testIdentifier || !appIsActive
     }
 
-    /// Nimb plays its own sound, which the system does not hold back, so it holds it back itself: no sound while a Focus («Не беспокоить»
-    /// and the others) is on, as the banner is not shown then either. When the person has not let Nimb see the Focus (`unknown`), the sound
-    /// plays as before.
-    nonisolated static func playsSound(soundSetting: UNNotificationSetting, bannerShown: Bool, focus: FocusStatus.State) -> Bool {
-        soundSetting != .disabled && bannerShown && focus != .on
-    }
-
     // MARK: UNUserNotificationCenterDelegate
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
@@ -173,25 +157,6 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
                 AppDelegate.showMainWindow()
             }
         }
-    }
-}
-
-/// Whether a Focus mode («Не беспокоить» and the others) is on. macOS tells only those programs that the person has allowed to see it
-/// (a question the system asks once); until then the state is unknown.
-enum FocusStatus {
-    enum State { case on, off, unknown }
-
-    static var current: State {
-        let center = INFocusStatusCenter.default
-        guard center.authorizationStatus == .authorized, let focused = center.focusStatus.isFocused else { return .unknown }
-        return focused ? .on : .off
-    }
-
-    /// Asks the system once, when a notification is about to be shown: the person knows what Nimb is doing then.
-    static func askIfNeeded() {
-        let center = INFocusStatusCenter.default
-        guard center.authorizationStatus == .notDetermined else { return }
-        center.requestAuthorization { _ in }
     }
 }
 
@@ -214,6 +179,14 @@ struct NotificationsCard: View {
                     .font(Typo.small)
                     .foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
+                if notifier.isOn && notifier.soundSetting == .disabled {
+                    Text("Звук уведомлений для Nimb выключен в системе. Включите «Воспроизводить звук при получении уведомлений».")
+                        .font(Typo.small)
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    OutlineButton(title: "Открыть настройки уведомлений", color: Theme.textPrimary) { notifier.openSystemSettings() }
+                        .padding(.top, 2)
+                }
                 if notifier.isOn && showsTest {
                     OutlineButton(title: notifier.testJustSent ? "Отправлено" : "Отправить тестовое уведомление", color: Theme.textPrimary) { notifier.sendTest() }
                         .disabled(notifier.testJustSent)

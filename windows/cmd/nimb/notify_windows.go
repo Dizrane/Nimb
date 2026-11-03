@@ -32,7 +32,6 @@ var (
 const (
 	balloonUpdate uint32 = 1
 	balloonTest   uint32 = 2
-	balloonDNS    uint32 = 3
 )
 
 const (
