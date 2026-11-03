@@ -43,6 +43,13 @@ func TestHidesLongKeys(t *testing.T) {
 	}
 }
 
+func TestAStackPathIsNotAKey(t *testing.T) {
+	line := "\tgithub.com/some-long-organisation/some-long-repository/pkg/device/send.go:112 +0x85"
+	if out := Clean(line, env); out != line {
+		t.Fatal(out)
+	}
+}
+
 func TestProviderAddressesBecomeTheirNames(t *testing.T) {
 	p := dnsx.Providers[0]
 	if out := Clean("DNS: "+strings.Join(p.Addresses, ", "), env); out != "DNS: ‹"+p.Name+"›" {

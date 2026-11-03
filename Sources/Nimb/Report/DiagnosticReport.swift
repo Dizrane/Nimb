@@ -76,7 +76,7 @@ enum DiagnosticReport {
 
         let services = await Task.detached(priority: .utility) { DNSManager.physicalServices() }.value
         // The server of the tunnel is Cloudflare's, not the person's: which one it is tells the city the traffic leaves from.
-        let keep = Set(dns.reports.flatMap { $0.samples.compactMap(\.address) } + [system.tunnelServer].compactMap { $0 })
+        let keep = Set(dns.reports.flatMap { $0.samples.compactMap(\.address) + $0.deadAddresses } + [system.tunnelServer].compactMap { $0 })
         return ReportRedactor.clean(out.joined(separator: "\n\n"), services: services, keep: keep)
     }
 

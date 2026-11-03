@@ -25,6 +25,18 @@ import Testing
         #expect(ReportRedactor.clean("private_key=\(key)").contains("‹ключ›"))
     }
 
+    @Test func aStackPathIsNotAKey() {
+        let line = "\tgithub.com/some-long-organisation/some-long-repository/pkg/device/send.go:112 +0x85"
+        #expect(ReportRedactor.clean(line) == line)
+    }
+
+    @Test func aProviderAddressThatDidNotAnswerStaysAsAnAddress() {
+        let provider = DNSProvider.all[0]
+        let dead = provider.addresses[0]
+        let text = ReportRedactor.clean("без ответа: \(dead); DNS: \(provider.addresses[1])", keep: [dead])
+        #expect(text.contains(dead) && !text.contains(provider.addresses[1]), "the bad address is told, the other one is the name")
+    }
+
     @Test func providerAddressesBecomeTheirNames() {
         let provider = DNSProvider.all[0]
         let text = ReportRedactor.clean("DNS: \(provider.addresses.joined(separator: ", "))")

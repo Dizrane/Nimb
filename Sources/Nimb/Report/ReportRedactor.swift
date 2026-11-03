@@ -26,9 +26,9 @@ enum ReportRedactor {
     /// answer, or answered with a refusal); every other address is replaced.
     static func clean(_ text: String, services: [String] = [], keep: Set<String> = []) -> String {
         var result = text
-        // The addresses of the DNS services of Nimb stay, as names.
+        // The addresses of the DNS services of Nimb stay, as names, except those asked to be kept (the one that did not answer).
         for provider in DNSProvider.all {
-            for address in provider.allAddresses { result = result.replacingOccurrences(of: address, with: "‹\(provider.name)›") }
+            for address in provider.allAddresses where !keep.contains(address) { result = result.replacingOccurrences(of: address, with: "‹\(provider.name)›") }
         }
         result = result.replacingOccurrences(of: NSHomeDirectory(), with: "~")
         if NSUserName().count >= 4 { result = result.replacingOccurrences(of: NSUserName(), with: "‹user›") }
@@ -42,7 +42,8 @@ enum ReportRedactor {
         let kept = keep.filter { !isPrivateAddress($0) }
         result = replace(#"\b(?:\d{1,3}\.){3}\d{1,3}\b"#, in: result) { kept.contains($0) ? $0 : "‹ip›" }
         result = replace(#"\b[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){3,7}\b"#, in: result, with: "‹ipv6›")
-        result = replace(#"[A-Za-z0-9+/=_\-]{32,}"#, in: result, with: "‹ключ›")
+        // A path of a stack of Go (`github.com/…/file.go`) is long too, and a line of a stack is useful: it is not a key.
+        result = replace(#"(?<![A-Za-z0-9+/=_\-])[A-Za-z0-9+/=_\-]{32,}+(?!\.go\b)"#, in: result, with: "‹ключ›")
         // Two addresses of one service read as one name.
         result = replace(#"(‹[^›]+›)(?:, \1)+"#, in: result, with: "$1")
         return result

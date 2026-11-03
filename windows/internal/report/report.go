@@ -106,11 +106,33 @@ func Clean(text string, env Environment) string {
 	text = reMAC.ReplaceAllString(text, "‹mac›")
 	text = reIPv4.ReplaceAllString(text, "‹ip›")
 	text = reIPv6.ReplaceAllString(text, "‹ipv6›")
-	text = reKey.ReplaceAllString(text, "‹ключ›")
+	text = maskKeys(text)
 	for i, a := range env.Public {
 		text = strings.ReplaceAll(text, fmt.Sprintf("⟦%d⟧", i), a)
 	}
 	return collapse(text)
+}
+
+// maskKeys replaces long keys. A path of a stack of Go (`github.com/…/file.go`) is long too, and a line of a stack is useful: it is not a key.
+func maskKeys(text string) string {
+	var out strings.Builder
+	last := 0
+	for _, m := range reKey.FindAllStringIndex(text, -1) {
+		if strings.HasPrefix(text[m[1]:], ".go") && !isWordRune(text[m[1]+3:]) {
+			continue
+		}
+		out.WriteString(text[last:m[0]])
+		out.WriteString("‹ключ›")
+		last = m[1]
+	}
+	out.WriteString(text[last:])
+	return out.String()
+}
+
+// isWordRune tells whether the text begins with a letter, a digit or an underscore.
+func isWordRune(text string) bool {
+	r, _ := utf8.DecodeRuneInString(text)
+	return r != utf8.RuneError && (unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_')
 }
 
 // replaceWord replaces name where it stands alone (not inside a longer word or number).
