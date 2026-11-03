@@ -127,7 +127,7 @@ func refreshTray(a *App) {
 			trayItems.all.SetTitle("Включить всё")
 		}
 		setTrayIcon(countOn(st.AI.On, st.Telegram.On, st.Media.On))
-		setWindowIcon(st.AI.On)
+		setWindowIcon(st.AI.On || st.Telegram.On || st.Media.On)
 		sleepSeconds(3)
 	}
 }

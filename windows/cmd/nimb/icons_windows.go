@@ -37,7 +37,7 @@ var traySomeDark []byte
 //go:embed build/windows/tray-all-dark.ico
 var trayAllDark []byte
 
-// The window (the title, the taskbar, Alt+Tab) has the two icons of the Mac Dock: the active one while the AI services are on.
+// The window (the title, the taskbar, Alt+Tab) has the two icons of the Mac Dock: the active one while any of the three services is on.
 //
 //go:embed build/windows/window-idle.ico
 var windowIdle []byte

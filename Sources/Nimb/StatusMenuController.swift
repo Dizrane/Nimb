@@ -29,7 +29,18 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
                 let total = tunnel == .unavailable ? 2 : 3
                 let state: IconState = count == 0 ? .off : (count == total ? .all : .partial)
                 self?.update(visible: running || background || tunnelOn || active != nil, state: state)
+                Self.updateDockIcon(active: count > 0)
             }
+    }
+
+    /// The Dock shows the halo over the planet while any of the three services is on and the plain halo otherwise.
+    /// The icon of the file itself (Finder, Launchpad) stays the plain one; the Dock reverts to it when the app quits.
+    private static func updateDockIcon(active: Bool) {
+        if active, let url = Bundle.main.url(forResource: "AppIconActive", withExtension: "icns"), let image = NSImage(contentsOf: url) {
+            NSApp.applicationIconImage = image
+        } else {
+            NSApp.applicationIconImage = nil
+        }
     }
 
     /// Whether the icon is in the menu bar right now.
