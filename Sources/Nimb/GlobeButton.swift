@@ -273,16 +273,6 @@ private struct GlobeCanvas: View {
             }
 
             if part == .signal {
-                // Scanning with DNS off: rings spread out from the button.
-                if mode == .probing && lit < 0.5 {
-                    for k in 0..<3 {
-                        let phase = (t * 0.6 + Double(k) / 3).truncatingRemainder(dividingBy: 1)
-                        let ringRadius = 64 + 56 * phase
-                        ctx.stroke(Path(ellipseIn: CGRect(x: c.x - ringRadius, y: c.y - ringRadius, width: ringRadius * 2, height: ringRadius * 2)),
-                                   with: .color(white.opacity((1 - phase) * 0.55 * (1 - lit * 2))), lineWidth: 1.5)
-                    }
-                }
-
                 // The near half of the halo and the sparks that drift along it; scanning speeds them up.
                 if strength > 0.01 {
                     HaloArt.draw(.front, in: &ctx, center: placement.center, scale: placement.scale, opacity: strength)
