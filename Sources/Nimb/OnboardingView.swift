@@ -67,7 +67,7 @@ struct OnboardingView: View {
         StepFrame(
             kind: .welcome,
             title: "Добро пожаловать в Nimb",
-            text: "За пару минут настроим всё, чтобы работали нейросети, Telegram, YouTube и Discord. Ничего устанавливать и вводить не нужно: Nimb делает всё сам. Когда понадобится пароль от вашего Mac, он попросит его в окне macOS: оно может называться «osascript», так система подписывает запрос Nimb."
+            text: "За пару минут настроим нейросети, Telegram, YouTube и Discord. Когда понадобится пароль от Mac, Nimb попросит его в окне macOS, оно может называться «osascript»."
         ) {
             VStack(alignment: .leading, spacing: 8) {
                 Bullet("Нейросети: ChatGPT, Claude, Gemini и другие")
@@ -86,7 +86,7 @@ struct OnboardingView: View {
         return StepFrame(
             kind: .ai,
             title: "Нейросети",
-            text: "Из-за региона ChatGPT, Claude и другие нейросети могут не открываться. Nimb переключит DNS на специальный сервис, и они заработают. Лучший сервис он подберёт сам."
+            text: "Из-за региона ChatGPT, Claude и другие нейросети могут не открываться. Nimb переключит DNS на подходящий сервис."
         ) {
             if done {
                 DoneRow(text: "Включено: \(model.active?.name ?? "")")
@@ -107,7 +107,7 @@ struct OnboardingView: View {
         StepFrame(
             kind: .telegram,
             title: "Telegram",
-            text: "Nimb запустит на этом Mac небольшой прокси, а Telegram будет ходить через него. После включения нажмите «Открыть в Telegram» и подтвердите окно «Добавить прокси»."
+            text: "Nimb запустит прокси для Telegram. После включения нажмите «Открыть в Telegram» и подтвердите «Добавить прокси»."
         ) {
             if telegram.isRunning {
                 DoneRow(text: "Прокси работает")
@@ -129,7 +129,7 @@ struct OnboardingView: View {
         StepFrame(
             kind: .media,
             title: "YouTube и Discord",
-            text: "Nimb создаст для этого Mac собственный анонимный аккаунт Cloudflare WARP и включит туннель. Личных данных он не передаёт. Пока туннель включён, через Cloudflare идёт весь трафик Mac: если не открывается банк или Госуслуги, выключите его. Понадобится пароль от Mac."
+            text: "Nimb создаст анонимный аккаунт Cloudflare WARP и включит туннель. Пока он включён, весь трафик Mac идёт через Cloudflare: если не открывается банк или Госуслуги, выключите его. Понадобится пароль."
         ) {
             if warp.isOn {
                 DoneRow(text: "Туннель работает")
@@ -160,7 +160,7 @@ struct OnboardingView: View {
         StepFrame(
             kind: .gear,
             title: "Чтобы работало само",
-            text: "Рекомендуем включить всё: Nimb запустится с Mac, будет работать при закрытом окне и скажет о новой версии."
+            text: "Рекомендуем включить всё: запуск с Mac, работа в фоне и уведомления об обновлениях."
         ) {
             // The three switches are one card with three rows, not three cards: the step has to fit the smallest window.
             VStack(spacing: 0) {
@@ -172,7 +172,7 @@ struct OnboardingView: View {
             }
             .card(.neutral)
             PrimaryButton(title: "Готово", action: onboarding.finish)
-            Text("Пройти настройку заново можно в «Настройках» (внизу слева).")
+            Text("Заново можно пройти в «Настройках».")
                 .font(Typo.small)
                 .foregroundStyle(Theme.textSecondary)
                 .multilineTextAlignment(.center)

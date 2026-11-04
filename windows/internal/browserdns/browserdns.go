@@ -9,7 +9,7 @@ import (
 )
 
 // FirefoxText is what the person is told.
-const FirefoxText = "Firefox мог включить «DNS через HTTPS» (в России он включён по умолчанию): тогда браузер спрашивает адреса у Cloudflare и обходит Nimb. Выключите его: «Настройки» → «Приватность и защита» → «DNS через HTTPS»."
+const FirefoxText = "Firefox мог включить «DNS через HTTPS» и обходит Nimb. Выключите: «Настройки» → «Приватность и защита» → «DNS через HTTPS»."
 
 var reMode = regexp.MustCompile(`user_pref\(\s*"network\.trr\.mode"\s*,\s*(\d+)\s*\)`)
 

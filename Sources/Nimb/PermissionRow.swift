@@ -31,10 +31,12 @@ struct PermissionRow: View {
                     .padding(.vertical, 2.5)
                     .overlay(RoundedRectangle(cornerRadius: 4, style: .continuous).strokeBorder((granted ? Theme.warn : Color.white).opacity(0.35), lineWidth: 1))
             }
-            Text(detail)
-                .font(Typo.small)
-                .foregroundStyle(Theme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
+            if !detail.isEmpty {
+                Text(detail)
+                    .font(Typo.small)
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if let note {
                 Text(note)
                     .font(Typo.small)

@@ -271,7 +271,7 @@ document.addEventListener('click', async (e) => {
     case 'helpinfo': toggleHelp(t); break;
     case 'tag': openPopover(t, { width: 280, side: 'above', build: (el) => {
       el.innerHTML = S.modified
-        ? `<div class="pv-title">Изменённая сборка</div><div class="pv-note">Приложение изменено или собрано не из официального выпуска. Отправка отчётов и помощь тестированию отключены. Разработчик не отвечает за изменённые сборки.<br><br>Если вы доработали что-то для себя, расскажите об этом разработчику в Telegram: хорошие идеи попадут в Nimb, и пользоваться ими смогут все.</div><button class="btn" id="pv-chat" style="margin-top:8px">Написать разработчику</button>`
+        ? `<div class="pv-title">Изменённая сборка</div><div class="pv-note">Приложение изменено или собрано не из официального выпуска. Отчёты и «Помогать тестированию» отключены. Разработчик не отвечает за изменённые сборки.<br><br>Если доработали что-то полезное, напишите разработчику в Telegram.</div><button class="btn" id="pv-chat" style="margin-top:8px">Написать разработчику</button>`
         : '<div class="pv-title">Оригинальная сборка</div><div class="pv-note">Всё хорошо. У вас последняя версия Nimb :3</div>';
       el.querySelector('#pv-chat')?.addEventListener('click', () => api().OpenDeveloperChat());
     } }); break;

@@ -17,10 +17,10 @@ struct WarpPage: View {
     private var subtitle: String {
         switch warp.phase {
         case .unavailable: return "В этой сборке Nimb нет туннеля. Скачайте приложение со страницы релизов."
-        case .notInstalled: return "Включите, чтобы открывались YouTube и Discord. Всё настроится само."
+        case .notInstalled: return "Включите, чтобы открывались YouTube и Discord."
         case .off: return "Включите, чтобы открывались YouTube и Discord."
         case .working(let text): return text
-        case .on: return "Весь трафик этого Mac идёт через Cloudflare WARP. Если не открывается банк или Госуслуги, выключите туннель."
+        case .on: return "Весь трафик идёт через Cloudflare WARP. Если не открывается банк или Госуслуги, выключите туннель."
         }
     }
 
@@ -83,7 +83,7 @@ struct WarpPage: View {
             Text("Что произойдёт при включении")
                 .font(Typo.name)
                 .foregroundStyle(Theme.textPrimary)
-            Text("Nimb создаст для этого Mac анонимный аккаунт Cloudflare WARP и запросит пароль. Пока туннель включён, через Cloudflare идёт весь трафик Mac, и некоторые сайты, например банки и Госуслуги, могут не открываться: тогда выключите туннель. Туннель нужен для доступа, а не для анонимности: если он упадёт, трафик пойдёт напрямую. Включая, вы принимаете условия Cloudflare WARP.")
+            Text("Nimb создаст анонимный аккаунт Cloudflare WARP и запросит пароль. Весь трафик Mac пойдёт через Cloudflare: банки и Госуслуги могут не открываться, тогда выключите туннель. Туннель нужен для доступа, а не для анонимности. Включая, вы принимаете условия Cloudflare WARP.")
                 .font(Typo.small)
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -98,12 +98,6 @@ struct WarpPage: View {
             Text("Проверка")
                 .font(Typo.name)
                 .foregroundStyle(Theme.textPrimary)
-            if warp.checks.isEmpty {
-                Text("Проверит, открываются ли YouTube и Discord.")
-                    .font(Typo.small)
-                    .foregroundStyle(Theme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
             ForEach(warp.checks) { check in
                 CheckRow(check: check)
             }

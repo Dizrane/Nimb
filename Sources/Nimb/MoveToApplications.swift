@@ -43,7 +43,7 @@ enum MoveToApplications {
         askedThisRun = true
         let alert = NSAlert()
         alert.messageText = "Переместить Nimb в «Программы»?"
-        alert.informativeText = "Оттуда приложение сможет обновляться само, и его проще найти. Если в «Программах» уже есть Nimb, он будет заменён."
+        alert.informativeText = "Так Nimb сможет обновляться сам. Копия в «Программах», если есть, будет заменена."
             + (movesOriginalToTrash(Bundle.main.bundleURL.path) ? " Эта копия переедет в Корзину." : "")
         alert.addButton(withTitle: "Переместить")
         alert.addButton(withTitle: "Не сейчас")

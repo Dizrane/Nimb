@@ -126,7 +126,7 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
         guard let center, isOn, !testJustSent else { return }
         let content = UNMutableNotificationContent()
         content.title = "Проверка уведомлений"
-        content.body = "Если вы это видите, Nimb сможет сообщить о новой версии."
+        content.body = "Уведомления работают."
         post(content, identifier: Self.testIdentifier, failure: "проверочное уведомление не показано")
         AppLog.shared.add("notifications", "показал проверочное уведомление")
         testJustSent = true
@@ -173,14 +173,14 @@ struct NotificationsCard: View {
                 Text("Уведомления об обновлениях")
                     .font(Typo.name)
                     .foregroundStyle(Theme.textPrimary)
-                Text(notifier.enabled && notifier.status == .denied
-                     ? "Разрешите уведомления для Nimb в «Системных настройках»: Nimb скажет, когда выйдет новая версия."
-                     : "Nimb скажет, когда выйдет новая версия.")
-                    .font(Typo.small)
-                    .foregroundStyle(Theme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                if notifier.enabled && notifier.status == .denied {
+                    Text("Разрешите уведомления для Nimb в «Системных настройках».")
+                        .font(Typo.small)
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 if notifier.isOn && notifier.soundSetting == .disabled {
-                    Text("Звук уведомлений для Nimb выключен в системе. Включите «Воспроизводить звук при получении уведомлений».")
+                    Text("Звук выключен в системе.")
                         .font(Typo.small)
                         .foregroundStyle(Theme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)

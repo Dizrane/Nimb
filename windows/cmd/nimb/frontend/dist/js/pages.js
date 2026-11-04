@@ -158,20 +158,20 @@ export class TelegramPage {
     this.hero.update({
       on: t.on, busy: t.busy, disabled: t.busy,
       title: t.on ? 'Включено' : t.busy ? 'Запускаю' : 'Выключено',
-      subtitle: t.on ? 'Прокси работает на этом компьютере. Telegram ходит через него.' : 'Включите, чтобы Telegram открывался и грузил файлы быстрее.',
+      subtitle: t.on ? 'Прокси работает.' : 'Включите, чтобы Telegram открывался.',
       label: t.on ? 'Остановить прокси для Telegram' : 'Включить прокси для Telegram',
     });
     if (same(this, 'rj', [t.on, t.error, t.wrongKeyRecently, t.tunnelAdvice, S.media.busy])) return;
     const body = t.on
       ? `<div class="card stack8"><div class="nm">Подключить Telegram</div>
-          <div class="sm">Откроется окно «Добавить прокси» в Telegram Desktop: подтвердите его.</div>
+          <div class="sm">В Telegram откроется «Добавить прокси»: подтвердите.</div>
           <div style="display:flex;justify-content:flex-end;gap:8px">
             <button class="btn" data-a="copy" data-f="copy" id="copy">Скопировать ссылку</button>
             <button class="btn" data-a="openTg" data-f="open" id="open">Открыть в Telegram</button></div>
           <div id="note" class="sm" style="text-align:right"></div></div>`
-      : `<div class="card"><div class="nm">Как это работает</div><div class="sm">Включите прокси и подтвердите окно «Добавить прокси» в Telegram.</div></div>`;
+      : `<div class="card"><div class="nm">Как это работает</div><div class="sm">Включите прокси и подтвердите «Добавить прокси» в Telegram.</div></div>`;
     // As on the Mac: only while it goes on; it goes away by itself ten seconds after the last connection with another key.
-    const wrongKey = t.on && t.wrongKeyRecently ? notice('Telegram подключается с чужим ключом: в нём, похоже, указан другой прокси на этом порту. Нажмите «Открыть в Telegram» и подтвердите, а старый прокси удалите.', 'warn') : '';
+    const wrongKey = t.on && t.wrongKeyRecently ? notice('Telegram подключается с чужим ключом: на этом порту указан другой прокси. Нажмите «Открыть в Telegram», старый прокси удалите.', 'warn') : '';
     // Advice only (the routing does not change): with the tunnel off, a network that does not let Telegram through is told to turn it on.
     const advice = t.on && t.tunnelAdvice ? `<div class="card" style="display:flex;align-items:flex-start;gap:10px"><div class="sm" style="flex:1">${esc(t.tunnelAdvice)}</div>
         <button class="btn" data-a="sw" data-v="media" data-f="advice" id="advice" ${S.media.busy ? 'disabled' : ''}>Включить туннель</button></div>` : '';
@@ -201,7 +201,7 @@ function checkRow(c) {
 
 function checkCard(sites) {
   return `<div class="card stack8"><div class="nm">Проверка</div>
-    ${sites.checks.length ? sites.checks.map(checkRow).join('') : '<div class="sm">Проверит, открываются ли YouTube и Discord.</div>'}
+    ${sites.checks.map(checkRow).join('')}
     <div class="chk-act">${sites.running ? '<span class="spin"></span>' : ''}<button class="btn" data-a="sitecheck" data-f="sitecheck" id="sitecheck" ${sites.running ? 'disabled' : ''}>Проверить YouTube и Discord</button></div></div>`;
 }
 
@@ -223,7 +223,7 @@ export class MediaPage {
     this.hero.update({
       on: m.on, busy: m.busy, disabled: m.busy || !S.serviceOk,
       title: m.busy ? 'Подождите' : m.on ? 'Включено' : 'Выключено',
-      subtitle: m.busy ? (m.on ? 'Выключаю туннель…' : 'Включаю туннель…') : m.on ? 'Весь трафик этого компьютера идёт через Cloudflare WARP. Если не открывается банк или Госуслуги, выключите туннель.' : 'Включите, чтобы открывались YouTube и Discord. Всё настроится само.',
+      subtitle: m.busy ? (m.on ? 'Выключаю туннель…' : 'Включаю туннель…') : m.on ? 'Весь трафик идёт через Cloudflare WARP. Если не открывается банк или Госуслуги, выключите туннель.' : 'Включите, чтобы открывались YouTube и Discord.',
       label: m.on ? 'Выключить туннель WARP' : 'Включить туннель WARP',
     });
     if (same(this, 'rj', [m.on, m.error, S.sites])) return;
@@ -253,7 +253,7 @@ export function toggleSites(anchor) {
 /** The switch for the notifications about new versions; the test button is there only while they are on. */
 export function notifyCard(S, extra, { framed = true, showsTest = true } = {}) {
   const on = S.update.notify;
-  return `<div class="${framed ? 'card ' : ''}row top"><div class="grow"><div class="nm">Уведомления об обновлениях</div><div class="sm">Nimb скажет, когда выйдет новая версия.</div>
+  return `<div class="${framed ? 'card ' : ''}row top"><div class="grow"><div class="nm">Уведомления об обновлениях</div>
     ${on && showsTest ? `<button class="btn" style="margin-top:5px" data-a="notifytest" data-f="notifytest" id="notifytest" aria-label="Отправить тестовое уведомление" ${extra.testSent ? 'disabled' : ''}>${extra.testSent ? 'Отправлено' : 'Отправить тестовое уведомление'}</button>` : ''}</div>
     <button class="pill ${on ? 'on' : ''}" role="switch" aria-checked="${on}" aria-label="Уведомления об обновлениях" data-a="notify" data-f="notify" id="notify"></button></div>`;
 }
@@ -270,8 +270,8 @@ function lastWords(unix) {
 /** The second line of the card «Сообщить о проблеме» (HelpTestingRow.swift): the switch «Помогать тестированию» and what it is. */
 function helpRow(S) {
   const h = S.help || {};
-  const detail = h.paused ? h.paused : !h.on ? 'Раз в сутки сам отправит сводку, если разрешите.'
-    : !h.last ? 'Включено. Пока ничего не отправлено.' : `Отправлено: ${h.count}, последний ${lastWords(h.last)}.`;
+  const detail = h.paused ? h.paused : !h.on ? 'Сводка раз в сутки.'
+    : !h.last ? 'Пока ничего не отправлено.' : `Отправлено: ${h.count}, последний ${lastWords(h.last)}.`;
   return `<div class="hr"></div><div class="rowline"><div class="grow"><div class="nm-line"><span class="nm">Помогать тестированию</span>
     <button class="info" data-a="helpinfo" data-f="helpinfo" id="helpinfo" aria-label="Что такое «Помогать тестированию»" title="Что это и что отправляется">${INFO_CIRCLE}</button></div>
     <div class="sm">${detail}</div></div>
@@ -290,10 +290,10 @@ export function toggleHelp(anchor) {
         el.querySelector('#pv-back').addEventListener('click', () => { example = false; draw(); });
       } else {
         el.innerHTML = `<div class="pv-title">Помогать тестированию</div>
-          ${point('Когда', 'Раз в сутки уходит одна сводка с цифрами за день. Если за день что-то серьёзно сломалось (программа закрылась неожиданно, туннель остановился сам или молчит больше 10 минут, сервис не работает как надо больше 10 минут, обновление не ставится), это попадёт в сводку со временем и состоянием в момент первого сбоя. Если сайт просто не открылся, это не причина: такое бывает у всех.')}
-          ${point('Как часто', 'Один отчёт в сутки, больше ничего само не отправляется. Если сети нет, отчёт ждёт до суток и уходит сам. Отчёты принимаются только из последней версии Nimb: если вышла новая, сначала обновитесь.')}
-          ${point('Что внутри', 'То же, что в «Сообщить о проблеме»: версии, состояние сервисов, журнал. Паролей, ключей и личных данных (адрес, имя компьютера, адреса вашей сети) нет. Адреса серверов DNS и туннеля есть: они помогают найти ошибку.')}
-          ${point('Номер установки', 'Случайный. По нему отчёты с одного компьютера связываются между собой, но не с вами лично. Когда вы выключаете переключатель, он стирается.')}
+          ${point('Что уходит', 'Раз в сутки одна сводка: цифры за день и серьёзные сбои (неожиданное закрытие, остановка туннеля или сервиса дольше 10 минут, неудачное обновление) со временем и состоянием. Сайт, который просто не открылся, сбоем не считается.')}
+          ${point('Когда', 'Один отчёт в сутки, больше ничего не отправляется. Без сети отчёт уйдёт позже. Принимаются отчёты только последней версии Nimb.')}
+          ${point('Что внутри', 'Как в «Сообщить о проблеме»: версии, состояние сервисов, журнал. Паролей и личных данных нет. Адреса серверов DNS и туннеля есть.')}
+          ${point('Номер установки', 'Случайный, с вами не связан. Стирается, когда выключаете переключатель.')}
           <div class="pv-hr"></div><button class="btn" id="pv-example">Показать пример отчёта</button>`;
         el.querySelector('#pv-example').addEventListener('click', async () => {
           example = true; draw();
@@ -316,14 +316,14 @@ export class SettingsPage {
     // The columns of the Mac (SettingsView.swift); the block «Пароль администратора» is not here (the service has the rights), so Помощь
     // stands over Удаление in the right column.
     setHTML(this.body, `<div class="col">${group('Работа',
-        card('Работать в фоне', 'Nimb остаётся у часов, когда окно закрыто.', `<button class="pill ${S.background ? 'on' : ''}" role="switch" aria-checked="${S.background}" aria-label="Работать в фоне" data-a="background" data-f="background" id="background"></button>`, true),
-        card('Запускать вместе с Windows', 'Nimb откроется сам при входе в систему. Если включена работа в фоне, окно не откроется: останется значок у часов.', `<button class="pill ${extra.autostart ? 'on' : ''}" role="switch" aria-checked="${extra.autostart}" aria-label="Запускать вместе с Windows" data-a="autostart" data-f="autostart" id="autostart"></button>`, true),
+        card('Работать в фоне', '', `<button class="pill ${S.background ? 'on' : ''}" role="switch" aria-checked="${S.background}" aria-label="Работать в фоне" data-a="background" data-f="background" id="background"></button>`, true),
+        card('Запускать вместе с Windows', '', `<button class="pill ${extra.autostart ? 'on' : ''}" role="switch" aria-checked="${extra.autostart}" aria-label="Запускать вместе с Windows" data-a="autostart" data-f="autostart" id="autostart"></button>`, true),
         notifyCard(S, extra))}</div>
       <div class="col">${group('Помощь',
-        `<div class="card stack12"><div class="rowline"><div class="grow"><div class="nm">Сообщить о проблеме</div><div class="sm">Отчёт придёт разработчику. Паролей и адресов в нём нет.</div></div><button class="btn" data-a="report" data-f="report" id="report">Отправить…</button></div>${helpRow(S)}</div>`,
-        card('Первая настройка', 'Короткое обучение по шагам.', '<button class="btn" data-a="onboard" data-f="onboard" id="onboard">Пройти заново</button>'))}
+        `<div class="card stack12"><div class="rowline"><div class="grow"><div class="nm">Сообщить о проблеме</div><div class="sm">Без паролей и личных данных.</div></div><button class="btn" data-a="report" data-f="report" id="report">Отправить…</button></div>${helpRow(S)}</div>`,
+        card('Первая настройка', '', '<button class="btn" data-a="onboard" data-f="onboard" id="onboard">Пройти заново</button>'))}
         ${group('Удаление',
-        card('Удалить Nimb', 'Вернёт DNS к автоматическому и удалит приложение вместе с настройками.', '<button class="btn red" data-a="uninstall" data-f="uninstall" id="uninstall">Удалить…</button>'))}
+        card('Удалить Nimb', 'Вернёт DNS и удалит приложение с настройками.', '<button class="btn red" data-a="uninstall" data-f="uninstall" id="uninstall">Удалить…</button>'))}
         ${notice(S.ai.error || S.media.error)}</div>`);
   }
   destroy() {}

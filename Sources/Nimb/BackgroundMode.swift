@@ -26,10 +26,6 @@ struct BackgroundCard: View {
                 Text("Работать в фоне")
                     .font(Typo.name)
                     .foregroundStyle(Theme.textPrimary)
-                Text("Nimb остаётся в строке меню, когда окно закрыто.")
-                    .font(Typo.small)
-                    .foregroundStyle(Theme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)
             PillSwitch(label: "Работать в фоне", isOn: background.enabled) { background.enabled.toggle() }

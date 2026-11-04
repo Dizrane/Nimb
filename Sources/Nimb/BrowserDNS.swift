@@ -6,7 +6,7 @@ import Foundation
 enum BrowserDNS {
     static let firefoxIdentifiers = ["org.mozilla.firefox", "org.mozilla.firefoxdeveloperedition", "org.mozilla.nightly"]
 
-    static let firefoxText = "Firefox мог включить «DNS через HTTPS» (в России он включён по умолчанию): тогда браузер спрашивает адреса у Cloudflare и обходит Nimb. Выключите его: «Настройки» → «Приватность и защита» → «DNS через HTTPS»."
+    static let firefoxText = "Firefox мог включить «DNS через HTTPS» и обходит Nimb. Выключите: «Настройки» → «Приватность и защита» → «DNS через HTTPS»."
 
     /// The line for the person, or nil when there is nothing to say: no Firefox, a Firefox that never started, or one that has
     /// DNS over HTTPS switched off in every profile. `profiles` are the preference files of each profile, as text.

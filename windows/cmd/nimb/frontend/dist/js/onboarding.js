@@ -177,35 +177,35 @@ export class Onboarding {
     const providerName = (S.providers.find((p) => p.id === S.ai.provider) || {}).name || '';
 
     if (step === 0) {
-      return head('Добро пожаловать в Nimb', 'За пару минут настроим всё, чтобы работали нейросети, Telegram, YouTube и Discord. Ничего устанавливать и вводить не нужно: Nimb делает всё сам.')
+      return head('Добро пожаловать в Nimb', 'За пару минут настроим нейросети, Telegram, YouTube и Discord.')
         + `<div class="card bullets" style="width:100%"><div>✓ Нейросети: ChatGPT, Claude, Gemini и другие</div><div>✓ Telegram: быстрее и без блокировок</div><div>✓ YouTube и Discord</div></div>`
         + next('Начать') + `<button class="link center-link" data-a="onbclose" data-f="onbskip" id="onbskip">Настрою потом</button>`;
     }
     if (step === 1) {
       const s = S.ai, p = S.probe;
       const progress = p.phase === 'enabling' ? 'Включаю…' : p.total > 0 ? `Проверено ${p.done} из ${p.total}` : 'Определяю адреса…';
-      return head('Нейросети', 'Из-за региона ChatGPT, Claude и другие нейросети могут не открываться. Nimb переключит DNS на специальный сервис, и они заработают. Лучший сервис он подберёт сам.')
+      return head('Нейросети', 'Из-за региона ChatGPT, Claude и другие нейросети могут не открываться. Nimb переключит DNS на подходящий сервис.')
         + (p.running ? busy(progress) : s.on ? done(`Включено: ${providerName}`) + next() : s.busy ? busy('Включаю…')
           : `<button class="btn main wide" data-a="onbbest" data-f="onbgo" id="onbgo" ${S.serviceOk ? '' : 'disabled'}>Подобрать и включить</button>` + skip())
         + banner(s.error || (S.serviceOk ? '' : S.serviceError));
     }
     if (step === 2) {
       const s = S.telegram;
-      return head('Telegram', 'Nimb запустит на этом компьютере небольшой прокси, а Telegram будет ходить через него. После включения нажмите «Открыть в Telegram» и подтвердите окно «Добавить прокси».')
+      return head('Telegram', 'Nimb запустит прокси для Telegram. После включения нажмите «Открыть в Telegram» и подтвердите «Добавить прокси».')
         + (s.on ? done('Прокси работает') + '<button class="btn wide" data-a="openTg" data-f="onbopen" id="onbopen">Открыть в Telegram</button>' + next()
           : s.busy ? busy('Запускаю…') : go('telegram', 'Включить прокси') + skip())
         + banner(s.error);
     }
     if (step === 3) {
       const s = S.media;
-      return head('YouTube и Discord', 'Nimb создаст для этого компьютера собственный анонимный аккаунт Cloudflare WARP и включит туннель. Личных данных он не передаёт. Пока туннель включён, через Cloudflare идёт весь трафик компьютера: если не открывается банк или Госуслуги, выключите его.')
+      return head('YouTube и Discord', 'Nimb создаст анонимный аккаунт Cloudflare WARP и включит туннель. Пока он включён, весь трафик идёт через Cloudflare: если не открывается банк или Госуслуги, выключите его.')
         + (s.on ? done('Туннель работает') + next()
           : s.busy ? busy('Включаю…')
           : go('media', 'Включить', !S.serviceOk) + `<div class="sm" style="text-align:center;font-size:12px;color:var(--t2)">Включая, вы принимаете условия Cloudflare WARP.</div>
              <button class="link center-link" data-a="terms" data-f="terms" id="terms" style="color:#6ea8ff">Условия Cloudflare WARP</button>` + skip())
         + banner(s.error || (S.serviceOk ? '' : S.serviceError));
     }
-    return head('Чтобы работало само', 'Рекомендуем включить: Nimb запустится вместе с Windows, будет работать у часов при закрытом окне и скажет о новой версии.')
+    return head('Чтобы работало само', 'Рекомендуем включить всё: запуск с Windows, работа в фоне и уведомления об обновлениях.')
       // The switches are one card with a row for each, not a card for each: the step has to fit the smallest window.
       + `<div class="card rows" style="width:100%;text-align:left"><div class="row"><div class="grow"><div class="nm">Запускать вместе с Windows</div></div>
          <button class="pill ${extra.autostart ? 'on' : ''}" role="switch" aria-checked="${extra.autostart}" aria-label="Запускать вместе с Windows" data-a="autostart" data-f="autostart" id="autostart"></button></div>

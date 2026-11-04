@@ -35,9 +35,9 @@ func AdviceFor(failures, reached int, failuresRecently, tunnelIsOff bool) Tunnel
 func (a TunnelAdvice) Words() string {
 	switch a {
 	case AdviceBlocked:
-		return "Ваша сеть не пускает Telegram: прокси до его серверов не достаёт. Туннель «YouTube и Discord» их откроет."
+		return "Сеть не пускает к серверам Telegram. Поможет туннель «YouTube и Discord»."
 	case AdvicePartly:
-		return "Часть файлов Telegram лежит на серверах, до которых ваша сеть не достаёт: прокси сам с этим не справится. Туннель «YouTube и Discord» их откроет."
+		return "Часть файлов Telegram лежит на серверах, недоступных в вашей сети. Поможет туннель «YouTube и Discord»."
 	}
 	return ""
 }

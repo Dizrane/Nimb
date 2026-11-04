@@ -10,13 +10,13 @@ struct SettingsView: View {
         let access = model.access
         guard access.enabled else { return nil }
         if access.tooBroad {
-            return "Если после замены это сообщение останется, широкий доступ даёт другое правило sudo, не от Nimb."
+            return "Если сообщение осталось, широкий доступ даёт другое правило sudo."
         }
         if !access.missing.isEmpty {
-            return "Для новых подключений (\(access.missing.joined(separator: ", "))) пароль пока запрашивается. «Добавить подключения» включит их в правило (понадобится пароль)."
+            return "Для новых подключений (\(access.missing.joined(separator: ", "))) нужен пароль. «Добавить подключения» включит их в правило."
         }
         if access.providersMissing {
-            return "В правиле нет новых сервисов (например MagicDNS): при переключении на них пароль пока запрашивается. «Обновить правило» добавит их (понадобится пароль)."
+            return "Для новых сервисов (например MagicDNS) нужен пароль. «Обновить правило» добавит их."
         }
         return nil
     }
@@ -25,8 +25,9 @@ struct SettingsView: View {
         VStack(spacing: 0) {
             PageHeader(title: "Настройки", buttonTitle: nil) {}
 
-            // Two columns, so that all the settings are in front of the person at once and nothing is scrolled.
-            FitOrScroll {
+            // Two columns, so that all the settings are in front of the person at once and nothing is scrolled. They stand under the title,
+            // as on Windows.
+            FitOrScroll(alignment: .top) {
                 HStack(alignment: .top, spacing: Space.xl) {
                     VStack(alignment: .leading, spacing: Space.l) {
                     SettingsSection(title: "Работа") {
@@ -42,7 +43,7 @@ struct SettingsView: View {
                                     Text("Сообщить о проблеме")
                                         .font(Typo.name)
                                         .foregroundStyle(Theme.textPrimary)
-                                    Text("Отчёт придёт разработчику. Паролей и личных данных в нём нет.")
+                                    Text("Без паролей и личных данных.")
                                         .font(Typo.small)
                                         .foregroundStyle(Theme.textSecondary)
                                         .fixedSize(horizontal: false, vertical: true)
@@ -61,10 +62,6 @@ struct SettingsView: View {
                                 Text("Первая настройка")
                                     .font(Typo.name)
                                     .foregroundStyle(Theme.textPrimary)
-                                Text("Короткое обучение по шагам.")
-                                    .font(Typo.small)
-                                    .foregroundStyle(Theme.textSecondary)
-                                    .fixedSize(horizontal: false, vertical: true)
                             }
                             Spacer(minLength: Space.s)
                             OutlineButton(title: "Пройти заново", color: Theme.textPrimary) {
@@ -86,10 +83,8 @@ struct SettingsView: View {
                         PermissionRow(
                             title: "Смена DNS",
                             detail: model.access.tooBroad
-                                ? "Старое правило слишком широкое. «Сделать точным» заменит его на безопасное."
-                                : model.passwordless
-                                ? "DNS переключается без пароля. Только между сервисами Nimb и автоматическим."
-                                : "DNS переключается по паролю или Touch ID. Можно разрешить без пароля.",
+                                ? "Правило слишком широкое. «Сделать точным» заменит его."
+                                : "Только между сервисами Nimb и автоматическим DNS.",
                             granted: model.passwordless,
                             disabled: model.isLocked,
                             note: accessNote,
@@ -100,10 +95,8 @@ struct SettingsView: View {
                         PermissionRow(
                             title: "Туннель YouTube и Discord",
                             detail: warp.passwordless && warp.unsafeFolder != nil
-                                ? "Небезопасно: папка «\(warp.unsafeFolder ?? "")» не только у администратора, через неё можно подменить помощника. Заберите разрешение."
-                                : warp.passwordless
-                                ? "Туннель включается и выключается без пароля."
-                                : "Туннель включается по паролю или Touch ID. Можно разрешить без пароля.",
+                                ? "Небезопасно: папка «\(warp.unsafeFolder ?? "")» доступна не только администратору. Заберите разрешение."
+                                : "",
                             granted: warp.passwordless,
                             disabled: warp.isWorking || warp.isSettingAccess,
                             action: { warp.setPasswordless(!warp.passwordless) }
@@ -116,7 +109,7 @@ struct SettingsView: View {
                                 Text("Удалить Nimb")
                                     .font(Typo.name)
                                     .foregroundStyle(Theme.textPrimary)
-                                Text("Вернёт DNS к автоматическому и удалит приложение вместе с настройками.")
+                                Text("Вернёт DNS и удалит приложение с настройками.")
                                     .font(Typo.small)
                                     .foregroundStyle(Theme.textSecondary)
                                     .fixedSize(horizontal: false, vertical: true)
