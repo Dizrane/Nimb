@@ -324,7 +324,7 @@ func (a *App) sendDigestIfDue() {
 		return
 	}
 	since := time.Unix(stamp, 0)
-	if !autoreport.DigestDue(now, since) {
+	if !autoreport.DigestDue(now, since, processStarted) {
 		return
 	}
 	causes := a.settings.get().HelpCauses

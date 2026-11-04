@@ -255,8 +255,13 @@ func TestTheBlackBoxKeepsADayOfLines(t *testing.T) {
 
 func TestTheDigestGoesOnceADay(t *testing.T) {
 	last := time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC)
-	if DigestDue(last.Add(23*time.Hour), last) || !DigestDue(last.Add(24*time.Hour), last) {
+	long := last.Add(-time.Hour)
+	if DigestDue(last.Add(23*time.Hour), last, long) || !DigestDue(last.Add(24*time.Hour), last, long) {
 		t.Error("a day between the digests")
+	}
+	now := last.Add(25 * time.Hour)
+	if DigestDue(now, last, now.Add(-30*time.Second)) || !DigestDue(now, last, now.Add(-4*time.Minute)) {
+		t.Error("right after the start the digest waits for the network")
 	}
 }
 

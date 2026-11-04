@@ -448,6 +448,8 @@ import Testing
         let last = now.addingTimeInterval(-23 * 3600)
         #expect(!DailyDigest.isDue(now: now, last: last))
         #expect(DailyDigest.isDue(now: now.addingTimeInterval(2 * 3600), last: last))
+        #expect(!DailyDigest.isDue(now: now.addingTimeInterval(2 * 3600), last: last, started: now.addingTimeInterval(2 * 3600 - 30)), "right after the start it waits for the network")
+        #expect(DailyDigest.isDue(now: now.addingTimeInterval(2 * 3600), last: last, started: now.addingTimeInterval(2 * 3600 - 240)))
         let lines = [
             "2026-10-23 10:00:00 | работает=1ч00м | dns=Comss совпало=да | telegram=вкл:1080 соединений=4 ошибок=0 совпало=да | туннель=вкл:utun4 совпало=да маршрутов=2 | трафик_через=utun4 | память=120МБ",
             "2026-10-23 10:05:00 | работает=1ч05м | dns=Comss совпало=НЕТ | telegram=выкл совпало=да | туннель=вкл:utun4 совпало=НЕТ маршрутов=0 | трафик_через=en0 | память=180МБ",

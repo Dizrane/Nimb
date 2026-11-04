@@ -193,7 +193,13 @@ enum PendingReports {
 enum DailyDigest {
     static let every: TimeInterval = 24 * 3600
 
-    static func isDue(now: Date, last: Date) -> Bool { now.timeIntervalSince(last) >= every }
+    /// Right after the start (a login, a wake of the computer) the network may still be coming up, and the report would read its first
+    /// seconds as a fault: the digest waits for the next look of the black box.
+    static let settle: TimeInterval = 180
+
+    static func isDue(now: Date, last: Date, started: Date = .distantPast) -> Bool {
+        now.timeIntervalSince(last) >= every && now.timeIntervalSince(started) >= settle
+    }
 
     /// The lines of the black box written after `since` (the time of the last digest, or of the switch being turned on): the digests follow
     /// each other with nothing counted twice and nothing missed, even when the program was closed for days. A line starts with its time.
@@ -392,13 +398,15 @@ final class AutoReporter: ObservableObject {
 
     /// The report of the day goes when a day has passed since the last one (or since the switch was turned on). A Mac that was asleep sends it
     /// at the first look after waking.
+    private let started = Date()
+
     private func sendDigestIfDue() {
         let defaults = UserDefaults.standard
         let now = Date()
         let stamp = defaults.double(forKey: Self.digestKey)
         // Turned on by an older version: the day starts now.
         guard stamp > 0 else { defaults.set(now.timeIntervalSince1970, forKey: Self.digestKey); return }
-        guard DailyDigest.isDue(now: now, last: Date(timeIntervalSince1970: stamp)) else { return }
+        guard DailyDigest.isDue(now: now, last: Date(timeIntervalSince1970: stamp), started: started) else { return }
         defaults.set(now.timeIntervalSince1970, forKey: Self.digestKey)
         let lines = DailyDigest.lines(BlackBox.lastLines(BlackBoxLine.keepLines), since: Date(timeIntervalSince1970: stamp))
         let summary = DailyDigest.summary(lines: lines, causes: causes())

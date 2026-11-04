@@ -350,7 +350,13 @@ func Trimmed(lines []string) []string {
 // the snapshot of the first fault.
 const DigestEvery = 24 * time.Hour
 
-func DigestDue(now, last time.Time) bool { return now.Sub(last) >= DigestEvery }
+func DigestDue(now, last, started time.Time) bool {
+	return now.Sub(last) >= DigestEvery && now.Sub(started) >= DigestSettle
+}
+
+// DigestSettle: right after the start (a login, a wake of the computer) the network may still be coming up, and the report would read its
+// first seconds as a fault: the digest waits for the next look of the black box.
+const DigestSettle = 3 * time.Minute
 
 // LinesSince are the lines of the black box written after `since` (the time of the last digest, or of the switch being turned on): the
 // digests follow each other with nothing counted twice and nothing missed, even when the program was closed for days. A line starts with
