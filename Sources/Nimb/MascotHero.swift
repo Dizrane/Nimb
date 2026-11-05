@@ -69,7 +69,6 @@ struct MascotHero: View {
             Text(title)
                 .font(Typo.status)
                 .foregroundStyle(Theme.textPrimary)
-                .shadow(color: .black.opacity(0.55), radius: 8, y: 1)
                 .contentTransition(.opacity)
 
             Text(subtitle)

@@ -50,7 +50,6 @@ struct HomeHero: View {
             Text(title)
                 .font(.system(size: 22 + 8 * scale, weight: .regular, design: .serif))
                 .foregroundStyle(Theme.textPrimary)
-                .shadow(color: .black.opacity(0.55), radius: 8, y: 1)
                 .contentTransition(.opacity)
                 .padding(.top, 6)
 
