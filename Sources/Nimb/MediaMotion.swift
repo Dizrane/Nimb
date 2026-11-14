@@ -24,46 +24,10 @@ enum MediaMotion {
 
         ctx.drawLayer { layer in
             layer.blendMode = .screen
-
-            // 1. Sound: three arcs, 2.8 s per wave, radius 30 to 60 around the mark, from -20 to +54 degrees.
-            for i in 0..<3 {
-                let phase = ((t / 2.8) + Double(i) / 3).truncatingRemainder(dividingBy: 1)
-                let r = 30 + 30 * phase
-                let alpha = pow(sin(.pi * phase), 1.3) * 0.55 * lit * sound
-                var arc = Path()
-                let steps = 14
-                for k in 0...steps {
-                    let a = -0.35 + (0.95 + 0.35) * Double(k) / Double(steps)
-                    let point = CGPoint(x: m.x + r * cos(a), y: m.y + r * sin(a))
-                    if k == 0 { arc.move(to: point) } else { arc.addLine(to: point) }
-                }
-                layer.stroke(arc, with: .color(.white.opacity(alpha)),
-                             style: StrokeStyle(lineWidth: (1.5 - 0.8 * phase) * (0.7 + 0.3 * sound), lineCap: .round))
-            }
-
-            // 2. Glint: every 5.2 s, in the first 34 % of the period, a band 32 pt wide, tilted by 0.45 rad, crosses the glass.
-            let q = ((t.truncatingRemainder(dividingBy: 5.2)) / 5.2) / 0.34
-            if q < 1 {
-                let d0 = S(display.origin)
-                let glass = CGRect(x: d0.x, y: d0.y, width: display.width, height: display.height)
-                let eased = q * q * (3 - 2 * q)
-                let cx = glass.minX - 30 + (glass.width + 60) * eased
-                layer.drawLayer { band in
-                    band.clip(to: Path(roundedRect: glass, cornerRadius: displayRadius))
-                    band.translateBy(x: cx, y: glass.midY)
-                    band.rotate(by: .radians(0.45))
-                    band.fill(Path(CGRect(x: -16, y: -120, width: 32, height: 240)),
-                              with: .linearGradient(Gradient(stops: [
-                                .init(color: .white.opacity(0), location: 0),
-                                .init(color: .white.opacity(0.20 * lit * glint), location: 0.5),
-                                .init(color: .white.opacity(0), location: 1),
-                              ]), startPoint: CGPoint(x: -16, y: 0), endPoint: CGPoint(x: 16, y: 0)))
-                }
-                // The play button flares as the band passes.
-                let flare = 0.35 * exp(-pow((cx - pl.x) / 22, 2)) * lit * glint
-                layer.fill(Path(ellipseIn: CGRect(x: pl.x - 26, y: pl.y - 26, width: 52, height: 52)),
-                           with: .radialGradient(Gradient(colors: [.white.opacity(flare), .white.opacity(0)]), center: pl, startRadius: 0, endRadius: 26))
-            }
+            drawSound(in: &layer, center: m, t: t, lit: lit)
+            let d0 = S(display.origin)
+            let glass = CGRect(origin: d0, size: display.size)
+            drawGlint(in: &layer, glass: glass, play: pl, t: t, lit: lit)
         }
 
         // 3. Blink: every 3.9 s the eyes close for 0.2 s (a pearl lid grows over each eye and opens again).
@@ -78,5 +42,50 @@ enum MediaMotion {
                          with: .color(Color(white: v)))
             }
         }
+    }
+
+    // Keep the drawing passes separate so older Swift compilers can type-check them independently.
+    // 1. Sound: three arcs, 2.8 s per wave, radius 30 to 60 around the mark, from -20 to +54 degrees.
+    private static func drawSound(in ctx: inout GraphicsContext, center: CGPoint, t: Double, lit: Double) {
+        for i in 0..<3 {
+            let phase = ((t / 2.8) + Double(i) / 3).truncatingRemainder(dividingBy: 1)
+            let r = 30 + 30 * phase
+            let alpha = pow(sin(.pi * phase), 1.3) * 0.55 * lit * sound
+            var arc = Path()
+            let steps = 14
+            for k in 0...steps {
+                let a = -0.35 + (0.95 + 0.35) * Double(k) / Double(steps)
+                let point = CGPoint(x: center.x + CGFloat(r * cos(a)), y: center.y + CGFloat(r * sin(a)))
+                if k == 0 { arc.move(to: point) } else { arc.addLine(to: point) }
+            }
+            let width = CGFloat((1.5 - 0.8 * phase) * (0.7 + 0.3 * sound))
+            ctx.stroke(arc, with: .color(.white.opacity(alpha)), style: StrokeStyle(lineWidth: width, lineCap: .round))
+        }
+    }
+
+    // 2. Glint: every 5.2 s, in the first 34 % of the period, a band 32 pt wide, tilted by 0.45 rad, crosses the glass.
+    private static func drawGlint(in ctx: inout GraphicsContext, glass: CGRect, play: CGPoint, t: Double, lit: Double) {
+        let q = ((t.truncatingRemainder(dividingBy: 5.2)) / 5.2) / 0.34
+        guard q < 1 else { return }
+        let eased = q * q * (3 - 2 * q)
+        let cx = glass.minX - 30 + (glass.width + 60) * CGFloat(eased)
+        ctx.drawLayer { band in
+            band.clip(to: Path(roundedRect: glass, cornerRadius: displayRadius))
+            band.translateBy(x: cx, y: glass.midY)
+            band.rotate(by: .radians(0.45))
+            let gradient = Gradient(stops: [
+                .init(color: .white.opacity(0), location: 0),
+                .init(color: .white.opacity(0.20 * lit * glint), location: 0.5),
+                .init(color: .white.opacity(0), location: 1),
+            ])
+            band.fill(Path(CGRect(x: -16, y: -120, width: 32, height: 240)),
+                      with: .linearGradient(gradient, startPoint: CGPoint(x: -16, y: 0), endPoint: CGPoint(x: 16, y: 0)))
+        }
+        // The play button flares as the band passes.
+        let distance = Double((cx - play.x) / 22)
+        let flare = 0.35 * exp(-pow(distance, 2)) * lit * glint
+        let gradient = Gradient(colors: [.white.opacity(flare), .white.opacity(0)])
+        ctx.fill(Path(ellipseIn: CGRect(x: play.x - 26, y: play.y - 26, width: 52, height: 52)),
+                 with: .radialGradient(gradient, center: play, startRadius: 0, endRadius: 26))
     }
 }
