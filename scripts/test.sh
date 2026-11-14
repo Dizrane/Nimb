@@ -10,7 +10,8 @@ log=$(mktemp)
 plugins="$(dirname "$(xcrun --find swiftc)")/../lib/swift/host/plugins/testing"
 [ -d "$plugins" ] || plugins=/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing
 run_swift_tests() {
-    swift test --scratch-path "${TMPDIR:-/tmp}/nimb-tests-build" \
+    # The tests share AppKit and process state; avoid running those tests concurrently on small CI runners.
+    swift test --no-parallel --scratch-path "${TMPDIR:-/tmp}/nimb-tests-build" \
         -Xswiftc -plugin-path -Xswiftc "$plugins"
 }
 if [ "${CI:-}" = true ]; then
