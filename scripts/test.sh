@@ -9,8 +9,22 @@ log=$(mktemp)
 # Testing macros may live in CLT or in the selected Xcode toolchain on CI.
 plugins="$(dirname "$(xcrun --find swiftc)")/../lib/swift/host/plugins/testing"
 [ -d "$plugins" ] || plugins=/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing
-swift test --scratch-path "${TMPDIR:-/tmp}/nimb-tests-build" \
-    -Xswiftc -plugin-path -Xswiftc "$plugins" > "$log" 2>&1 || status=1
+run_swift_tests() {
+    swift test --scratch-path "${TMPDIR:-/tmp}/nimb-tests-build" \
+        -Xswiftc -plugin-path -Xswiftc "$plugins"
+}
+if [ "${CI:-}" = true ]; then
+    # Stream compiler/test progress on runners instead of hiding it until the entire Swift run exits.
+    run_swift_tests > "$log" 2>&1 &
+    swift_pid=$!
+    tail -n +1 -f "$log" &
+    log_pid=$!
+    wait "$swift_pid" || status=1
+    kill "$log_pid" 2>/dev/null || true
+    wait "$log_pid" 2>/dev/null || true
+else
+    run_swift_tests > "$log" 2>&1 || status=1
+fi
 grep -v "ld: warning" "$log" | grep -E "✘|Test run|error:|Build complete" | cut -c1-200
 rm -f "$log"
 ./scripts/test_windows.sh || status=1
