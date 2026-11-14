@@ -275,7 +275,7 @@ func TestTargetsAreTheOnesOfTheMacApp(t *testing.T) {
 }
 
 func swiftList(t *testing.T, src, name string) []string {
-	m := regexp.MustCompile(`(?s)` + name + `[^=]*= \[(.*?)\]\n`).FindStringSubmatch(src)
+	m := regexp.MustCompile(`(?s)` + name + `[^=]*= \[(.*?)\]\r?\n`).FindStringSubmatch(src)
 	if m == nil {
 		t.Fatalf("no %s in the Mac app", name)
 	}
@@ -284,6 +284,18 @@ func swiftList(t *testing.T, src, name string) []string {
 		out = append(out, s[1])
 	}
 	return out
+}
+
+func TestSwiftListHandlesCheckoutLineEndings(t *testing.T) {
+	const source = "private static let refusalWords = [\n    \"first\", \"second\"\n]\n"
+	for _, tc := range []struct{ name, newline string }{{"LF", "\n"}, {"CRLF", "\r\n"}} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := strings.ReplaceAll(source, "\n", tc.newline)
+			if got := swiftList(t, src, "refusalWords"); !slices.Equal(got, []string{"first", "second"}) {
+				t.Errorf("words: %v", got)
+			}
+		})
+	}
 }
 
 func TestWordsAndThresholdsAreTheOnesOfTheMacApp(t *testing.T) {
