@@ -1,0 +1,22 @@
+{
+  "approved_variant": "Mac Glass v2",
+  "image_dimensions": [
+    1672,
+    941
+  ],
+  "generator": "built-in ImageGen",
+  "files": {
+    "nimb-0.9.26-windows-0.4.2-mac-glass-v2.png": {
+      "bytes": 1577178,
+      "sha256": "0698f49eb6ac12d61c7148e87d4a7f0ea46e2897edd8b32fecf4933169f978b9"
+    },
+    "nimb-0.9.26-windows-0.4.2-mac-glass-v2-prompt.md": {
+      "bytes": 4895,
+      "sha256": "b1938b9500cc299a3b5da2b0375a85a06208360cecc46182bc73d2ede42abfc9"
+    },
+    "references/initial-composition.jpg": {
+      "bytes": 45240,
+      "sha256": "a5df872c0fb1e8fb653f15c1b6e6c23801ea2f09f8945f4287ec2035657140d7"
+    }
+  }
+}
