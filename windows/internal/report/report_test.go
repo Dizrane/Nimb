@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/Dizrane/Nimb/windows/internal/dnsx"
 )
@@ -270,4 +272,36 @@ func mustFind(id string) dnsx.Provider {
 func useKey(t *testing.T) {
 	SetKey([]byte("test-key"))
 	t.Cleanup(func() { SetKey(nil) })
+}
+
+func TestEncodedReportFitsRelayByteLimit(t *testing.T) {
+	useKey(t)
+	for _, unit := range []string{"я", "🙂", "\x01", "\"\\\n", "<>&/"} {
+		t.Run(fmt.Sprintf("%q", unit), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				raw, err := io.ReadAll(r.Body)
+				if err != nil || len(raw) > 100_000 {
+					t.Errorf("wire body: %d bytes, %v", len(raw), err)
+				}
+				var p map[string]any
+				if err := json.Unmarshal(raw, &p); err != nil {
+					t.Error(err)
+					return
+				}
+				text := p["text"].(string)
+				if !utf8.ValidString(text) || !strings.HasPrefix(text, "НАЧАЛО") || !strings.HasSuffix(text, "КОНЕЦ") {
+					t.Error("damaged report ends")
+				}
+				install, _ := p["install"].(string)
+				if p["sig"] != Signature(Message(p["id"].(string), p["app"].(string), "windows", install, text), currentKey()) {
+					t.Error("signature does not cover the final trimmed text")
+				}
+			}))
+			defer srv.Close()
+			t.Setenv("NIMB_REPORT_URL", srv.URL)
+			if err := SendAuto(context.Background(), "0.4.1", "AB12CD", "НАЧАЛО"+strings.Repeat(unit, 100_000)+"КОНЕЦ", "daily-digest", "AB12CD34"); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
 }

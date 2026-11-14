@@ -18,8 +18,8 @@ func probe(code int, failure string, seconds float64) Probe {
 	return Probe{Name: "p", URL: "https://example.test/", Code: code, Seconds: seconds, Failure: failure}
 }
 
-func TestAProbeAnswersWithAnythingButAServerError(t *testing.T) {
-	for code, want := range map[int]bool{200: true, 204: true, 301: true, 403: true, 404: true, 499: true, 500: false, 503: false, 199: false, 0: false} {
+func TestRefusalsAndMissingResourcesDoNotPass(t *testing.T) {
+	for code, want := range map[int]bool{200: true, 204: true, 301: true, 403: false, 404: false, 499: false, 500: false, 503: false, 199: false, 0: false} {
 		if got := probe(code, "", 0.4).Answered(); got != want {
 			t.Errorf("code %d: %v, want %v", code, got, want)
 		}
@@ -31,7 +31,7 @@ func TestAProbeAnswersWithAnythingButAServerError(t *testing.T) {
 
 func TestAllAnsweredWorks(t *testing.T) {
 	c := Check{Name: "YouTube", Probes: []Probe{probe(200, "", 0.2), probe(204, "", 0.4), probe(301, "", 0.6)}}
-	if c.Verdict() != Works || c.Result() != "открывается 0,4 с" {
+	if c.Verdict() != Works || c.Result() != "адреса доступны 0,4 с" {
 		t.Errorf("%s %q", c.Verdict(), c.Result())
 	}
 }
@@ -67,6 +67,8 @@ func TestTheSummaryOfAProbe(t *testing.T) {
 	}{
 		{probe(200, "", 0.44), "ответ 200 · 0,4 с"},
 		{probe(500, "", 0.1), "ответ 500 (ошибка сервера)"},
+		{probe(403, "", 0.1), "ответ 403 (ошибка запроса)"},
+		{probe(404, "", 0.1), "ответ 404 (ошибка запроса)"},
 		{probe(0, "не удалось соединиться", 0), "не удалось соединиться"},
 	} {
 		if got := c.p.Summary(); got != c.want {
@@ -83,7 +85,7 @@ func TestTheLineOfTheLog(t *testing.T) {
 		{Name: "YouTube", Probes: []Probe{probe(200, "", 0.4)}},
 		{Name: "Discord", Probes: []Probe{probe(200, "", 0.4), probe(0, "x", 0)}},
 	})
-	if got != "проверка: YouTube открывается 0,4 с; Discord частично: 1 из 2" {
+	if got != "проверка: YouTube адреса доступны 0,4 с; Discord частично: 1 из 2" {
 		t.Errorf("%q", got)
 	}
 }
@@ -155,7 +157,7 @@ func TestADeadAddressIsTriedTwiceAndThenGivenUp(t *testing.T) {
 func TestTheChecksComeInTheOrderOfTheTargets(t *testing.T) {
 	ask := func(ctx context.Context, address string) Probe { return Probe{Code: 204, Seconds: 0.1} }
 	checks := Run(context.Background(), Targets, ask)
-	if len(checks) != 2 || checks[0].Name != "YouTube" || checks[1].Name != "Discord" || len(checks[0].Probes) != 4 || checks[1].Probes[3].Name != "Сообщения" {
+	if len(checks) != 2 || checks[0].Name != "YouTube" || checks[1].Name != "Discord" || len(checks[0].Probes) != 3 || len(checks[1].Probes) != 3 || checks[1].Probes[2].Name != "Файлы" {
 		t.Fatalf("%+v", checks)
 	}
 }

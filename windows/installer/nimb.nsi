@@ -140,16 +140,29 @@ Section "Uninstall"
   nsExec::Exec 'taskkill /F /IM Nimb.exe'
   Pop $0
 
-  ; 1. The service goes (it takes the tunnel down with it). 2. The DNS comes back, the account at Cloudflare is deleted, the
-  ; folder of the service and the driver of the adapter are removed.
+  ; Stop first; keep the installed service and program available until DNS/data/driver cleanup succeeds.
   DetailPrint "Останавливаю службу Nimb…"
-  nsExec::ExecToLog '"$INSTDIR\nimb-svc.exe" uninstall'
+  nsExec::ExecToLog '"$INSTDIR\nimb-svc.exe" stop'
   Pop $0
+  ${If} $0 != 0
+    MessageBox MB_OK|MB_ICONEXCLAMATION "Не удалось остановить службу (код $0). Удаление отменено, файлы приложения сохранены." /SD IDOK
+    SetErrorLevel 1
+    Abort
+  ${EndIf}
   DetailPrint "Возвращаю DNS и удаляю данные…"
   nsExec::ExecToLog '"$INSTDIR\nimb-svc.exe" cleanup'
   Pop $0
   ${If} $0 != 0
-    MessageBox MB_OK|MB_ICONEXCLAMATION "Не всё удалось вернуть (код $0). Если интернет работает странно, откройте Параметры → Сеть и интернет → ваше подключение → Назначение DNS-сервера и выберите «Автоматически (DHCP)»."
+    MessageBox MB_OK|MB_ICONEXCLAMATION "Очистка не завершена (код $0). Удаление отменено: приложение и его данные сохранены. Подключите сетевые устройства и повторите удаление. Подробности — в журнале этого окна." /SD IDOK
+    SetErrorLevel 1
+    Abort
+  ${EndIf}
+  nsExec::ExecToLog '"$INSTDIR\nimb-svc.exe" uninstall'
+  Pop $0
+  ${If} $0 != 0
+    MessageBox MB_OK|MB_ICONEXCLAMATION "Не удалось удалить службу (код $0). Удаление отменено, файлы приложения сохранены." /SD IDOK
+    SetErrorLevel 1
+    Abort
   ${EndIf}
 
   ; What Nimb left in the folders of the people of this computer, and the autostart of the person who is uninstalling.

@@ -30,7 +30,7 @@ export default {
 
     if (Number(request.headers.get("content-length") || 0) > MAX_BODY) return reply({ ok: false, error: "too large" }, 413);
     const raw = await request.text();
-    if (raw.length > MAX_BODY) return reply({ ok: false, error: "too large" }, 413);
+    if (new TextEncoder().encode(raw).byteLength > MAX_BODY) return reply({ ok: false, error: "too large" }, 413);
 
     let data;
     try {

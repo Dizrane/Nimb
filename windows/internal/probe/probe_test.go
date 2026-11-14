@@ -44,6 +44,8 @@ func TestClassify(t *testing.T) {
 		{"a normal page", chatgpt, 200, 5000, nil, "<html>hello</html>", OK, ""},
 		{"an API without a key", openaiAPI, 401, 120, hdr("content-type", "application/json"), `{"error":"Missing bearer authentication"}`, OK, ""},
 		{"a 404 of the service itself", openaiAPI, 404, 10, nil, "not found", OK, ""},
+		{"a missing website is not a working app", chatgpt, 404, 10, nil, "not found", Failed, ""},
+		{"a website authentication error is not a working app", chatgpt, 401, 10, nil, "unauthorized", Failed, ""},
 		{"no answer at all", chatgpt, 0, 0, nil, "", Failed, ""},
 		{"a server error", chatgpt, 500, 10, nil, "", Failed, ""},
 		{"a bad gateway", chatgpt, 502, 10, nil, "", Failed, ""},
@@ -88,13 +90,13 @@ func TestServiceStatus(t *testing.T) {
 		r    ServiceResult
 		want ServiceStatus
 	}{
-		{ServiceResult{"ChatGPT", 4, 0, 5}, Works},
-		{ServiceResult{"ChatGPT", 3, 0, 4}, Works}, // a few dead addresses in a pool still work
-		{ServiceResult{"ChatGPT", 2, 0, 5}, Unstable},
-		{ServiceResult{"Gemini", 4, 1, 5}, Unstable}, // a refusal page hits every visit that lands on that address
-		{ServiceResult{"Claude", 0, 0, 5}, Down},
-		{ServiceResult{"Claude", 0, 3, 5}, Refused},
-		{ServiceResult{"Claude", 0, 0, 0}, Down},
+		{ServiceResult{Name: "ChatGPT", Answered: 4, Total: 5}, Works},
+		{ServiceResult{Name: "ChatGPT", Answered: 3, Total: 4}, Works},
+		{ServiceResult{Name: "ChatGPT", Answered: 2, Total: 5}, Unstable},
+		{ServiceResult{Name: "Gemini", Answered: 4, Blocked: 1, Total: 5}, Unstable},
+		{ServiceResult{Name: "Claude", Total: 5}, Down},
+		{ServiceResult{Name: "Claude", Blocked: 3, Total: 5}, Refused},
+		{ServiceResult{Name: "Claude"}, Down},
 	}
 	for _, c := range cases {
 		if got := c.r.Status(); got != c.want {
@@ -138,6 +140,28 @@ func TestReportCounts(t *testing.T) {
 	}
 	if got := r.DeadAddresses(); len(got) != 0 {
 		t.Errorf("10.0.0.2 answers for the other services, it is not dead: %v", got)
+	}
+}
+
+func TestALargeHealthyPoolCannotHideTheOtherTargetFailing(t *testing.T) {
+	for _, failing := range []Kind{Site, API} {
+		r := ProviderReport{Provider: dnsx.Providers[0]}
+		for _, target := range All {
+			if target.Service != "ChatGPT" {
+				continue
+			}
+			if target.Kind == failing {
+				r.Samples = append(r.Samples, Sample{Target: target, Outcome: Outcome{Status: Failed}})
+			} else {
+				for i := 0; i < 7; i++ {
+					r.Samples = append(r.Samples, ok(target, "192.0.2.1", 0.2))
+				}
+			}
+		}
+		got := r.Services()[0]
+		if got.Answered != 7 || got.Total != 8 || got.Status() != Unstable || r.WorkingCount() != 0 {
+			t.Errorf("failing kind %v: %+v", failing, got)
+		}
 	}
 }
 

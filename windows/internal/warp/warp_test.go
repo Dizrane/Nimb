@@ -1,6 +1,8 @@
 package warp
 
 import (
+	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -50,5 +52,14 @@ func TestStrangeRepliesAreRefused(t *testing.T) {
 		if _, err := accountFrom([]byte(body), "KEY=", preset); err == nil {
 			t.Errorf("%s: should be refused", name)
 		}
+	}
+}
+
+func TestCancellingRegistrationPreservesCancellationInsteadOfTryingMoreHosts(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := Register(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled registration did not return cancellation: %v", err)
 	}
 }

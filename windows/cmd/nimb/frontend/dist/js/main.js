@@ -108,11 +108,11 @@ function updateShell() {
   for (const id of ['home', ...ORDER, 'settings']) document.getElementById(`row-${id}`).classList.toggle('sel', id === sel);
   for (const k of ORDER) {
     const slot = document.getElementById(`slot-${k}`);
-    const busy = S[k].busy, on = isOn(k), disabled = busy || !(k === 'telegram' || S.serviceOk) || (k === 'ai' && S.probe.running);
+    const busy = S[k].busy, canCancel = k === 'media' && S.media.canCancel, on = isOn(k) || canCancel, disabled = (busy && !canCancel) || !(k === 'telegram' || S.serviceOk) || (k === 'ai' && S.probe.running);
     const key = `${busy}|${on}|${disabled}`;
     if (slot.dataset.key !== key) {
       slot.dataset.key = key;
-      morph(slot, busy ? '<span class="pending"><span class="spin"></span></span>'
+      morph(slot, busy && !canCancel ? '<span class="pending"><span class="spin"></span></span>'
         : `<button class="pill ${on ? 'on' : ''}" role="switch" aria-checked="${on}" aria-label="${SV[k].title}" data-a="sw" data-v="${k}" data-f="sw-${k}" id="sw-${k}" ${disabled ? 'disabled' : ''}></button>`);
     }
     icons[k].invalidate();
@@ -177,12 +177,19 @@ async function startProbe(enable) {
 
 const actions = {
   async toggle(k) {
-    if (S[k].busy) return;
-    S[k].busy = true; render();
-    try { await api()[SV[k].call](!isOn(k)); } catch (e) { /* the error text comes back with the state */ }
+    const cancel = k === 'media' && S.media.canCancel;
+    if (S[k].busy && !cancel) return;
+    const on = cancel ? false : !isOn(k);
+    S[k].busy = true;
+    if (cancel) S.media.canCancel = false;
+    render();
+    const poll = k === 'media' ? setInterval(refresh, 400) : null;
+    try { await api()[SV[k].call](on); } catch (e) { /* see state */ }
+    finally { if (poll) clearInterval(poll); }
     await refresh();
   },
   async toggleAll() {
+    if (S.media.canCancel) { await this.toggle('media'); return; }
     const on = !ORDER.every(isOn);
     ORDER.forEach((k) => { S[k].busy = true; }); render();
     // The state is read often while the three are being switched, so that each card turns on as soon as its own part is done (the tunnel is

@@ -126,6 +126,9 @@ func Classify(target Target, code int, seconds float64, bodySize int, headers ma
 		}
 		return Outcome{Status: Blocked, Reason: "403: доступ закрыт"}
 	}
+	if target.Kind == Site && code >= 400 {
+		return Outcome{Status: Failed}
+	}
 	// Refusal pages are short; the big pages of the apps carry such phrases only inside their translations.
 	if bodySize < bigBody || strings.Contains(headers["content-type"], "json") {
 		lower := strings.ToLower(body)

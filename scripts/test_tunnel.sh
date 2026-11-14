@@ -38,6 +38,7 @@ chmod +x "$WORK/bin/nc"
 cat > "$WORK/bin/curl" <<'STUB'
 #!/bin/sh
 for a in "$@"; do url=$a; done
+[ -z "${NIMB_TEST_HTTP_CODE:-}" ] || { printf '%s' "$NIMB_TEST_HTTP_CODE"; exit 0; }
 [ -n "${NIMB_PROBE_DIR:-}" ] || { printf 204; exit 0; }
 server=$(sed -n 's/^server=//p' "$NIMB_TUNNEL_RUN.state" 2>/dev/null | head -1)
 case "$url" in
@@ -57,6 +58,23 @@ STUB
 chmod +x "$WORK/bin/scutil"
 fail=0
 check() { if eval "$2"; then echo "ok:   $1"; else echo "FAIL: $1"; fail=1; fi; }
+
+# Selecting a WARP endpoint must reject error pages, even when TLS succeeded.
+sed -n '/^probe_ok()/,/^}/p' "$HELPER" > "$WORK/probe.sh"
+for code in 200 204 302; do
+    if PATH="$WORK/bin:$PATH" NIMB_TEST_HTTP_CODE="$code" sh -c '. "$1"; probe_ok https://example.test/' sh "$WORK/probe.sh"; then
+        echo "ok:   endpoint probe accepts $code"
+    else
+        echo "FAIL: endpoint probe rejected $code"; fail=1
+    fi
+done
+for code in 000 403 404 429 500 503; do
+    if PATH="$WORK/bin:$PATH" NIMB_TEST_HTTP_CODE="$code" sh -c '. "$1"; probe_ok https://example.test/' sh "$WORK/probe.sh"; then
+        echo "FAIL: endpoint probe accepted $code"; fail=1
+    else
+        echo "ok:   endpoint probe rejects $code"
+    fi
+done
 
 # The daemon dies without `down`: the watcher takes the routes out and removes the state, so the Mac keeps its internet.
 sleep 2 & daemon=$!
@@ -102,6 +120,21 @@ state_pid() { sed -n 's/^pid=//p' "$WORK/run/r.state" 2>/dev/null | head -1; }
 wait_new_pid() { i=0; while [ $i -lt 15 ]; do p=$(state_pid); [ -n "$p" ] && [ "$p" != "$1" ] && kill -0 "$p" 2>/dev/null && return 0; sleep 1; i=$((i + 1)); done; return 1; }
 # The line of a restart is written after the new daemon is up: waits (at most 10 s) until there are $1 of them.
 wait_restarts() { i=0; while [ $i -lt 10 ]; do [ "$(wc -l < "$WORK/run/r.restarts" 2>/dev/null | tr -d " ")" = "$1" ] && return 0; sleep 1; i=$((i + 1)); done; return 1; }
+# The network never answers: a down during startup must cancel that attempt, remove its routes and prevent further retries.
+mkdir -p "$WORK/cancel-probe"
+printf '203.0.113.7\n198.51.100.1\n198.51.100.2\n' > "$WORK/cancel-probe/shake.bad"
+NIMB_PROBE_DIR="$WORK/cancel-probe" NIMB_TUNNEL_HANDSHAKE_WAIT=30 helper_r up >"$WORK/cancel.out" 2>&1 &
+cancel_start=$!
+i=0; while [ ! -s "$WORK/run/r.state" ] && [ $i -lt 60 ]; do sleep 0.1; i=$((i+1)); done
+cancel_daemon=$(state_pid)
+helper_r down
+i=0; while kill -0 "$cancel_start" 2>/dev/null && [ $i -lt 30 ]; do sleep 0.1; i=$((i+1)); done
+check "down interrupts a start whose handshake never comes" '! kill -0 "$cancel_start" 2>/dev/null'
+kill "$cancel_start" 2>/dev/null || true
+wait "$cancel_start" 2>/dev/null || true
+sleep 1
+check "cancelled start leaves no daemon, watcher or state and cannot come back" '[ ! -f "$WORK/run/r.state" ] && [ -f "$WORK/run/r.stopped" ] && ! kill -0 "$cancel_daemon" 2>/dev/null'
+helper_r down
 helper_r up >/dev/null 2>&1
 pid1=$(state_pid)
 check "the stand-in tunnel is up" '[ -n "$pid1" ] && kill -0 "$pid1" 2>/dev/null'

@@ -208,26 +208,35 @@ func TestOnlyKnownServersAreKeptAndThePortStays(t *testing.T) {
 	}
 }
 
-func TestASiteOpensWhenItAnswersWithAnyStatus(t *testing.T) {
+func TestAServerWithRefusalsIsNotSelected(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/204":
 			w.WriteHeader(204)
 		case "/403":
-			w.WriteHeader(403) // a refusal is an answer: the handshake of TLS went through
+			w.WriteHeader(403)
+		case "/404":
+			w.WriteHeader(404)
+		case "/500":
+			w.WriteHeader(500)
 		case "/slow":
 			time.Sleep(6 * time.Second)
 		}
 	}))
 	defer srv.Close()
 	ctx := context.Background()
-	if !Opens(ctx, srv.Client(), srv.URL+"/204") || !Opens(ctx, srv.Client(), srv.URL+"/403") {
-		t.Error("an answer did not count")
+	if !Opens(ctx, srv.Client(), srv.URL+"/204") {
+		t.Error("a successful response did not count")
+	}
+	for _, path := range []string{"/403", "/404", "/500"} {
+		if Opens(ctx, srv.Client(), srv.URL+path) {
+			t.Errorf("%s passed", path)
+		}
 	}
 	if Opens(ctx, srv.Client(), "http://127.0.0.1:1/") {
 		t.Error("a closed port opened")
 	}
-	if !OpenBoth(ctx, srv.Client(), srv.URL+"/204", srv.URL+"/403") || OpenBoth(ctx, srv.Client(), srv.URL+"/204", "http://127.0.0.1:1/") {
+	if !OpenBoth(ctx, srv.Client(), srv.URL+"/204", srv.URL+"/204") || OpenBoth(ctx, srv.Client(), srv.URL+"/204", srv.URL+"/403") || OpenBoth(ctx, srv.Client(), srv.URL+"/204", "http://127.0.0.1:1/") {
 		t.Error("OpenBoth")
 	}
 }

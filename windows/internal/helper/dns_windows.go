@@ -52,7 +52,7 @@ func (h *Helper) dropBackup() {
 }
 
 func (h *Helper) dnsStatus() *ipc.DNSStatus {
-	if h.backup == nil {
+	if h.backup == nil || h.backup.Restoring {
 		return &ipc.DNSStatus{}
 	}
 	return &ipc.DNSStatus{Active: true, Provider: h.backup.Provider}
@@ -61,7 +61,7 @@ func (h *Helper) dnsStatus() *ipc.DNSStatus {
 // tunnelDNS: the DNS of the tunnel adapter is first in the order of the system (its metric is the lowest), so with Smart DNS
 // on it gets the servers of the provider too, or the names would be asked of 1.1.1.1 and Smart DNS would do nothing.
 func (h *Helper) tunnelDNS() []netip.Addr {
-	if h.backup != nil {
+	if h.backup != nil && !h.backup.Restoring {
 		if p, ok := dnsx.Find(h.backup.Provider); ok {
 			var out []netip.Addr
 			for _, a := range p.Addresses {
@@ -85,6 +85,9 @@ func (h *Helper) syncTunnelDNS() {
 
 // dnsSet puts the provider on every connected adapter of the computer.
 func (h *Helper) dnsSet(provider dnsx.Provider) error {
+	if provider.Retired {
+		return errors.New(provider.Name + " больше не поддерживает доступ к нейросетям. Выберите другой DNS.")
+	}
 	now, err := dnsx.Adapters()
 	if err != nil {
 		return fmt.Errorf("не удалось получить список сетевых подключений: %w", err)
@@ -99,9 +102,10 @@ func (h *Helper) dnsSet(provider dnsx.Provider) error {
 		next = &dup
 	}
 	write := next.Apply(provider, now)
+	previous := h.backup
 	h.backup = next
 	if err := h.saveBackup(); err != nil {
-		h.dropBackup()
+		h.backup = previous
 		return fmt.Errorf("не удалось сохранить прежние настройки: %w", err)
 	}
 	h.logf("DNS: %s (%s) задан на %d из %d подключений", provider.Name, provider.ID, len(write), len(now))
@@ -119,7 +123,18 @@ func (h *Helper) dnsRestore() error {
 	if h.backup == nil {
 		return nil
 	}
-	now, err := dnsx.Adapters()
+	if !h.backup.Restoring {
+		previous := h.backup
+		next := *previous
+		next.Restoring = true
+		h.backup = &next
+		if err := h.saveBackup(); err != nil {
+			h.backup = previous
+			return fmt.Errorf("не удалось сохранить запрос на возврат DNS: %w", err)
+		}
+	}
+	defer h.syncTunnelDNS()
+	now, err := dnsx.RestoreAdapters()
 	if err != nil {
 		return fmt.Errorf("не удалось получить список сетевых подключений: %w", err)
 	}
@@ -127,31 +142,40 @@ func (h *Helper) dnsRestore() error {
 	for _, name := range skipped {
 		h.logf("DNS: на «%s» его уже изменили вручную, оставляю как есть", name)
 	}
-	failed := 0
-	var names []string
+	var failedGUIDs []string
 	for _, a := range write {
 		if err := dnsx.Write(a); err != nil {
 			h.logf("DNS: вернуть прежний не вышло: %v", err)
-			failed++
-			names = append(names, a.Name)
+			failedGUIDs = append(failedGUIDs, a.GUID)
 			continue
 		}
-		if after, ok := dnsx.Current(a.GUID); ok && !dnsx.Same(after.NameServer, a.NameServer) {
-			failed++
-			names = append(names, a.Name)
+		if after, ok := dnsx.Current(a.GUID); !ok || !dnsx.Same(after.NameServer, a.NameServer) {
+			failedGUIDs = append(failedGUIDs, a.GUID)
 			continue
 		}
 		if a.Set6 {
-			h.write6(a)
+			if err := h.write6Checked(a); err != nil {
+				h.logf("DNS: вернуть прежние серверы IPv6 не вышло: %v", err)
+				failedGUIDs = append(failedGUIDs, a.GUID)
+			}
 		}
 	}
 	dnsx.Flush()
-	if failed > 0 {
-		// The backup stays, so that the next try (or the uninstaller) can finish the job.
-		return fmt.Errorf("DNS не вернулся на: %s", strings.Join(names, ", "))
+	pending := h.backup.PendingRestore(now, failedGUIDs)
+	if pending != nil {
+		previous := h.backup
+		h.backup = pending
+		if err := h.saveBackup(); err != nil {
+			h.backup = previous // the persisted superset still contains the way back for every adapter
+			return fmt.Errorf("не удалось сохранить оставшиеся настройки DNS: %w", err)
+		}
+		var names []string
+		for _, a := range pending.Adapters {
+			names = append(names, a.Name)
+		}
+		return fmt.Errorf("DNS ещё не возвращён на: %s; повторю при появлении подключения", strings.Join(names, ", "))
 	}
 	h.dropBackup()
-	h.syncTunnelDNS()
 	if len(write) > 0 {
 		h.logf("DNS: прежние настройки возвращены на %d подключениях", len(write))
 	}
@@ -180,13 +204,24 @@ func (h *Helper) writeAll(adapters []dnsx.Adapter, provider dnsx.Provider) (fail
 
 // write6 writes the IPv6 servers of an adapter and checks them; a failure is only logged.
 func (h *Helper) write6(a dnsx.Adapter) {
-	if err := dnsx.Write6(a); err != nil {
+	if err := h.write6Checked(a); err != nil {
 		h.logf("DNS: серверы IPv6 на «%s» не заданы: %v", a.Name, err)
-		return
 	}
-	if after, ok := dnsx.Current(a.GUID); ok && !dnsx.Same6(after.NameServer6, a.NameServer6) {
-		h.logf("DNS: серверы IPv6 на «%s» не приняты системой: %q", a.Name, after.NameServer6)
+}
+
+// A restore must keep its backup when IPv6 could not be restored too (for example a disabled adapter rejects the write).
+func (h *Helper) write6Checked(a dnsx.Adapter) error {
+	if err := dnsx.Write6(a); err != nil {
+		return err
 	}
+	after, ok := dnsx.Current(a.GUID)
+	if !ok {
+		return fmt.Errorf("не удалось проверить серверы IPv6 на «%s»", a.Name)
+	}
+	if !dnsx.Same6(after.NameServer6, a.NameServer6) {
+		return fmt.Errorf("серверы IPv6 на «%s» не приняты системой: %q", a.Name, after.NameServer6)
+	}
+	return nil
 }
 
 // dnsWatcher looks at the adapters while Smart DNS is on: a new one (the person plugs in a cable, a Wi-Fi adapter wakes up) gets
@@ -210,7 +245,6 @@ func (h *Helper) startWatching() {
 	})
 	if err != nil {
 		h.logf("следить за новыми подключениями не получается: %v", err)
-		return
 	}
 	w.cb = cb
 	h.watch = w
@@ -237,7 +271,9 @@ func (h *Helper) stopWatching() {
 	if h.watch == nil {
 		return
 	}
-	h.watch.cb.Unregister()
+	if h.watch.cb != nil {
+		h.watch.cb.Unregister()
+	}
 	close(h.watch.stop)
 }
 
@@ -248,8 +284,14 @@ func (h *Helper) dnsFresh() {
 	if h.backup == nil {
 		return
 	}
+	if h.backup.Restoring {
+		if err := h.dnsRestore(); err != nil {
+			h.logf("DNS: %v", err)
+		}
+		return
+	}
 	provider, ok := dnsx.Find(h.backup.Provider)
-	if !ok {
+	if !ok || provider.Retired {
 		return
 	}
 	now, err := dnsx.Adapters()

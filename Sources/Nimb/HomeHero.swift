@@ -60,10 +60,10 @@ struct HomeHero: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: 320)
 
-            Button { if all.allOn { all.disableAll() } else { all.enableAll() } } label: {
+            Button { if all.canCancelWarp { all.cancelWarpStartup() } else if all.allOn { all.disableAll() } else { all.enableAll() } } label: {
                 HStack(spacing: 8) {
                     if all.isRunning { ProgressView().controlSize(.small).tint(.black) }
-                    Text(all.allOn ? "Выключить всё" : "Включить всё")
+                    Text(all.canCancelWarp ? "Отменить подключение WARP" : all.allOn ? "Выключить всё" : "Включить всё")
                         .font(.system(size: 13 + 2 * (scale - 1), weight: .semibold))
                 }
                 .foregroundStyle(Color.black.opacity(0.88))
@@ -73,7 +73,7 @@ struct HomeHero: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(PressableStyle())
-            .disabled(busy)
+            .disabled(busy && !all.canCancelWarp)
             .padding(.top, 12)
         }
         .animation(.easeInOut(duration: 0.35), value: title)

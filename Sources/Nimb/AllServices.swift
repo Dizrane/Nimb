@@ -41,12 +41,19 @@ final class AllServices: ObservableObject {
         }
     }
 
+    var canCancelWarp: Bool { warp?.canCancelStartup ?? false }
+    func cancelWarpStartup() { warp?.cancelStartup() }
+    func cancelWarpStartupAndWait() async {
+        warp?.cancelStartup()
+        while warp?.startAttempt != nil { try? await Task.sleep(for: .milliseconds(100)) }
+    }
+
     var warpAvailable: Bool { warp?.phase != .unavailable }
 
     /// How many of the services work right now.
     var onCount: Int {
         guard let dns, let telegram, let warp else { return 0 }
-        return [dns.active != nil, telegram.isRunning, warp.isOn].filter { $0 }.count
+        return [dns.hasProviderDNS, telegram.isRunning, warp.isOn].filter { $0 }.count
     }
 
     var total: Int { warpAvailable ? 3 : 2 }
@@ -63,7 +70,7 @@ final class AllServices: ObservableObject {
             case .none: break
             }
         }
-        return (dns.isBusy ? dns.active == nil : dns.active != nil,
+        return (dns.isBusy ? !dns.hasProviderDNS : dns.hasProviderDNS,
                 telegram.isStarting ? true : telegram.isRunning,
                 warp.isWorking ? warp.isTurningOn : warp.isOn)
     }
@@ -74,9 +81,9 @@ final class AllServices: ObservableObject {
     func isOn(_ page: AppPage) -> Bool {
         guard let dns, let telegram, let warp else { return false }
         switch page {
-        case .ai: return dns.active != nil
+        case .ai: return dns.hasProviderDNS
         case .telegram: return telegram.isRunning
-        case .media: return warp.isOn
+        case .media: return warp.isOn || warp.canCancelStartup
         default: return false
         }
     }
@@ -87,7 +94,7 @@ final class AllServices: ObservableObject {
         switch page {
         case .ai: return dns.isBusy || dns.isProbing || dns.isSettingUp
         case .telegram: return telegram.isStarting
-        case .media: return warp.isWorking
+        case .media: return warp.isWorking && !warp.canCancelStartup
         default: return false
         }
     }
@@ -95,6 +102,7 @@ final class AllServices: ObservableObject {
     /// The service cannot be switched now (it is unavailable in this build, or something else is changing).
     func isLocked(_ page: AppPage) -> Bool {
         guard let warp else { return true }
+        if page == .media && warp.canCancelStartup { return false }
         if page == .media && warp.phase == .unavailable { return true }
         return isBusy
     }
@@ -103,7 +111,7 @@ final class AllServices: ObservableObject {
     func detail(_ page: AppPage) -> String {
         guard let dns, let telegram, let warp else { return "" }
         switch page {
-        case .ai: return dns.active?.name ?? "ChatGPT, Claude, Gemini и другие"
+        case .ai: return dns.active?.name ?? (dns.hasProviderDNS ? "DNS задан на части подключений" : "ChatGPT, Claude, Gemini и другие")
         case .telegram: return telegram.isRunning ? "Прокси работает" : "Прокси для Telegram Desktop"
         case .media: return warp.isOn ? "Туннель работает" : (warp.phase == .unavailable ? "Недоступно в этой сборке" : "Туннель WARP")
         default: return ""
@@ -121,7 +129,7 @@ final class AllServices: ObservableObject {
     }
 
     var effectiveCount: Int { let e = effective; return [e.ai, e.telegram, e.media].filter { $0 }.count }
-    var allOn: Bool { onCount == total }
+    var allOn: Bool { onCount == total && dns?.active != nil }
 
     /// Something is changing, so that another change has to wait.
     var isBusy: Bool {
@@ -131,7 +139,7 @@ final class AllServices: ObservableObject {
 
     func toggleWarp() {
         guard let warp else { return }
-        if warp.isOn { warp.disconnect() } else if warp.phase == .notInstalled { warp.enable() } else { warp.connect() }
+        if warp.canCancelStartup { warp.cancelStartup() } else if warp.isOn { warp.disconnect() } else if warp.phase == .notInstalled { warp.enable() } else { warp.connect() }
     }
 
     func enableAll() {
@@ -142,16 +150,16 @@ final class AllServices: ObservableObject {
             defer { isRunning = false; intent = .none }
             if !telegram.isRunning { telegram.start(); await settle() }
             let needDNS = dns.active == nil, needWarp = warpAvailable && !warp.isOn
-            if needDNS && needWarp && dns.asksPassword && warp.asksPassword(turningOn: true) {
+            if needDNS && needWarp && dns.asksPassword(turningOn: true) && warp.asksPassword(turningOn: true) {
                 // Both want the administrator password: it is asked once, for the two together.
                 PrivilegedBatch.shared.expect(2)
-                dns.toggle()
+                dns.enable()
                 toggleWarp()
                 await settle()
                 return
             }
             if needDNS {
-                dns.toggle(); await settle()
+                dns.enable(); await settle()
                 // The password was refused: do not ask again for the next one.
                 if dns.active == nil { return }
             }
@@ -166,16 +174,16 @@ final class AllServices: ObservableObject {
         Task {
             defer { isRunning = false; intent = .none }
             if telegram.isRunning { telegram.stop() }
-            if dns.active != nil && warp.isOn && dns.asksPassword && warp.asksPassword(turningOn: false) {
+            if dns.hasProviderDNS && warp.isOn && dns.asksPassword && warp.asksPassword(turningOn: false) {
                 PrivilegedBatch.shared.expect(2)
-                dns.toggle()
+                dns.disable()
                 warp.disconnect()
                 await settle()
                 return
             }
-            if dns.active != nil {
-                dns.toggle(); await settle()
-                if dns.active != nil { return }
+            if dns.hasProviderDNS {
+                dns.disable(); await settle()
+                if dns.hasProviderDNS { return }
             }
             if warp.isOn { warp.disconnect(); await settle() }
         }
@@ -184,14 +192,14 @@ final class AllServices: ObservableObject {
     /// Whether anything of Nimb is still working: a service that would go on after the program is gone.
     var anythingWorks: Bool {
         guard let dns, let telegram, let warp else { return false }
-        return dns.active != nil || telegram.isRunning || warp.isOn
+        return dns.hasProviderDNS || telegram.isRunning || warp.isOn || warp.startAttempt != nil
     }
 
     /// The services that still work, by name.
     var stillWorking: [String] {
         guard let dns, let telegram, let warp else { return [] }
         var names: [String] = []
-        if dns.active != nil { names.append("DNS нейросетей") }
+        if dns.hasProviderDNS { names.append("DNS нейросетей") }
         if telegram.isRunning { names.append("прокси Telegram") }
         if warp.isOn { names.append("туннель YouTube и Discord") }
         return names
@@ -201,18 +209,20 @@ final class AllServices: ObservableObject {
     /// administrator password), and says in the end which of them still work. Waits for what is changing now.
     func shutdown() async -> [String] {
         guard let dns, let telegram, let warp else { return [] }
+        if warp.canCancelStartup { warp.cancelStartup() }
         while isBusy { try? await Task.sleep(for: .milliseconds(150)) }
+        await dns.syncFromSystem()
         isRunning = true
         intent = .off
         defer { isRunning = false; intent = .none }
         if telegram.isRunning { telegram.stop() }
-        if dns.active != nil && warp.isOn && dns.asksPassword && warp.asksPassword(turningOn: false) {
+        if dns.hasProviderDNS && warp.isOn && dns.asksPassword && warp.asksPassword(turningOn: false) {
             PrivilegedBatch.shared.expect(2)
-            dns.toggle()
+            dns.disable()
             warp.disconnect()
             await settle()
         } else {
-            if dns.active != nil { dns.toggle(); await settle() }
+            if dns.hasProviderDNS { dns.disable(); await settle() }
             if warp.isOn { warp.disconnect(); await settle() }
         }
         warp.refresh()

@@ -30,6 +30,8 @@ type ServiceResult struct {
 	Answered int
 	Blocked  int // requests that were answered with a refusal (region, address, limit)
 	Total    int
+	// A large API pool must not hide a failing site, or vice versa.
+	HasFailingTarget bool
 }
 
 // Status judges the service by its counts.
@@ -41,7 +43,7 @@ func (r ServiceResult) Status() ServiceStatus {
 		return Down
 	}
 	// A dead address is skipped by the browser, but a refusal page is not: it hits every visit that lands on that address.
-	if r.Blocked > 0 {
+	if r.Blocked > 0 || r.HasFailingTarget {
 		return Unstable
 	}
 	if float64(r.Answered)/float64(r.Total) >= WorkingShare {
@@ -73,6 +75,20 @@ func (r ProviderReport) Services() []ServiceResult {
 				res.Answered++
 			case Blocked:
 				res.Blocked++
+			}
+		}
+		for _, kind := range []Kind{Site, API} {
+			answered, total := 0, 0
+			for _, s := range r.Samples {
+				if s.Target.Service == name && s.Target.Kind == kind {
+					total++
+					if s.ok() {
+						answered++
+					}
+				}
+			}
+			if total == 0 || float64(answered)/float64(total) < WorkingShare {
+				res.HasFailingTarget = true
 			}
 		}
 		out = append(out, res)

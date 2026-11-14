@@ -4,7 +4,7 @@ package main
 
 import (
 	"context"
-	"errors"
+	"crypto/rand"
 	"fmt"
 	"os"
 	"os/exec"
@@ -39,8 +39,10 @@ type App struct {
 	settings *settingsStore
 	tgPort   uint16
 
-	mu   sync.Mutex // one switch at a time
-	busy map[string]bool
+	mu            sync.Mutex // one switch at a time
+	busy          map[string]bool
+	mediaAttempt  string
+	mediaStopping bool
 	// tunnelEpoch grows each time the tunnel starts or stops being switched (under mu): a check of the providers that saw it change is not
 	// to be believed.
 	tunnelEpoch int
@@ -213,6 +215,7 @@ type State struct {
 	Media struct {
 		On           bool    `json:"on"`
 		Busy         bool    `json:"busy"`
+		CanCancel    bool    `json:"canCancel"`
 		Error        string  `json:"error,omitempty"`
 		HandshakeAgo int     `json:"handshakeAgo"`
 		DroppedAt    int64   `json:"droppedAt,omitempty"`
@@ -265,6 +268,9 @@ func (a *App) GetState() State {
 	st.AI.Busy, st.AI.Error = busy["ai"], errs["ai"]
 	st.Telegram.Busy, st.Telegram.Error = busy["telegram"], errs["telegram"]
 	st.Media.Busy, st.Media.Error = busy["media"], errs["media"]
+	a.mu.Lock()
+	st.Media.CanCancel = a.busy["media"] && a.mediaAttempt != "" && !a.mediaStopping
+	a.mu.Unlock()
 
 	var tg *ipc.TelegramStatus
 	if resp, err := callService(ipc.Request{Cmd: ipc.Status}); err != nil {
@@ -277,6 +283,9 @@ func (a *App) GetState() State {
 		if resp.DNS != nil && resp.DNS.Active {
 			st.AI.On = true
 			st.AI.Provider = resp.DNS.Provider
+			if p, ok := dnsx.Find(resp.DNS.Provider); ok && p.Retired {
+				st.AI.Warnings = append(st.AI.Warnings, p.Name+" больше не поддерживает доступ к нейросетям. Выберите другой DNS или выключите сервис, чтобы вернуть прежние настройки.")
+			}
 			if hint := a.browserHint(); hint != "" {
 				st.AI.Warnings = append(st.AI.Warnings, hint)
 			}
@@ -400,9 +409,11 @@ func (a *App) restoreTunnel() {
 		if !a.settings.get().TunnelWanted || (err == nil && resp.Tunnel != nil && resp.Tunnel.Up) {
 			return
 		}
-		a.begin("media")
-		_, err = callService(ipc.Request{Cmd: ipc.TunnelUp})
-		if a.end("media", err).OK {
+		if !a.enter("media") {
+			return
+		}
+		result := a.applyMedia(true)
+		if result.OK || !a.settings.get().TunnelWanted {
 			return
 		}
 		if !tunnelrestart.TriesAgain(true, attempt) {
@@ -548,7 +559,7 @@ func (a *App) applyAI(on bool) Result {
 
 // SetProvider chooses a provider; if Smart DNS is on it moves to it at once.
 func (a *App) SetProvider(id string) Result {
-	if _, ok := dnsx.Find(id); !ok {
+	if p, ok := dnsx.Find(id); !ok || p.Retired {
 		return Result{Error: "неизвестный провайдер"}
 	}
 	a.settings.update(func(s *Settings) { s.Provider = id })
@@ -560,32 +571,74 @@ func (a *App) SetProvider(id string) Result {
 }
 
 // SetMedia turns the tunnel on or off.
-func (a *App) SetMedia(on bool) Result {
+func (a *App) SetMedia(on bool) Result { return a.setMedia(on, callService) }
+
+func (a *App) setMedia(on bool, request func(ipc.Request) (ipc.Response, error)) Result {
+	if !on {
+		a.mu.Lock()
+		stopping := a.busy["media"] && a.mediaAttempt != "" && !a.mediaStopping
+		a.mu.Unlock()
+		if stopping {
+			return a.applyMediaWith(false, request)
+		}
+	}
 	if !a.enter("media") {
 		return a.ignored("media")
 	}
-	return a.applyMedia(on)
+	return a.applyMediaWith(on, request)
 }
 
 // applyMedia does the work of SetMedia; the service is already marked as busy.
-func (a *App) applyMedia(on bool) Result {
+func (a *App) applyMedia(on bool) Result { return a.applyMediaWith(on, callService) }
+
+func (a *App) applyMediaWith(on bool, request func(ipc.Request) (ipc.Response, error)) Result {
+	a.mu.Lock()
+	if !on && a.mediaStopping {
+		a.mu.Unlock()
+		return Result{OK: true}
+	}
+	id := a.mediaAttempt
 	if on {
-		logLine("туннель: включаю")
+		id = rand.Text()
+		a.mediaAttempt = id
+		a.mediaStopping = false
 	} else {
-		logLine("туннель: выключаю")
+		a.mediaStopping = true
+	}
+	a.mu.Unlock()
+	if !on {
+		a.settings.update(func(s *Settings) { s.TunnelWanted = false })
 	}
 	cmd := ipc.TunnelDown
 	if on {
 		cmd = ipc.TunnelUp
+		logLine("туннель: включаю")
+	} else {
+		logLine("туннель: отменяю запуск/выключаю")
 	}
-	_, err := callService(ipc.Request{Cmd: cmd})
-	// What the person did last is what comes back after a restart of the computer.
-	a.settings.update(func(s *Settings) { s.TunnelWanted = on && err == nil })
-	if err != nil && strings.Contains(err.Error(), "сервер не ответил") {
-		// A network of a university, an office or a hotel may close the tunnel; the words of the Mac for it.
-		err = errors.New(err.Error() + ". Проверьте интернет и попробуйте ещё раз. В некоторых сетях (вуз, работа, отель) туннель закрыт: тогда поможет другая сеть или мобильный интернет.")
+	_, err := request(ipc.Request{Cmd: cmd, Attempt: id})
+	a.mu.Lock()
+	if a.mediaAttempt != id || (on && a.mediaStopping) {
+		a.mu.Unlock()
+		return Result{OK: true}
 	}
-	return a.end("media", err)
+	a.mediaAttempt = ""
+	a.mediaStopping = false
+	a.noteSwitch("media")
+	delete(a.busy, "media")
+	if err != nil {
+		a.errs["media"] = err.Error()
+	}
+	if on && err == nil {
+		a.settings.update(func(s *Settings) { s.TunnelWanted = true })
+	}
+	a.mu.Unlock()
+	if err != nil {
+		logLine("туннель: ОШИБКА: " + err.Error())
+		a.autoError("media", err)
+		return Result{Error: err.Error()}
+	}
+	return Result{OK: true}
 }
 
 // SetTelegram turns the proxy on or off.
@@ -628,6 +681,11 @@ func (a *App) SetAll(on bool) Result {
 		name  string
 		apply func(bool) Result
 	}{{"ai", a.applyAI}, {"telegram", a.applyTelegram}, {"media", a.applyMedia}} {
+		if !on && step.name == "media" {
+			wg.Add(1)
+			go func() { defer wg.Done(); results[i] = a.SetMedia(false) }()
+			continue
+		}
 		if !a.enter(step.name) {
 			results[i] = a.ignored(step.name)
 			continue

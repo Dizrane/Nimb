@@ -4,9 +4,10 @@
 // once, and after that the window of Nimb can switch the tunnel without asking for administrator rights every time.
 //
 //	nimb-svc install    register and start the service (administrator)
+//	nimb-svc stop       stop the service without removing it (administrator)
 //	nimb-svc uninstall  stop and remove the service (administrator)
 //	nimb-svc run        run in this console, for debugging (administrator)
-//	nimb-svc cleanup    after uninstall: give the DNS back, delete the account at Cloudflare, remove the data and the driver (administrator)
+//	nimb-svc cleanup    after stopping the service: give the DNS back, delete the account at Cloudflare, remove the data and the driver (administrator)
 package main
 
 import (
@@ -21,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
 	"golang.zx2c4.com/wintun"
@@ -40,13 +42,15 @@ func main() {
 		return
 	}
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: nimb-svc install | uninstall | run")
+		fmt.Fprintln(os.Stderr, "usage: nimb-svc install | stop | uninstall | cleanup | run")
 		os.Exit(2)
 	}
 	var err error
 	switch os.Args[1] {
 	case "install":
 		err = install()
+	case "stop":
+		err = stopService()
 	case "uninstall":
 		err = uninstall()
 	case "cleanup":
@@ -146,16 +150,16 @@ func openLog() (func(string, ...any), func()) {
 		}
 }
 
-// cleanup is called by the uninstaller after the service is removed.
+// cleanup is called with the service stopped; errors abort removal before its registration/program files are deleted.
 func cleanup() error {
 	logf := func(format string, args ...any) { fmt.Printf(format+"\n", args...) }
 	problems := helper.Cleanup(helper.DataDir(), logf)
-	// The driver of the adapter (wintun) stays in the system after the program is gone; it is removed here, with its DLL, which sits next to this file.
-	if err := wintun.Uninstall(); err != nil {
-		fmt.Println("driver:", err)
-	}
 	if len(problems) > 0 {
 		return errors.New(strings.Join(problems, "; "))
+	}
+	// The driver of the adapter (wintun) stays in the system after the program is gone; it is removed here, with its DLL, which sits next to this file.
+	if err := wintun.Uninstall(); err != nil {
+		return fmt.Errorf("не удалось удалить драйвер: %w", err)
 	}
 	fmt.Println("cleaned")
 	return nil
@@ -212,26 +216,66 @@ func install() error {
 	return nil
 }
 
-func uninstall() error {
+func stoppedService() (*mgr.Mgr, *mgr.Service, error) {
 	m, err := mgr.Connect()
 	if err != nil {
-		return fmt.Errorf("нужны права администратора: %w", err)
+		return nil, nil, fmt.Errorf("нужны права администратора: %w", err)
 	}
-	defer m.Disconnect()
 	s, err := m.OpenService(serviceName)
 	if err != nil {
-		return fmt.Errorf("служба %s не установлена", serviceName)
+		m.Disconnect()
+		if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
+			return nil, nil, nil
+		}
+		return nil, nil, err
 	}
-	defer s.Close()
-	if st, err := s.Query(); err == nil && st.State != svc.Stopped {
-		s.Control(svc.Stop)
+	fail := func(err error) (*mgr.Mgr, *mgr.Service, error) { s.Close(); m.Disconnect(); return nil, nil, err }
+	st, err := s.Query()
+	if err != nil {
+		return fail(err)
+	}
+	if st.State != svc.Stopped {
+		if _, err := s.Control(svc.Stop); err != nil && !errors.Is(err, windows.ERROR_SERVICE_NOT_ACTIVE) {
+			return fail(err)
+		}
 		for i := 0; i < 40; i++ {
-			if st, err := s.Query(); err != nil || st.State == svc.Stopped {
-				break
+			st, err = s.Query()
+			if err != nil {
+				return fail(err)
+			}
+			if st.State == svc.Stopped {
+				return m, s, nil
 			}
 			time.Sleep(250 * time.Millisecond)
 		}
+		return fail(errors.New("служба не остановилась за 10 секунд; удаление отменено"))
 	}
+	return m, s, nil
+}
+
+func stopService() error {
+	m, s, err := stoppedService()
+	if err != nil {
+		return err
+	}
+	if s != nil {
+		s.Close()
+		m.Disconnect()
+	}
+	fmt.Println("service stopped")
+	return nil
+}
+
+func uninstall() error {
+	m, s, err := stoppedService()
+	if err != nil {
+		return err
+	}
+	if s == nil {
+		return nil
+	}
+	defer m.Disconnect()
+	defer s.Close()
 	if err := s.Delete(); err != nil {
 		return err
 	}

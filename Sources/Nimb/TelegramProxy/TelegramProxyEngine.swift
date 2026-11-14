@@ -327,10 +327,15 @@ actor WebSocketPool {
 }
 
 func withTimeout<T: Sendable>(_ seconds: TimeInterval, _ operation: @escaping @Sendable () async throws -> T) async throws -> T {
-    try await withThrowingTaskGroup(of: T.self) { group in
+    let nanoseconds = seconds * 1_000_000_000
+    // A deadline may expire between checking the clock and arriving here. Do not start work or convert an invalid interval to UInt64.
+    guard seconds > 0, nanoseconds.isFinite, nanoseconds < Double(UInt64.max) else {
+        throw ChannelError("время ожидания истекло")
+    }
+    return try await withThrowingTaskGroup(of: T.self) { group in
         group.addTask { try await operation() }
         group.addTask {
-            try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            try await Task.sleep(nanoseconds: UInt64(nanoseconds))
             throw ChannelError("время ожидания истекло")
         }
         defer { group.cancelAll() }

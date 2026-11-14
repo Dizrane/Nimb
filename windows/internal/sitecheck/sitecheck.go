@@ -35,14 +35,12 @@ var Targets = []Target{
 	{"YouTube", []Address{
 		{"Сайт", "https://www.youtube.com/"},
 		{"Проверочный адрес", "https://www.youtube.com/generate_204"},
-		{"Картинки", "https://i.ytimg.com/"},
-		{"Видео", "https://redirector.googlevideo.com/"},
+		{"Картинки", "https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg"},
 	}},
 	{"Discord", []Address{
 		{"Сайт", "https://discord.com/"},
-		{"Служебный адрес", "https://discord.com/api/v9/gateway"},
-		{"Файлы", "https://cdn.discordapp.com/"},
-		{"Сообщения", "https://gateway.discord.gg/"},
+		{"Служебный адрес", "https://discord.com/api/v10/gateway"},
+		{"Файлы", "https://cdn.discordapp.com/embed/avatars/0.png"},
 	}},
 }
 
@@ -54,8 +52,8 @@ type Probe struct {
 	Failure   string // why there was no answer, in words
 }
 
-// Answered: the server answered with something other than an error of its own: the site is reachable.
-func (p Probe) Answered() bool { return p.Failure == "" && p.Code >= 200 && p.Code < 500 }
+// Answered: a successful response or redirect; refusals and missing resources do not pass.
+func (p Probe) Answered() bool { return p.Failure == "" && p.Code >= 200 && p.Code < 400 }
 
 // Host is the name of the server of the address.
 func (p Probe) Host() string {
@@ -73,7 +71,10 @@ func (p Probe) Summary() string {
 	if p.Answered() {
 		return fmt.Sprintf("ответ %d · %s с", p.Code, tenth(p.Seconds))
 	}
-	return fmt.Sprintf("ответ %d (ошибка сервера)", p.Code)
+	if p.Code >= 500 {
+		return fmt.Sprintf("ответ %d (ошибка сервера)", p.Code)
+	}
+	return fmt.Sprintf("ответ %d (ошибка запроса)", p.Code)
 }
 
 // tenth writes seconds with one digit after the comma, as the Mac does.
@@ -133,14 +134,14 @@ func (c Check) Median() (seconds float64, ok bool) {
 	return times[len(times)/2], true
 }
 
-// Result is the line of the verdict: "открывается 0,4 с", "частично: 3 из 4", "не отвечает".
+// Result reports basic HTTP reachability, not successful playback, messages or voice calls.
 func (c Check) Result() string {
 	switch c.Verdict() {
 	case Works:
 		if m, ok := c.Median(); ok {
-			return "открывается " + tenth(m) + " с"
+			return "адреса доступны " + tenth(m) + " с"
 		}
-		return "открывается"
+		return "адреса доступны"
 	case Partial:
 		return fmt.Sprintf("частично: %d из %d", c.Answered(), len(c.Probes))
 	}
@@ -171,7 +172,7 @@ func (c Check) View() View {
 	return v
 }
 
-// Line is the checks as one line of the log: "проверка: YouTube открывается 0,4 с; Discord частично: 3 из 4".
+// Line is the checks as one line of the log.
 func Line(checks []Check) string {
 	var parts []string
 	for _, c := range checks {

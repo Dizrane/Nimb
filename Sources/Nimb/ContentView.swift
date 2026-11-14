@@ -4,6 +4,8 @@ import SwiftUI
 final class DNSViewModel: ObservableObject {
     @Published var selected: DNSProvider = DNSProvider.all[0]
     @Published var active: DNSProvider? { didSet { if active != oldValue { AppLog.shared.add("dns", "DNS: \(active?.name ?? "выключен")") } } }
+    /// Also true for partial or mixed application: these connections must be cleaned up before quitting.
+    @Published private(set) var hasProviderDNS = false
     @Published var isBusy = false
     @Published var errorMessage: String? { didSet { if let message = errorMessage { AppLog.shared.add("dns", "ошибка: \(message)") } } }
     @Published var warnings: [String] = []
@@ -18,10 +20,12 @@ final class DNSViewModel: ObservableObject {
         // Read the state synchronously once, so a Mac that already has DNS on opens straight into space.
         let services = DNSManager.physicalServices()
         access = DNSManager.passwordlessState(for: services)
-        let current = DNSManager.activeProvider(on: services)
+        let configuration = DNSManager.configuration(on: services)
+        let current = configuration.active
         active = current
+        hasProviderDNS = configuration.needsCleanup
         if let current {
-            selected = current
+            if !current.retired { selected = current }
             warnings = DNSManager.overrideWarnings(for: current)
         }
     }
@@ -29,7 +33,11 @@ final class DNSViewModel: ObservableObject {
     var passwordless: Bool { access.enabled }
 
     /// A change of DNS goes to the password prompt (there is no rule for it that covers every connection).
-    var asksPassword: Bool { access.asksPassword(for: active == nil ? selected : nil) }
+    var asksPassword: Bool { asksPassword(turningOn: !hasProviderDNS) }
+
+    func asksPassword(turningOn: Bool) -> Bool {
+        access.asksPassword(for: turningOn ? selected : nil) || (!turningOn && DNSManager.restorationAsksPassword)
+    }
 
     /// True while a DNS change or a service check is running; both need the network undisturbed.
     var isLocked: Bool { isBusy || isProbing || isSettingUp }
@@ -37,7 +45,7 @@ final class DNSViewModel: ObservableObject {
     var mode: AppMode {
         if isProbing { return .probing }
         if isBusy || isSettingUp { return .busy }
-        return active == nil ? .off : .on
+        return hasProviderDNS ? .on : .off
     }
 
     var best: ProviderReport? {
@@ -98,36 +106,42 @@ final class DNSViewModel: ObservableObject {
     /// in the menu bar (nobody opened its window or its menu) would otherwise judge by what it saw last, which another program may have changed.
     func syncFromSystem() async {
         guard !isLocked else { return }
-        let read = await Task.detached { () -> (active: DNSProvider?, warnings: [String], access: DNSManager.PasswordlessState) in
+        let read = await Task.detached { () -> (configuration: DNSConfiguration, warnings: [String], access: DNSManager.PasswordlessState) in
             let services = DNSManager.physicalServices()
-            let active = DNSManager.activeProvider(on: services)
+            let configuration = DNSManager.configuration(on: services)
+            let active = configuration.active
             var warnings: [String] = []
             if let active {
                 warnings = DNSManager.overrideWarnings(for: active)
             } else if let partial = DNSManager.partialProvider(on: services) {
-                warnings = ["\(partial.provider.name) задан не на всех подключениях (нет на: \(partial.missing.joined(separator: ", "))). Нажмите кнопку, чтобы применить заново."]
+                warnings = ["\(partial.provider.name) задан не на всех подключениях (нет на: \(partial.missing.joined(separator: ", "))). Выключите DNS кнопкой или выберите провайдера, чтобы применить его заново."]
                     + DNSManager.overrideWarnings(for: partial.provider)
             }
-            return (active, warnings, DNSManager.passwordlessState(for: services))
+            return (configuration, warnings, DNSManager.passwordlessState(for: services))
         }.value
         guard !isLocked else { return }
         // Only what changed is published: the same value set again would redraw the pages and the menu for nothing.
         if access != read.access { access = read.access }
-        if active != read.active { active = read.active }
+        if active != read.configuration.active { active = read.configuration.active }
+        if hasProviderDNS != read.configuration.needsCleanup { hasProviderDNS = read.configuration.needsCleanup }
         if warnings != read.warnings { warnings = read.warnings }
-        if let active = read.active, selected != active { selected = active }
+        if let active = read.configuration.active, !active.retired, selected != active { selected = active }
     }
 
-    /// Turns the selected provider on, or resets to automatic DNS if one is already active.
+    /// Turns the selected provider on, or restores the previous DNS if one is already active.
     func toggle() {
-        let target: DNSProvider? = active == nil ? selected : nil
-        change(to: target)
+        if hasProviderDNS { disable() } else { enable() }
     }
+
+    func enable() { change(to: selected) }
+
+    func disable() { change(to: nil) }
 
     /// Picking another provider while one is active switches straight to it.
     func select(_ provider: DNSProvider) {
+        guard !provider.retired else { return }
         selected = provider
-        if active != nil, active != provider { change(to: provider) }
+        if hasProviderDNS, active != provider { change(to: provider) }
     }
 
     func togglePasswordless() { setPasswordless(!passwordless, confirm: true) }
@@ -167,7 +181,7 @@ final class DNSViewModel: ObservableObject {
         }
     }
 
-    /// Puts DNS back to automatic, removes the sudoers rule, then quits and deletes the app with its leftovers.
+    /// Restores previous DNS, removes permissions/helpers, then deletes the app and all its data, including DNS backups.
     func uninstall() {
         guard !isLocked else { return }
         if let reason = Uninstaller.blocker() { errorMessage = reason; return }
@@ -176,7 +190,7 @@ final class DNSViewModel: ObservableObject {
         alert.alertStyle = .warning
         alert.messageText = "Удалить Nimb?"
         alert.informativeText = """
-            Сначала Nimb отключится от DNS-сервисов: DNS вернётся к автоматическому (от роутера или провайдера), а правило «без пароля» и туннель WARP, если они включены, будут удалены. Для этого понадобится пароль администратора.
+            Сначала Nimb отключится от DNS-сервисов: DNS вернётся к настройкам, сохранённым перед включением Nimb (для старых включений без сохранённой копии — к автоматическому), а правило «без пароля» и туннель WARP, если они включены, будут удалены. Для этого понадобится пароль администратора.
 
             Затем приложение закроется и удалит само себя вместе с настройками и кэшем. Действие необратимо.
             """
@@ -188,12 +202,13 @@ final class DNSViewModel: ObservableObject {
         isSettingUp = true
         errorMessage = nil
         Task.detached {
+            await AllServices.shared.cancelWarpStartupAndWait()
             let services = DNSManager.servicesUsingProviders()
             let removeRule = DNSManager.passwordlessState(for: DNSManager.physicalServices()).enabled
             let removeTunnel = WarpPaths.isInstalled
             var failure: Error?
             do {
-                if !services.isEmpty || removeRule || removeTunnel {
+                if !services.isEmpty || DNSManager.hasSavedDNS || removeRule || removeTunnel {
                     try DNSManager.resetBeforeUninstall(services, removingRule: removeRule, removingTunnel: removeTunnel)
                 }
                 // The entry in «Объекты входа» goes away with the app, not later by itself.
@@ -220,17 +235,25 @@ final class DNSViewModel: ObservableObject {
         isBusy = true
         errorMessage = nil
         Task.detached {
-            let services = DNSManager.physicalServices()
+            // A partial application must be turned off too. Leave custom DNS on all other connections alone.
+            let services = provider == nil ? DNSManager.servicesUsingProviders() : DNSManager.physicalServices()
             let result = Result { try DNSManager.apply(provider, to: services) }
+            let configuration = DNSManager.configuration(on: DNSManager.physicalServices())
             // What the system says now, for the diary: not what the command said.
-            let summary = DNSManager.applySummary(provider, services: services, current: Dictionary(uniqueKeysWithValues: services.map { ($0, DNSManager.servers(of: $0)) }))
+            let summary: String
+            if provider == nil {
+                summary = if case .success = result { "Прежние настройки DNS возвращены" } else { "Возврат прежних настроек DNS не завершён" }
+            } else {
+                summary = DNSManager.applySummary(provider, services: services, current: Dictionary(uniqueKeysWithValues: services.map { ($0, DNSManager.servers(of: $0)) }))
+            }
             await MainActor.run {
                 AppLog.shared.add("dns", summary)
                 // `apply` has read the servers back and checked them, so success means the state is the one asked for. It
                 // is set in the same moment as "not busy": a reading that came later left a gap in which the page, the
                 // menu and "turn everything off" still saw the old state.
+                self.active = configuration.active
+                self.hasProviderDNS = configuration.needsCleanup
                 if case .success = result {
-                    if self.active != provider { self.active = provider }
                     if let provider, self.selected != provider { self.selected = provider }
                 }
                 self.isBusy = false
@@ -464,9 +487,9 @@ struct DNSHero: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            HeroButton(mode: model.mode, lit: model.active != nil, region: model.active?.region ?? model.selected.region, action: model.toggle)
+            HeroButton(mode: model.mode, lit: model.hasProviderDNS, region: model.active?.region ?? model.selected.region, action: model.toggle)
                 .disabled(model.isLocked)
-                .accessibilityLabel(model.active == nil ? "Включить Smart DNS" : "Выключить Smart DNS")
+                .accessibilityLabel(model.hasProviderDNS ? "Выключить Smart DNS" : "Включить Smart DNS")
 
             Text(title)
                 .font(Typo.status)
@@ -501,7 +524,7 @@ struct DNSHero: View {
     private var title: String {
         switch model.mode {
         case .off: return "Выключено"
-        case .on: return "Включено"
+        case .on: return model.active == nil ? "Включено частично" : "Включено"
         case .probing: return "Проверка сервисов"
         case .busy: return model.isSettingUp ? "Настраиваю доступ" : "Применяю DNS"
         }
@@ -510,7 +533,7 @@ struct DNSHero: View {
     private var subtitle: String {
         switch model.mode {
         case .off: return "Включите, чтобы открывались ChatGPT, Claude, Gemini и другие нейросети"
-        case .on: return ""
+        case .on: return model.active == nil ? "DNS задан на части подключений" : ""
         case .probing: return "Спрашиваю DNS и запрашиваю сайты и API"
         case .busy: return !model.asksPassword && !model.isSettingUp ? "Меняю DNS на всех подключениях" : "Подтвердите пароль администратора"
         }
@@ -896,7 +919,7 @@ private struct DetailsView: View {
                     .foregroundStyle(Theme.warn)
             }
             Divider()
-            Text("Цифры — сколько адресов ответило как положено. Отказ из-за региона, страница ограничений и ответ 403 не считаются. Сервис работает, если ответило 75% и больше. Это проверка адресов, а не приложений.")
+            Text("Цифры — сколько адресов ответило как положено. Для сайта и API нужно не менее 75% успешных ответов отдельно. Отказы из-за региона не считаются. Проверка браузера Cloudflare подтверждает только доступность адреса: вход и работу нейросети проверьте вручную.")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

@@ -170,6 +170,48 @@ final class WarpTunnelModel: ObservableObject {
         set { UserDefaults.standard.set(newValue, forKey: wantedKey) }
     }
     private var restoring = false
+    @Published private(set) var startAttempt: TunnelStartAttempt?
+    private var startupTask: Task<Void, Never>?
+    private var intentGeneration = 0
+    var canCancelStartup: Bool { startAttempt.map { !$0.isCancelled } ?? false }
+
+    func cancelStartup() {
+        guard let attempt = startAttempt, !attempt.isCancelled else { return }
+        do { try attempt.cancel() } catch { errorMessage = error.localizedDescription; return }
+        Self.wanted = false
+        intentGeneration += 1
+        startupTask?.cancel()
+        phase = .working("Отменяю подключение…")
+    }
+
+    private func beginStartup() -> TunnelStartAttempt? {
+        do {
+            let attempt = try TunnelStartAttempt()
+            intentGeneration += 1
+            startAttempt = attempt
+            return attempt
+        } catch { errorMessage = error.localizedDescription; return nil }
+    }
+
+    private func finishCancelledStartup(_ attempt: TunnelStartAttempt, result: Result<String, Error>) {
+        if TunnelStartAttempt.cancellationWasClean(result) { endStartup(attempt); return }
+        Task {
+            let cleanup = await TunnelStartAttempt.perform { if WarpPaths.isInstalled { _ = try Self.runWithoutPassword("down") } }
+            await MainActor.run {
+                if case .failure(let error) = cleanup { self.errorMessage = Self.friendly(error) }
+                self.endStartup(attempt)
+            }
+        }
+    }
+
+    private func endStartup(_ attempt: TunnelStartAttempt) {
+        guard startAttempt === attempt else { return }
+        startAttempt = nil
+        startupTask = nil
+        attempt.remove()
+        finish()
+        if attempt.isCancelled { Self.wanted = false }
+    }
 
     init() {
         refresh()
@@ -187,8 +229,8 @@ final class WarpTunnelModel: ObservableObject {
         Task { @MainActor in
             defer { restoring = false }
             for attempt in 0..<TunnelRestore.attempts {
-                guard await Self.waitForNetwork(timeout: 180) else { AppLog.shared.add("tunnel", "сети нет: туннель не включён"); return }
-                guard phase == .off else { return }
+                guard Self.wanted, await Self.waitForNetwork(timeout: 180) else { AppLog.shared.add("tunnel", "сети нет: туннель не включён"); return }
+                guard Self.wanted, phase == .off else { return }
                 connect(userInitiated: false)
                 while isWorking { try? await Task.sleep(nanoseconds: 500_000_000) }
                 if isOn { return }
@@ -246,7 +288,7 @@ final class WarpTunnelModel: ObservableObject {
     var isWorking: Bool { if case .working = phase { return true } else { return false } }
     /// While it works: is it being switched on (or set up) and not off?
     var isTurningOn: Bool {
-        if case .working(let text) = phase { return !(text.hasPrefix("Выключаю") || text.hasPrefix("Удаляю")) }
+        if case .working(let text) = phase { return !(text.hasPrefix("Выключаю") || text.hasPrefix("Удаляю") || text.hasPrefix("Отменяю")) }
         return isOn
     }
     var isInstalled: Bool { phase != .notInstalled && phase != .unavailable }
@@ -417,23 +459,28 @@ final class WarpTunnelModel: ObservableObject {
     /// The first start on a Mac, with nothing to enter: makes this Mac's own WARP account (keys and address), puts it together
     /// with the shared preset from the app, installs everything and starts the tunnel, all in one password prompt.
     func enable(phaseText: String = "Создаю личные ключи WARP…", afterKeyReset: Bool = false) {
-        guard bundledFiles != nil, !isWorking else { return }
+        guard bundledFiles != nil, !isWorking, let attempt = beginStartup() else { return }
         errorMessage = nil
         checks = []
         phase = .working(phaseText)
-        Task {
+        startupTask = Task {
             let account: WarpAccount
             do {
                 account = try await WarpRegistration.register()
             } catch {
-                errorMessage = error.localizedDescription
-                if afterKeyReset { AutoReporter.shared.notify(.newKeysFailed) }
-                finish()
+                if !attempt.isCancelled { errorMessage = error.localizedDescription }
+                if afterKeyReset && !attempt.isCancelled { AutoReporter.shared.notify(.newKeysFailed) }
+                endStartup(attempt)
+                return
+            }
+            guard !attempt.isCancelled else {
+                endStartup(attempt)
+                Task.detached { await WarpRegistration.delete(account) }
                 return
             }
             phase = .working("Включаю…")
-            let outcome = await Task.detached { Result { try Self.installFiles(configText: account.file, thenStart: true) } }.value
-            if case .failure(let error) = outcome {
+            let outcome = await TunnelStartAttempt.perform { try Self.installFiles(configText: account.file, attempt: attempt) }
+            if case .failure(let error) = outcome, !attempt.isCancelled {
                 if case DNSError.cancelled = error {} else {
                     errorMessage = Self.friendly(error)
                     // New keys were made and the tunnel still does not start: the last way out of the program is gone, and it is told.
@@ -442,12 +489,15 @@ final class WarpTunnelModel: ObservableObject {
                 // Not installed (the password was refused, say): the account would be left without an owner.
                 if !WarpPaths.isInstalled { await WarpRegistration.delete(account) }
             }
-            finish()
+            if attempt.isCancelled {
+                if !WarpPaths.isInstalled { Task.detached { await WarpRegistration.delete(account) } }
+                finishCancelledStartup(attempt, result: outcome)
+            } else { endStartup(attempt) }
         }
     }
 
     /// Puts helper, daemon and settings in place as root and, if asked, starts the tunnel in the same prompt.
-    nonisolated private static func installFiles(configText: String, thenStart: Bool = true) throws {
+    nonisolated private static func installFiles(configText: String, attempt: TunnelStartAttempt) throws -> String {
         guard let binary = Bundle.main.url(forResource: "amneziawg-go", withExtension: nil),
               let helper = Bundle.main.url(forResource: "nimb-tunnel", withExtension: "sh") else {
             throw WarpConfigError("В этой сборке Nimb нет amneziawg-go.")
@@ -460,7 +510,7 @@ final class WarpTunnelModel: ObservableObject {
         ])
         defer { staged.remove() }
         let d = "'\(WarpPaths.dir)'"
-        var steps = ["set -e"] + staged.guardedCopy() + [
+        let steps = ["set -e"] + staged.guardedCopy() + [
             // The old settings may hold an account of this Mac; it goes away together with them.
             "if [ -x '\(WarpPaths.helper)' ]; then '\(WarpPaths.helper)' down || true; '\(WarpPaths.helper)' unregister || true; fi",
             "/bin/mkdir -p \(d)", "/usr/sbin/chown root:wheel \(d)", "/bin/chmod 755 \(d)",
@@ -469,13 +519,12 @@ final class WarpTunnelModel: ObservableObject {
             "/usr/bin/install -m 600 -o root -g wheel \"$stage/warp.conf\" \(d)/warp.conf",
             "/usr/bin/xattr -cr \(d) 2>/dev/null || true",
         ]
-        if thenStart { steps.append("'\(WarpPaths.helper)' up") }
-        _ = try DNSManager.runPrivileged(steps.joined(separator: "; "))
+        return try DNSManager.runPrivileged(attempt.script(up: "'\(WarpPaths.helper)' up", down: "[ ! -x '\(WarpPaths.helper)' ] || '\(WarpPaths.helper)' down", preparation: steps))
     }
 
     // MARK: On and off
 
-    func toggle() { isOn ? disconnect() : connect() }
+    func toggle() { if canCancelStartup { cancelStartup() } else if isOn { disconnect() } else { connect() } }
 
     /// What the person sees for a failure: the helper's words, and for the common one (no answer from Cloudflare) what to try.
     nonisolated static func friendly(_ error: Error) -> String {
@@ -518,7 +567,7 @@ final class WarpTunnelModel: ObservableObject {
     }
 
     func connect(userInitiated: Bool = true) {
-        guard isInstalled, !isWorking else { return }
+        guard isInstalled, !isWorking, let attempt = beginStartup() else { return }
         errorMessage = nil
         checks = []
         let upgrade = upgrade
@@ -526,10 +575,16 @@ final class WarpTunnelModel: ObservableObject {
         // permission «без пароля». The person is told why.
         phase = .working(upgrade != nil && passwordless ? "Обновляю помощник туннеля: пароль нужен один раз…" : "Включаю…")
         let withoutPassword = passwordless && upgrade == nil
-        Task.detached {
-            let result = Result<String, Error> {
-                if withoutPassword { return try Self.runWithoutPassword("up") }
-                var script = "'\(WarpPaths.helper)' up"
+        startupTask = Task {
+            let result = await TunnelStartAttempt.perform { () throws -> String in
+                if withoutPassword {
+                    do {
+                        return try DNSManager.run("/bin/sh", ["-c", attempt.script(up: "/usr/bin/sudo -n '\(WarpPaths.helper)' up", down: "/usr/bin/sudo -n '\(WarpPaths.helper)' down")], timeout: nil)
+                    } catch DNSError.failed(let message) where message.contains("password is required") || message.contains("not allowed") || message.contains("may not run") {
+                        return try DNSManager.runPrivileged(attempt.script(up: "'\(WarpPaths.helper)' up", down: "'\(WarpPaths.helper)' down"))
+                    }
+                }
+                var preparation: [String] = []
                 var staged: StagedFiles?
                 defer { staged?.remove() }
                 if let upgrade {
@@ -538,22 +593,24 @@ final class WarpTunnelModel: ObservableObject {
                         ("nimb-tunnel", try Data(contentsOf: upgrade.helper)),
                     ])
                     staged = files
-                    script = (["set -e"] + files.guardedCopy() + [
+                    preparation = ["set -e"] + files.guardedCopy() + [
                         "/usr/bin/install -m 755 -o root -g wheel \"$stage/amneziawg-go\" '\(WarpPaths.binary)'",
                         "/usr/bin/install -m 755 -o root -g wheel \"$stage/nimb-tunnel\" '\(WarpPaths.helper)'",
                         "/usr/bin/xattr -c '\(WarpPaths.binary)' '\(WarpPaths.helper)' 2>/dev/null || true",
-                        script,
-                    ]).joined(separator: "; ")
+                    ]
                 }
-                return try DNSManager.runPrivileged(script)
+                // The final command execs the helper; setup and its guarded copies stay in the supervised child.
+                return try DNSManager.runPrivileged(attempt.script(up: "'\(WarpPaths.helper)' up", down: "'\(WarpPaths.helper)' down", preparation: preparation))
             }
             await MainActor.run {
+                guard self.startAttempt === attempt else { return }
+                if attempt.isCancelled { self.finishCancelledStartup(attempt, result: result); return }
                 var message: String?
                 if case .failure(let error) = result {
                     if case DNSError.cancelled = error {} else { message = Self.friendly(error); self.errorMessage = message }
-                    if case DNSError.cancelled = error { self.finish(); return }
+                    if case DNSError.cancelled = error { self.endStartup(attempt); return }
                 }
-                self.finish()
+                self.endStartup(attempt)
                 self.afterStart(failedWith: message, userAsked: userInitiated)
             }
         }
@@ -567,9 +624,10 @@ final class WarpTunnelModel: ObservableObject {
         let last = defaults.double(forKey: Self.keysResetKey)
         let lastReset = last > 0 ? Date(timeIntervalSince1970: last) : nil
         guard failures >= TunnelKeyReset.failuresNeeded, userAsked, !isOn, lastReset.map({ Date().timeIntervalSince($0) >= TunnelKeyReset.pause }) ?? true else { return }
+        let generation = intentGeneration
         Task {
             // The internet is looked at first: with none, new keys would not help, and Cloudflare would be asked for nothing.
-            guard await Self.cloudflareReachable(),
+            guard await Self.cloudflareReachable(), generation == intentGeneration, !isWorking,
                   TunnelKeyReset.shouldReset(failures: failures, internetWorks: true, lastReset: lastReset, now: Date(), userAsked: userAsked) else { return }
             defaults.set(Date().timeIntervalSince1970, forKey: Self.keysResetKey)
             defaults.set(0, forKey: Self.handshakeFailuresKey)
@@ -587,7 +645,10 @@ final class WarpTunnelModel: ObservableObject {
     }
 
     func disconnect() {
+        if canCancelStartup { cancelStartup(); return }
         guard !isWorking else { return }
+        intentGeneration += 1
+        Self.wanted = false
         errorMessage = nil
         checks = []
         phase = .working("Выключаю…")

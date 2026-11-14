@@ -1,4 +1,6 @@
 import Foundation
+import Network
+import SystemConfiguration
 
 enum DNSError: LocalizedError {
     case cancelled
@@ -36,17 +38,93 @@ enum DNSManager {
         return result
     }
 
-    static func servers(of service: String) -> [String] {
-        guard let output = try? run("/usr/sbin/networksetup", ["-getdnsservers", service]) else { return [] }
-        return output.split(separator: "\n").map(String.init).filter { $0.first?.isNumber == true }
+    static func servers(of service: String) -> [String] { (try? checkedServers(of: service)) ?? [] }
+
+    static func parsedServers(_ output: String) throws -> [String] {
+        let lines = output.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
+        if lines.count == 1, lines[0].hasPrefix("There aren't any DNS Servers set on ") { return [] }
+        guard !lines.isEmpty, lines.allSatisfy(validAddress) else { throw DNSError.failed("Не удалось прочитать текущие DNS. Настройки не изменены.") }
+        return lines
+    }
+
+    private static func checkedServers(of service: String) throws -> [String] {
+        try parsedServers(run("/usr/sbin/networksetup", ["-getdnsservers", service]))
+    }
+
+    private static func validAddress(_ value: String) -> Bool {
+        let parts = value.split(separator: "%", omittingEmptySubsequences: false)
+        guard parts.count <= 2, let address = parts.first else { return false }
+        if parts.count == 2, parts[1].range(of: #"^[A-Za-z0-9._-]+$"#, options: .regularExpression) == nil { return false }
+        return IPv4Address(String(address)) != nil || IPv6Address(String(address)) != nil
+    }
+
+    static func sameServers(_ lhs: [String], _ rhs: [String]) -> Bool {
+        func normalized(_ value: String) -> String {
+            let parts = value.split(separator: "%", maxSplits: 1)
+            let ip = String(parts.first ?? "")
+            let zone = parts.count == 2 ? "%" + parts[1] : ""
+            if let v6 = IPv6Address(ip) { return v6.rawValue.base64EncodedString() + zone }
+            return ip
+        }
+        return lhs.map(normalized) == rhs.map(normalized)
+    }
+
+    private static let changeLock = NSLock()
+
+    private static func serviceNames() throws -> [String: String] {
+        guard let preferences = SCPreferencesCreate(nil, "Nimb DNS" as CFString, nil),
+              let services = SCNetworkServiceCopyAll(preferences) as? [SCNetworkService] else {
+            throw DNSError.failed("Не удалось прочитать список сетевых подключений.")
+        }
+        return Dictionary(uniqueKeysWithValues: services.compactMap { service in
+            guard let name = SCNetworkServiceGetName(service) as String?,
+                  let id = SCNetworkServiceGetServiceID(service) as String? else { return nil }
+            return (id, name)
+        })
+    }
+
+    private static func readSettings(names: [String: String], ids: Set<String>) throws -> [String: DNSServiceSettings] {
+        var result: [String: DNSServiceSettings] = [:]
+        for id in ids {
+            if let name = names[id] { result[id] = DNSServiceSettings(name: name, servers: try checkedServers(of: name)) }
+        }
+        return result
+    }
+
+    static var hasSavedDNS: Bool { FileManager.default.fileExists(atPath: DNSBackupStore.standard.url.path) }
+
+    /// Custom DNS are restored under the normal administrator prompt; the narrow sudo rule remains unchanged.
+    static var restorationAsksPassword: Bool {
+        guard let backup = try? DNSBackupStore.standard.load() else { return true }
+        return backup.entries.values.contains { saved in
+            !saved.servers.isEmpty && !DNSProvider.all.contains { sameServers($0.addresses, saved.servers) }
+        }
     }
 
     /// The provider currently set on every physical service, or nil if DNS is automatic or mixed.
     static func activeProvider(on services: [String]) -> DNSProvider? {
-        guard !services.isEmpty else { return nil }
-        return DNSProvider.all.first { provider in
-            services.allSatisfy { provider.matches(servers(of: $0)) }
+        configuration(on: services).active
+    }
+
+    static func configuration(on services: [String]) -> DNSConfiguration {
+        let current = Dictionary(uniqueKeysWithValues: services.map { ($0, servers(of: $0)) })
+        var pending = false
+        var restoredServices: Set<String> = []
+        if hasSavedDNS {
+            do {
+                let backup = try DNSBackupStore.standard.load()
+                let names = try serviceNames()
+                for (id, servers) in backup.restored ?? [:] {
+                    if let name = names[id], let now = current[name], sameServers(servers, now) { restoredServices.insert(name) }
+                }
+                for (id, saved) in backup.entries {
+                    guard let name = names[id] else { pending = true; break }
+                    let servers = try current[name] ?? checkedServers(of: name)
+                    if !sameServers(saved.servers, servers), saved.applied.contains(where: { sameServers($0, servers) }) { pending = true; break }
+                }
+            } catch { pending = true }
         }
+        return DNSConfiguration(services: services, servers: current, pendingRestoration: pending, restoredServices: restoredServices)
     }
 
     /// A provider that is set on some, but not all, of the services, with the services it is missing on.
@@ -63,6 +141,11 @@ enum DNSManager {
     /// Reasons why the DNS set on the services may not be the one the system actually uses.
     static func overrideWarnings(for provider: DNSProvider) -> [String] {
         var warnings: [String] = []
+        if provider.retired {
+            warnings.append("\(provider.name) больше не поддерживает доступ к нейросетям. Выберите другой DNS или выключите сервис, чтобы вернуть прежние настройки.")
+        } else if physicalServices().contains(where: { provider.legacy.contains(servers(of: $0)) }) {
+            warnings.append("Заданы прежние адреса \(provider.name). Выключите и включите DNS, чтобы применить обновлённые адреса.")
+        }
 
         if let list = try? run("/usr/sbin/scutil", ["--nc", "list"]) {
             for line in list.split(separator: "\n") where line.contains("(Connected)") {
@@ -127,29 +210,75 @@ enum DNSManager {
 
     // MARK: Writing (asks for the administrator password)
 
-    /// Sets `provider` on all given services, or resets them to automatic DNS when it is nil.
-    /// Every command is checked, and the result is read back afterwards.
+    /// Persist originals before enabling; disabling restores only settings still owned by this session.
     static func apply(_ provider: DNSProvider?, to services: [String]) throws {
-        if canApplyWithoutPassword(provider, to: services) {
-            try applyWithSudo(provider, to: services)
+        changeLock.lock(); defer { changeLock.unlock() }
+        if let provider {
+            guard !provider.retired else { throw DNSError.failed("\(provider.name) больше не поддерживает доступ к нейросетям. Выберите другой DNS.") }
+            let store = DNSBackupStore.standard
+            var backup = try store.load()
+            let names = try serviceNames()
+            let ids = Set(names.filter { services.contains($0.value) }.keys)
+            guard ids.count == services.count else { throw DNSError.failed("Список подключений изменился. Повторите включение DNS.") }
+            let before = try readSettings(names: names, ids: ids)
+            backup.prepare(provider, current: before)
+            try store.save(backup)
+            let targets = Dictionary(uniqueKeysWithValues: before.values.map { ($0.name, provider.addresses) })
+            try writeSettings(targets)
         } else {
-            try runPrivileged(applyScript(provider, to: services))
+            try restore(services: services)
         }
+    }
 
-        let expected = provider?.addresses ?? []
-        let mismatched = services.filter { servers(of: $0) != expected }
-        if !mismatched.isEmpty {
-            throw DNSError.failed("DNS не применился на: \(mismatched.joined(separator: ", ")).")
+    private static func writeSettings(_ targets: [String: [String]], removingRule: Bool = false, removingTunnel: Bool = false) throws {
+        guard !targets.isEmpty || removingRule || removingTunnel else { return }
+        guard targets.values.allSatisfy({ $0.allSatisfy(validAddress) }) else {
+            throw DNSError.failed("Сохранённые DNS повреждены. Настройки не изменены.")
+        }
+        if !removingRule && !removingTunnel && canWriteWithoutPassword(targets) {
+            try applyWithSudo(targets)
+        } else {
+            try runPrivileged(settingsScript(targets, removingRule: removingRule, removingTunnel: removingTunnel))
+        }
+        let mismatched = try targets.keys.filter { try !sameServers(checkedServers(of: $0), targets[$0] ?? []) }
+        if !mismatched.isEmpty { throw DNSError.failed("DNS не применился на: \(mismatched.joined(separator: ", ")).") }
+    }
+
+    private static func restore(services: [String], removingRule: Bool = false, removingTunnel: Bool = false) throws {
+        let store = DNSBackupStore.standard
+        var backup = try store.load()
+        let names = try serviceNames()
+        let ids = Set(backup.entries.keys).union(names.filter { services.contains($0.value) }.keys)
+        let before = try readSettings(names: names, ids: ids)
+        let plan = backup.restoration(current: before, legacyServices: Set(services))
+        let targets = Dictionary(uniqueKeysWithValues: plan.compactMap { id, servers in names[id].map { ($0, servers) } })
+        // Keep permissions/helpers until every saved connection is back, including temporarily absent USB services.
+        var failure: Error?
+        do { try writeSettings(targets) } catch { failure = error }
+        let after = try readSettings(names: try serviceNames(), ids: ids)
+        backup.reconcile(current: after)
+        try store.save(backup)
+        if let failure { throw failure }
+        guard backup.entries.isEmpty else {
+            throw DNSError.failed("Прежние DNS сохранены, но ещё не возвращены на: \(backup.entries.values.map(\.name).sorted().joined(separator: ", ")). Подключите устройство и повторите выключение DNS.")
+        }
+        if removingRule || removingTunnel {
+            try writeSettings([:], removingRule: removingRule, removingTunnel: removingTunnel)
         }
     }
 
     /// Shell script that runs as root: it tries every command and exits non-zero if any failed.
     /// With `removingRule` the sudoers rule is deleted at the end, but only if every command above succeeded.
     static func applyScript(_ provider: DNSProvider?, to services: [String], removingRule: Bool = false, removingTunnel: Bool = false) -> String {
-        let addresses = provider?.addresses.joined(separator: " ") ?? "Empty"
+        settingsScript(Dictionary(uniqueKeysWithValues: services.map { ($0, provider?.addresses ?? []) }), removingRule: removingRule, removingTunnel: removingTunnel)
+    }
+
+    static func settingsScript(_ targets: [String: [String]], removingRule: Bool = false, removingTunnel: Bool = false) -> String {
         var script = ["failed=0"]
-        for service in services {
+        for service in targets.keys.sorted() {
             let quoted = shellQuote(service)
+            let servers = targets[service] ?? []
+            let addresses = servers.isEmpty ? "Empty" : servers.map(shellQuote).joined(separator: " ")
             script.append("/usr/sbin/networksetup -setdnsservers \(quoted) \(addresses) || { echo \(shellQuote("Не удалось изменить DNS:")) \(quoted) >&2; failed=1; }")
         }
         script.append("/usr/bin/dscacheutil -flushcache || { echo \(shellQuote("Не удалось сбросить кэш DNS (dscacheutil).")) >&2; failed=1; }")
@@ -164,17 +293,13 @@ enum DNSManager {
 
     /// Physical services whose DNS is one of ours. Anything the user set by hand is left alone.
     static func servicesUsingProviders() -> [String] {
-        physicalServices().filter { service in
-            let current = servers(of: service)
-            return DNSProvider.all.contains { $0.matches(current) }
-        }
+        configuration(on: physicalServices()).managedServices
     }
 
-    /// Back to automatic DNS on `services` and, if asked, the sudoers rule removed, in one password prompt.
+    /// Restore saved DNS (or automatic for older installations), then remove permissions/helpers after success.
     static func resetBeforeUninstall(_ services: [String], removingRule: Bool, removingTunnel: Bool = false) throws {
-        try runPrivileged(applyScript(nil, to: services, removingRule: removingRule, removingTunnel: removingTunnel))
-        let left = services.filter { !servers(of: $0).isEmpty }
-        if !left.isEmpty { throw DNSError.failed("DNS не вернулся к автоматическому на: \(left.joined(separator: ", ")).") }
+        changeLock.lock(); defer { changeLock.unlock() }
+        try restore(services: services, removingRule: removingRule, removingTunnel: removingTunnel)
     }
 
     // MARK: Without a password (opt-in)
@@ -257,15 +382,14 @@ enum DNSManager {
             enabled: true,
             missing: named.filter { !covered.contains($0) },
             tooBroad: sudoAcceptsAnyDNS(),
-            uncoveredProviders: Set(DNSProvider.all.filter { provider in !covered.allSatisfy { list.allows(setCommand($0, provider.addresses)) } }.map(\.id))
+            uncoveredProviders: Set(DNSProvider.available.filter { provider in !covered.allSatisfy { list.allows(setCommand($0, provider.addresses)) } }.map(\.id))
         )
     }
 
-    private static func canApplyWithoutPassword(_ provider: DNSProvider?, to services: [String]) -> Bool {
-        let addresses = provider?.addresses ?? ["Empty"]
+    private static func canWriteWithoutPassword(_ targets: [String: [String]]) -> Bool {
         let list = noPasswordList()
-        return !services.isEmpty
-            && services.allSatisfy { list.allows(setCommand($0, addresses)) }
+        return !targets.isEmpty
+            && targets.allSatisfy { service, servers in list.allows(setCommand(service, servers.isEmpty ? ["Empty"] : servers)) }
             && list.allows("/usr/bin/dscacheutil -flushcache")
             && list.allows("/usr/bin/killall -HUP mDNSResponder")
     }
@@ -276,7 +400,7 @@ enum DNSManager {
         func escaped(_ service: String) -> String { service.replacingOccurrences(of: " ", with: "\\ ") }
         var commands: [String] = []
         for service in services {
-            for addresses in [["Empty"]] + DNSProvider.all.map(\.addresses) {
+            for addresses in [["Empty"]] + DNSProvider.available.map(\.addresses) {
                 commands.append(setCommand(escaped(service), addresses))
             }
         }
@@ -337,8 +461,7 @@ enum DNSManager {
     }
 
     /// The same commands as `applyScript`, each one through `sudo -n`, so nothing is asked.
-    private static func applyWithSudo(_ provider: DNSProvider?, to services: [String]) throws {
-        let addresses = provider?.addresses ?? ["Empty"]
+    private static func applyWithSudo(_ targets: [String: [String]]) throws {
         var failures: [String] = []
         func sudo(_ args: [String], _ failure: String) {
             do { _ = try run("/usr/bin/sudo", ["-n"] + args, timeout: nil) } catch DNSError.failed(let message) {
@@ -347,8 +470,9 @@ enum DNSManager {
                 failures.append(failure)
             }
         }
-        for service in services {
-            sudo(["/usr/sbin/networksetup", "-setdnsservers", service] + addresses, "Не удалось изменить DNS: \(service).")
+        for service in targets.keys.sorted() {
+            let servers = targets[service] ?? []
+            sudo(["/usr/sbin/networksetup", "-setdnsservers", service] + (servers.isEmpty ? ["Empty"] : servers), "Не удалось изменить DNS: \(service).")
         }
         sudo(["/usr/bin/dscacheutil", "-flushcache"], "Не удалось сбросить кэш DNS (dscacheutil).")
         sudo(["/usr/bin/killall", "-HUP", "mDNSResponder"], "Не удалось перезапустить mDNSResponder.")

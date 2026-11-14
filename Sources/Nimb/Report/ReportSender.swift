@@ -39,16 +39,12 @@ enum ReportSender {
         init(_ message: String, refused: Bool = false) { errorDescription = message; self.refused = refused }
     }
 
-    /// The relay takes at most 100 KB; a longer report loses the middle of the diary, not its head or its end.
-    private static let limit = 60_000
-
     /// `auto` is for a report that the program sends by itself («Помогать тестированию»): the cause and the random number of the installation.
     static func send(id: String, text: String, auto: (trigger: String, install: String)? = nil) async throws {
         if let paused = ReportGate.pausedWords { throw Failure(paused, refused: true) }
         guard let key = ReportKey.data else { throw Failure(ReportConfig.pausedWords, refused: true) }
         guard let endpoint = ReportConfig.endpoint else { throw Failure("Отправка из приложения пока не настроена.") }
-        var body = text
-        if body.count > limit { body = String(body.prefix(limit / 2)) + "\n…\n" + String(body.suffix(limit / 2)) }
+        let body = try ReportPayload.fitted(text)
         var payload: [String: Any] = ["v": 1, "id": id, "app": Updater.currentVersion, "platform": "macos", "text": body]
         payload["sig"] = ReportSigner.signature(of: ReportSigner.message(id: id, app: Updater.currentVersion, platform: "macos", install: auto?.install ?? "", text: body), key: key)
         if let auto {
@@ -59,7 +55,9 @@ enum ReportSender {
         var request = URLRequest(url: endpoint, timeoutInterval: 20)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        let encoded = try JSONSerialization.data(withJSONObject: payload)
+        guard encoded.count <= ReportPayload.bodyLimit else { throw Failure("Отчёт слишком большой для отправки.") }
+        request.httpBody = encoded
         let response: URLResponse
         let answer: Data
         do {

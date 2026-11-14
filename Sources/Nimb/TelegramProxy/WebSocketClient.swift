@@ -31,7 +31,9 @@ final class WebSocketClient: @unchecked Sendable {
             let deadline = Date().addingTimeInterval(timeout)
             while head.range(of: terminator) == nil {
                 guard Date() < deadline, head.count < 16384 else { throw ChannelError("ответ на рукопожатие слишком долгий") }
-                guard let chunk = try await channel.receive(maximum: 4096) else { throw ChannelError("соединение закрыто при рукопожатии") }
+                guard let chunk = try await withTimeout(deadline.timeIntervalSinceNow, {
+                    try await channel.receive(maximum: 4096)
+                }) else { throw ChannelError("соединение закрыто при рукопожатии") }
                 head.append(chunk)
             }
             let end = head.range(of: terminator)!

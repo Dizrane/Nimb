@@ -58,37 +58,61 @@ final class Channel: @unchecked Sendable {
 
     /// Waits until the connection is ready. An accepted connection is already running, so this only waits.
     func start(timeout: TimeInterval) async throws {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            let once = ResumeOnce()
-            @Sendable func finish(_ result: Result<Void, Error>) {
-                once { continuation.resume(with: result) }
-            }
-            connection.stateUpdateHandler = { state in
-                switch state {
-                case .ready: finish(.success(()))
-                case .failed(let error): finish(.failure(error))
-                case .cancelled: finish(.failure(ChannelError("соединение закрыто")))
-                case .waiting(let error): finish(.failure(error))
-                default: break
+        defer { connection.stateUpdateHandler = nil }
+        do {
+            try await withTaskCancellationHandler {
+                try Task.checkCancellation()
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    let once = ResumeOnce()
+                    @Sendable func finish(_ result: Result<Void, Error>) {
+                        once { continuation.resume(with: result) }
+                    }
+                    connection.stateUpdateHandler = { state in
+                        switch state {
+                        case .ready: finish(.success(()))
+                        case .failed(let error): finish(.failure(error))
+                        case .cancelled: finish(.failure(ChannelError("соединение закрыто")))
+                        case .waiting(let error): finish(.failure(error))
+                        default: break
+                        }
+                    }
+                    connection.start(queue: queue)
+                    queue.asyncAfter(deadline: .now() + timeout) {
+                        // A timer that lost to .ready must not close an already working connection.
+                        once {
+                            self.connection.cancel()
+                            continuation.resume(throwing: ChannelError("время ожидания истекло"))
+                        }
+                    }
                 }
+                try Task.checkCancellation()
+            } onCancel: {
+                self.connection.cancel()
             }
-            connection.start(queue: queue)
-            queue.asyncAfter(deadline: .now() + timeout) {
-                finish(.failure(ChannelError("время ожидания истекло")))
-            }
+        } catch {
+            connection.cancel()
+            throw error
         }
-        connection.stateUpdateHandler = nil
     }
 
     /// Reads up to `maximum` bytes (at least one). nil means the other side has finished.
     func receive(maximum: Int = 65536) async throws -> Data? {
-        try await withCheckedThrowingContinuation { continuation in
-            connection.receive(minimumIncompleteLength: 1, maximumLength: maximum) { data, _, isComplete, error in
-                if let error { continuation.resume(throwing: error) }
-                else if let data, !data.isEmpty { continuation.resume(returning: data) }
-                else if isComplete { continuation.resume(returning: nil) }
-                else { continuation.resume(returning: Data()) }
+        try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            let result: Data? = try await withCheckedThrowingContinuation { continuation in
+                connection.receive(minimumIncompleteLength: 1, maximumLength: maximum) { data, _, isComplete, error in
+                    if let error { continuation.resume(throwing: error) }
+                    else if let data, !data.isEmpty { continuation.resume(returning: data) }
+                    else if isComplete { continuation.resume(returning: nil) }
+                    else { continuation.resume(returning: Data()) }
+                }
             }
+            try Task.checkCancellation()
+            return result
+        } onCancel: {
+            // Task groups await even cancelled children. Closing the socket completes the pending Network callback,
+            // so a timeout can actually return instead of waiting forever for an unresponsive peer.
+            self.connection.cancel()
         }
     }
 
@@ -96,14 +120,7 @@ final class Channel: @unchecked Sendable {
     func receiveExactly(_ count: Int) async throws -> Data {
         var result = Data()
         while result.count < count {
-            let chunk: Data? = try await withCheckedThrowingContinuation { continuation in
-                connection.receive(minimumIncompleteLength: 1, maximumLength: count - result.count) { data, _, isComplete, error in
-                    if let error { continuation.resume(throwing: error) }
-                    else if let data, !data.isEmpty { continuation.resume(returning: data) }
-                    else if isComplete { continuation.resume(returning: nil) }
-                    else { continuation.resume(returning: Data()) }
-                }
-            }
+            let chunk = try await receive(maximum: count - result.count)
             guard let chunk else { throw ChannelError("соединение закрыто") }
             result.append(chunk)
         }
@@ -111,10 +128,16 @@ final class Channel: @unchecked Sendable {
     }
 
     func send(_ data: Data) async throws {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            connection.send(content: data, completion: .contentProcessed { error in
-                if let error { continuation.resume(throwing: error) } else { continuation.resume() }
-            })
+        try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                connection.send(content: data, completion: .contentProcessed { error in
+                    if let error { continuation.resume(throwing: error) } else { continuation.resume() }
+                })
+            }
+            try Task.checkCancellation()
+        } onCancel: {
+            self.connection.cancel()
         }
     }
 

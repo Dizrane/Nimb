@@ -11,14 +11,15 @@ struct SiteProbe: Identifiable, Equatable {
     let failure: String?
 
     var id: String { url }
-    /// The server answered with something other than an error of its own: the site is reachable.
-    var answered: Bool { failure == nil && (200..<500).contains(code) }
+    /// A successful response or redirect; refusals and missing resources are not successful checks.
+    var answered: Bool { failure == nil && (200..<400).contains(code) }
     var host: String { URL(string: url)?.host ?? url }
 
     /// The line shown next to the name.
     var summary: String {
         if let failure { return failure }
         let time = seconds.formatted(.number.precision(.fractionLength(1)))
-        return answered ? "ответ \(code) · \(time) с" : "ответ \(code) (ошибка сервера)"
+        if answered { return "ответ \(code) · \(time) с" }
+        return "ответ \(code) (\(code >= 500 ? "ошибка сервера" : "ошибка запроса"))"
     }
 }

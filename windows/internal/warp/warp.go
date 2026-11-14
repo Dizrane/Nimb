@@ -55,8 +55,14 @@ func Register(ctx context.Context) (*Account, error) {
 	}
 	problem := "no answer"
 	for _, host := range hosts {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		status, data, err := send(ctx, "POST", host, "/"+apiVersion+"/reg", "", body)
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			problem = err.Error()
 			continue
 		}

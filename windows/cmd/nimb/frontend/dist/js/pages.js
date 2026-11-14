@@ -39,7 +39,7 @@ export class HomePage {
   update(S) {
     const eff = ORDER.filter((k) => S[k].on || S[k].busy).length;
     const busy = ORDER.some((k) => S[k].busy);
-    this.hero.update({ count: eff, busy, all: ORDER.every((k) => S[k].on) && !busy, running: busy });
+    this.hero.update({ count: eff, busy, canCancel: S.media.canCancel, all: ORDER.every((k) => S[k].on) && !busy, running: busy });
   }
   destroy() { this.hero.destroy(); }
 }
@@ -75,7 +75,7 @@ function details(p, name) {
   const refusals = p.refusals.map((l) => `<div class="dnote bad">${esc(l)}</div>`).join('');
   const dead = p.dead.length ? `<div class="dnote warn">Без нормального ответа: ${esc(p.dead.join(', '))}</div>` : '';
   return `<div class="det" style="margin:0">${rows}${refusals}${dead}
-    <div class="dfoot">Цифры — сколько адресов пула ответило как положено. Отказ из-за региона, страница ограничений и ответ 403 не считаются. Сервис работает, если ответило не менее 75%. Проверка не гарантирует, что откроются приложения.</div></div>`;
+    <div class="dfoot">Цифры — сколько адресов ответило как положено. Для сайта и API нужно не менее 75% успешных ответов отдельно. Отказы из-за региона не считаются. Проверка браузера Cloudflare подтверждает только доступность адреса: вход и работу нейросети проверьте вручную.</div></div>`;
 }
 
 const probeLabel = (pr) => (pr.running ? (pr.phase === 'enabling' ? 'Включаю…' : pr.total > 0 ? `Проверено ${pr.done} из ${pr.total}` : 'Определяю адреса…') : 'Проверить сервисы');
@@ -188,7 +188,7 @@ function siteDetails(c) {
   const probes = c.probes.map((p) => `<div><div class="drow"><span><span class="pm ${p.answered ? 'ok' : 'bad'}">${p.answered ? '✓' : '✕'}</span>${esc(p.name)}</span><span class="mono">${esc(p.summary)}</span></div>
       <div class="mono host">${esc(p.host)}</div></div>`).join('');
   return `<div class="det" style="margin:0">${probes}
-    <div class="dfoot">Проверка спрашивает у сайта несколько адресов: страницу, картинки, видео или файлы. Если часть ответила, а часть нет, чаще всего это случайная задержка, а не поломка: сам сайт обычно открывается. Каждый адрес при неудаче спрашивается дважды.</div></div>`;
+    <div class="dfoot">Проверяются страница, служебный адрес и изображение. Ответы 403, 404 и ошибки сервера не считаются успешными. Неудачный адрес проверяется повторно. Воспроизведение видео, сообщения и звонки проверьте в приложениях.</div></div>`;
 }
 
 function checkRow(c) {
@@ -221,10 +221,10 @@ export class MediaPage {
     this.S = S;
     const m = S.media;
     this.hero.update({
-      on: m.on, busy: m.busy, disabled: m.busy || !S.serviceOk,
-      title: m.busy ? 'Подождите' : m.on ? 'Включено' : 'Выключено',
-      subtitle: m.busy ? (m.on ? 'Выключаю туннель…' : 'Включаю туннель…') : m.on ? 'Весь трафик идёт через Cloudflare WARP. Если не открывается банк или Госуслуги, выключите туннель.' : 'Включите, чтобы открывались YouTube и Discord.',
-      label: m.on ? 'Выключить туннель WARP' : 'Включить туннель WARP',
+      on: m.on, busy: m.busy, disabled: (m.busy && !m.canCancel) || !S.serviceOk,
+      title: m.canCancel ? 'Подключаюсь' : m.busy ? 'Останавливаю' : m.on ? 'Включено' : 'Выключено',
+      subtitle: m.canCancel ? 'Нажмите кнопку ещё раз, чтобы отменить подключение.' : m.busy ? (m.on ? 'Выключаю туннель…' : 'Включаю туннель…') : m.on ? 'Весь трафик идёт через Cloudflare WARP. Если не открывается банк или Госуслуги, выключите туннель.' : 'Включите, чтобы открывались YouTube и Discord.',
+      label: m.canCancel ? 'Отменить подключение WARP' : m.on ? 'Выключить туннель WARP' : 'Включить туннель WARP',
     });
     if (same(this, 'rj', [m.on, m.error, S.sites])) return;
     const first = m.on ? checkCard(S.sites) : `<div class="card"><div class="nm">Что произойдёт при включении</div>

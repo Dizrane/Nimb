@@ -16,6 +16,43 @@ func ad(guid, name, servers string) Adapter {
 func eu() Provider { p, _ := Find("geohide-eu"); return p }
 func ru() Provider { p, _ := Find("geohide"); return p }
 
+func TestRetiredProviderIsRecognisedButNotOffered(t *testing.T) {
+	p, found := Find("comss")
+	if !found || !p.Retired || !p.Matches("94.250.253.55,212.109.195.93") {
+		t.Fatalf("%+v", p)
+	}
+	for _, available := range ByName() {
+		if available.ID == p.ID {
+			t.Fatal("retired provider offered")
+		}
+	}
+	b := &Backup{Provider: p.ID, Adapters: []Adapter{ad("{A}", "Wi-Fi", "9.9.9.9")}}
+	write, skipped := b.Restore([]Adapter{ad("{A}", "Wi-Fi", p.Servers())})
+	if len(skipped) != 0 || len(write) != 1 || write[0].NameServer != "9.9.9.9" {
+		t.Fatalf("write %+v, skipped %v", write, skipped)
+	}
+}
+
+func TestRetiredDNSAreStillRecognisedAndRestored(t *testing.T) {
+	for id, servers := range map[string]string{
+		"magicdns":   "109.120.132.43,94.249.177.102",
+		"geohide-eu": "143.20.64.192,45.13.237.213",
+		"geohide":    "159.194.200.33,193.233.112.67",
+	} {
+		p, found := Find(id)
+		if !found || !p.Matches(servers) || Same(p.Servers(), servers) {
+			t.Fatalf("%s: %+v", id, p)
+		}
+		saved := Adapter{GUID: "{A}", Name: "Wi-Fi", NameServer: "9.9.9.9", V6: true, NameServer6: "2001:db8::53"}
+		now := Adapter{GUID: "{A}", Name: "Wi-Fi", NameServer: servers, V6: true, NameServer6: mappedServers(strings.Split(servers, ","))}
+		b := &Backup{Provider: id, Adapters: []Adapter{saved}}
+		write, skipped := b.Restore([]Adapter{now})
+		if len(skipped) != 0 || len(write) != 1 || write[0].NameServer != "9.9.9.9" || !write[0].Set6 || write[0].NameServer6 != saved.NameServer6 {
+			t.Errorf("%s: write %+v, skipped %v", id, write, skipped)
+		}
+	}
+}
+
 // The addresses must be the ones of the Mac app: a different list in the two apps would be a quiet mistake.
 func TestProvidersAreTheOnesOfTheMacApp(t *testing.T) {
 	raw, err := os.ReadFile("../../../Sources/Nimb/Services.swift")
@@ -85,12 +122,87 @@ func TestRestoreLeavesWhatThePersonChanged(t *testing.T) {
 	}
 }
 
-func TestRestoreForgetsAdaptersThatAreGone(t *testing.T) {
+func TestRestoreDefersAdaptersThatAreGone(t *testing.T) {
 	b := &Backup{}
 	b.Apply(eu(), []Adapter{ad("{A}", "Wi-Fi", ""), ad("{B}", "USB", "9.9.9.9")})
-	write, _ := b.Restore([]Adapter{ad("{A}", "Wi-Fi", eu().Servers())})
+	now := []Adapter{ad("{A}", "Wi-Fi", eu().Servers())}
+	write, _ := b.Restore(now)
 	if len(write) != 1 || write[0].GUID != "{A}" {
 		t.Fatalf("write=%+v", write)
+	}
+	pending := b.PendingRestore(now, nil)
+	if pending == nil || !pending.Restoring || len(pending.Adapters) != 1 || pending.Adapters[0].GUID != "{B}" {
+		t.Fatalf("the USB adapter must keep its original settings until it returns: %+v", pending)
+	}
+	// A service restart must still know that DNS was switched off, and must not give the provider to new adapters.
+	raw, err := json.Marshal(pending)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var loaded Backup
+	if err := json.Unmarshal(raw, &loaded); err != nil {
+		t.Fatal(err)
+	}
+	if !loaded.Restoring {
+		t.Fatalf("the pending restore state was lost: %s", raw)
+	}
+	now = []Adapter{ad("{A}", "Wi-Fi", ""), ad("{B}", "USB", eu().Servers()), ad("{C}", "New cable", "")}
+	write, _ = loaded.Restore(now)
+	if len(write) != 1 || write[0].GUID != "{B}" || write[0].NameServer != "9.9.9.9" {
+		t.Fatalf("only the returning USB adapter must be restored: %+v", write)
+	}
+	if remaining := loaded.PendingRestore(now, nil); remaining != nil {
+		t.Fatalf("the backup can be removed once the USB restore is confirmed: %+v", remaining)
+	}
+}
+
+func TestUnverifiedRestoreKeepsOnlyTheAffectedAdapter(t *testing.T) {
+	b := &Backup{}
+	b.Apply(eu(), []Adapter{ad("{A}", "Wi-Fi", "9.9.9.9"), ad("{B}", "Ethernet", "10.0.0.53")})
+	now := []Adapter{ad("{A}", "Wi-Fi", eu().Servers()), ad("{B}", "Ethernet", eu().Servers())}
+	// A write can succeed immediately before its adapter disappears, so its readback is unavailable. That is not confirmation.
+	pending := b.PendingRestore(now, []string{"{A}"})
+	if pending == nil || len(pending.Adapters) != 1 || pending.Adapters[0].GUID != "{A}" || pending.Adapters[0].NameServer != "9.9.9.9" {
+		t.Fatalf("only the unverified write must keep its backup: %+v", pending)
+	}
+	// A manual change while the USB adapter was gone belongs to the person when it comes back.
+	now = []Adapter{ad("{A}", "Wi-Fi", "10.0.0.99")}
+	write, skipped := pending.Restore(now)
+	if len(write) != 0 || len(skipped) != 1 || pending.PendingRestore(now, nil) != nil {
+		t.Fatalf("a later manual DNS choice must be kept and complete restoration: write=%+v skipped=%v", write, skipped)
+	}
+}
+
+func TestPendingAdapterKeepsItsProviderWhenDNSIsEnabledAgain(t *testing.T) {
+	// Migration matters too: an installed older version stored no per-adapter provider.
+	var b Backup
+	if err := json.Unmarshal([]byte(`{"provider":"geohide-eu","restoring":true,"adapters":[{"guid":"{USB}","name":"USB","nameServer":"9.9.9.9"}]}`), &b); err != nil {
+		t.Fatal(err)
+	}
+	b.Apply(ru(), []Adapter{ad("{LAN}", "Ethernet", "")})
+	if b.Restoring {
+		t.Fatal("enabling DNS again must leave the pending off state")
+	}
+	now := []Adapter{ad("{USB}", "USB", eu().Servers()), ad("{LAN}", "Ethernet", ru().Servers())}
+	write, skipped := b.Restore(now)
+	if len(write) != 2 || len(skipped) != 0 || write[0].NameServer != "9.9.9.9" || write[1].NameServer != "" {
+		t.Fatalf("the absent USB adapter still has the previous provider and must restore it: write=%+v skipped=%v", write, skipped)
+	}
+}
+
+func TestRestoreRecognizesThePreviousProviderAfterFailedProviderChange(t *testing.T) {
+	b := &Backup{}
+	b.Apply(eu(), []Adapter{ad("{A}", "Wi-Fi", "9.9.9.9")})
+	// Two attempts to change the provider both fail. The backup must still recognise the provider actually on the adapter.
+	b.Apply(ru(), []Adapter{ad("{A}", "Wi-Fi", eu().Servers())})
+	third, _ := Find("comss")
+	b.Apply(third, []Adapter{ad("{A}", "Wi-Fi", eu().Servers())})
+	write, skipped := b.Restore([]Adapter{ad("{A}", "Wi-Fi", eu().Servers())})
+	if len(write) != 1 || write[0].NameServer != "9.9.9.9" || len(skipped) != 0 {
+		t.Fatalf("a failed provider change must not strand its predecessor: write=%+v skipped=%v", write, skipped)
+	}
+	if write, skipped := b.Restore([]Adapter{ad("{A}", "Wi-Fi", "10.0.0.99")}); len(write) != 0 || len(skipped) != 1 {
+		t.Fatalf("a manual DNS must still be kept: write=%+v skipped=%v", write, skipped)
 	}
 }
 
@@ -125,7 +237,7 @@ func TestAnAdapterWithIPv6ServersGetsTheProviderThereToo(t *testing.T) {
 	if len(write) != 2 || !write[0].Set6 || write[1].Set6 {
 		t.Fatalf("only the adapter that has IPv6 servers is written in IPv6: %+v", write)
 	}
-	if want := "::ffff:143.20.64.192,::ffff:45.13.237.213"; eu().Servers6() != want {
+	if want := "::ffff:143.20.64.192,::ffff:5.175.161.40"; eu().Servers6() != want {
 		t.Fatalf("Servers6 = %q, want %q", eu().Servers6(), want)
 	}
 	// Done: nothing is left to write, whatever the IPv4 side says.

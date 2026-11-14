@@ -36,6 +36,7 @@ enum WarpRegistration {
 
         var lastProblem = "нет ответа"
         for host in hosts {
+            try Task.checkCancellation()
             do {
                 let reply = try await send("POST", host: host, path: "/\(apiVersion)/reg", token: nil, json: body)
                 guard reply.status == 200, let object = try? JSONSerialization.jsonObject(with: reply.data) as? [String: Any] else {
@@ -46,6 +47,7 @@ enum WarpRegistration {
             } catch let error as WarpConfigError {
                 throw error
             } catch {
+                try Task.checkCancellation()
                 lastProblem = error.localizedDescription
             }
         }

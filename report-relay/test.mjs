@@ -31,6 +31,12 @@ assert.equal((await post({ ...good, platform: "linux" })).status, 400);
 assert.equal((await post({ ...good, id: "<script>" })).status, 400);
 assert.equal((await post({ ...good, text: "" })).status, 400);
 assert.equal((await post({ ...good, text: "x".repeat(100_001) })).status, 413);
+// No Content-Length: a UTF-8 body can exceed the limit even when its JS character count does not.
+for (const text of ["я".repeat(51_000), "🙂".repeat(26_000)]) {
+  const raw = JSON.stringify({ ...good, text });
+  assert.ok(raw.length < 100_000);
+  assert.equal((await post(raw)).status, 413);
+}
 assert.equal((await post(good, {})).status, 500);
 assert.equal((await post(good, { ...env, LIMITER: { limit: async () => ({ success: false }) } })).status, 429);
 

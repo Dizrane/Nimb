@@ -281,10 +281,13 @@ final class AutoReporter: ObservableObject {
     private var warp: WarpTunnelModel?
     private var cancellables: Set<AnyCancellable> = []
     private var tracker = MismatchTracker()
+    private let consent: AutoReportConsent
 
     private init() {
         let defaults = UserDefaults.standard
-        enabled = defaults.bool(forKey: Self.enabledKey)
+        let on = defaults.bool(forKey: Self.enabledKey)
+        enabled = on
+        consent = AutoReportConsent(enabled: on)
         sentCount = defaults.integer(forKey: Self.countKey)
         let last = defaults.double(forKey: Self.lastKey)
         lastSent = last > 0 ? Date(timeIntervalSince1970: last) : nil
@@ -314,6 +317,10 @@ final class AutoReporter: ObservableObject {
 
     func setEnabled(_ on: Bool) {
         guard on != enabled else { return }
+        consent.setEnabled(on)
+        tracker = MismatchTracker()
+        retrying = false
+        takingSnapshot = false
         enabled = on
         let defaults = UserDefaults.standard
         defaults.set(on, forKey: Self.enabledKey)
@@ -359,24 +366,34 @@ final class AutoReporter: ObservableObject {
         let items = PendingReports.fresh(PendingReports.decode(try? Data(contentsOf: Self.pendingURL)), now: Date())
         guard !items.isEmpty else { try? FileManager.default.removeItem(at: Self.pendingURL); return }
         retrying = true
-        Task {
+        consent.run { [self] permit in
+            defer { if consent.isCurrent(permit) { retrying = false } }
             var left = items
             for item in items {
+                guard consent.isCurrent(permit), ReportGate.isOpen else { return }
+                // A queue from an earlier opt-in must not be sent with its old installation number.
+                guard item.install == UserDefaults.standard.string(forKey: Self.installKey) else {
+                    left.removeAll { $0 == item }
+                    continue
+                }
                 do {
                     try await ReportSender.send(id: item.id, text: item.text, auto: (trigger: item.trigger, install: item.install))
+                    guard consent.isCurrent(permit) else { return }
                     left.removeAll { $0 == item }
                     recordSent()
                     AppLog.shared.add("тестирование", "отчёт \(item.id) отправлен позже, когда сеть вернулась")
                 } catch let failure as ReportSender.Failure where failure.refused {
+                    guard consent.isCurrent(permit) else { return }
                     // The relay will never take it (or this build sends nothing): it is dropped, not kept for the next look.
                     left.removeAll { $0 == item }
                     AppLog.shared.add("тестирование", "отчёт \(item.id) не принят и убран из очереди")
                 } catch {
+                    guard consent.isCurrent(permit) else { return }
                     break
                 }
             }
+            guard consent.isCurrent(permit) else { return }
             if left.isEmpty { try? FileManager.default.removeItem(at: Self.pendingURL) } else { try? JSONEncoder().encode(left).write(to: Self.pendingURL) }
-            retrying = false
         }
     }
 
@@ -418,8 +435,9 @@ final class AutoReporter: ObservableObject {
     /// A disagreement of the DNS is counted only while Cloudflare answers (one small request, and only while there is a disagreement).
     private func observeDNS(agrees: Bool) {
         guard !agrees else { _ = tracker.observe("dns", agrees: true); return }
-        Task {
+        consent.run { [self] permit in
             let online = await WarpTunnelModel.cloudflareReachable()
+            guard consent.isCurrent(permit), ReportGate.isOpen else { return }
             if tracker.observe("dns", agrees: AutoReportRules.dnsCounts(agrees: false, online: online)) { notify(.mismatch(.dns)) }
         }
     }
@@ -439,29 +457,34 @@ final class AutoReporter: ObservableObject {
     private func keepSnapshot(title: String, at: Date) {
         guard !takingSnapshot, !FileManager.default.fileExists(atPath: Self.snapshotURL.path), let dns, let telegram, let warp else { return }
         takingSnapshot = true
-        Task {
+        consent.run { [self] permit in
+            defer { if consent.isCurrent(permit) { takingSnapshot = false } }
             let text = await DiagnosticReport.collect(dns: dns, telegram: telegram, warp: warp, brief: true)
+            guard consent.isCurrent(permit) else { return }
             try? FileManager.default.createDirectory(at: Self.folder, withIntermediateDirectories: true)
             try? JSONEncoder().encode(FaultSnapshot(title: title, at: at, text: text)).write(to: Self.snapshotURL)
-            takingSnapshot = false
         }
     }
 
     private func sendDigest(summary: String, snapshot: FaultSnapshot?) {
         guard let dns, let telegram, let warp else { return }
         let install = UserDefaults.standard.string(forKey: Self.installKey) ?? Self.newInstallID()
-        Task {
+        consent.run { [self] permit in
             let facts = await DiagnosticReport.collect(dns: dns, telegram: telegram, warp: warp)
+            guard consent.isCurrent(permit), ReportGate.isOpen else { return }
             let id = DiagnosticReport.newID()
             let text = DiagnosticReport.head(id: id, description: "авто: \(AutoTrigger.dailyDigest.title) (установка \(install))", contact: "") + "\n\n" + summary
                 + "\n\n" + (snapshot.map { $0.section + "\n\n" } ?? "") + facts
             do {
                 try await ReportSender.send(id: id, text: text, auto: (trigger: AutoTrigger.dailyDigest.key, install: install))
+                guard consent.isCurrent(permit) else { return }
                 recordSent()
                 AppLog.shared.add("тестирование", "отчёт \(id) отправлен: \(AutoTrigger.dailyDigest.title)")
             } catch let failure as ReportSender.Failure where failure.refused {
+                guard consent.isCurrent(permit) else { return }
                 AppLog.shared.add("тестирование", "отчёт \(id) не отправлен: \(failure.localizedDescription)")
             } catch {
+                guard consent.isCurrent(permit) else { return }
                 // Kept for the next looks: the net may be down.
                 let item = PendingReports.Item(id: id, trigger: AutoTrigger.dailyDigest.key, install: install, text: text, at: Date())
                 let kept = PendingReports.fresh(PendingReports.decode(try? Data(contentsOf: Self.pendingURL)) + [item], now: Date())

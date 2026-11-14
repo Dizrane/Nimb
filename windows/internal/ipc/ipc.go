@@ -44,7 +44,8 @@ const MaxLine = 4096
 
 // Request is what the window sends.
 type Request struct {
-	Cmd string `json:"cmd"`
+	Cmd     string `json:"cmd"`
+	Attempt string `json:"attempt,omitempty"` // opaque start ID, only for tunnel.up/down
 	// Provider is the ID of a Smart DNS provider, only for dns.set. The service has its own list and takes no addresses.
 	Provider string `json:"provider,omitempty"`
 	// Secret and Port are only for telegram.up, and only for the first time: the key of the proxy (32 hex digits) and the port that the person's
@@ -117,7 +118,8 @@ type Handler interface {
 	Handle(ctx context.Context, req Request) Response
 }
 
-// Serve answers the connections of the listener until the context ends. Commands run one at a time.
+// Serve answers connections until the context ends. Tunnel start/stop reach the handler immediately so stop can cancel
+// startup; the helper serializes their state changes with its mutex. Other mutations retain the outer queue.
 func Serve(ctx context.Context, l net.Listener, h Handler) error {
 	go func() {
 		<-ctx.Done()
@@ -151,13 +153,18 @@ func serveOne(ctx context.Context, conn net.Conn, h Handler, mu *sync.Mutex) {
 		return
 	}
 	var req Request
-	if err := json.Unmarshal(line, &req); err != nil || !known[req.Cmd] || (req.Provider != "" && req.Cmd != DNSSet) {
+	if err := json.Unmarshal(line, &req); err != nil || !known[req.Cmd] || (req.Provider != "" && req.Cmd != DNSSet) || !validAttempt(req) {
 		write(conn, Response{Error: "неизвестная команда"})
 		return
 	}
-	mu.Lock()
-	resp := safely(ctx, h, req)
-	mu.Unlock()
+	var resp Response
+	if req.Cmd == Status || req.Cmd == Ping || req.Cmd == TunnelUp || req.Cmd == TunnelDown {
+		resp = safely(ctx, h, req)
+	} else {
+		mu.Lock()
+		resp = safely(ctx, h, req)
+		mu.Unlock()
+	}
 	write(conn, resp)
 }
 
@@ -193,7 +200,11 @@ func write(conn net.Conn, resp Response) {
 // server for up to 16 seconds), so the wait is generous.
 func Call(conn net.Conn, req Request) (Response, error) {
 	defer conn.Close()
-	conn.SetDeadline(time.Now().Add(120 * time.Second)) // a start of the tunnel that looks through the servers can take a minute
+	timeout := 120 * time.Second
+	if req.Cmd == TunnelUp {
+		timeout = 150 * time.Second
+	} // helper's 120-second startup limit plus cleanup
+	conn.SetDeadline(time.Now().Add(timeout)) // a start of the tunnel that looks through the servers can take a minute
 	b, _ := json.Marshal(req)
 	if _, err := conn.Write(append(b, '\n')); err != nil {
 		return Response{}, fmt.Errorf("служба не отвечает: %w", err)
@@ -207,4 +218,19 @@ func Call(conn net.Conn, req Request) (Response, error) {
 		return Response{}, errors.New("служба ответила непонятно")
 	}
 	return resp, nil
+}
+
+func validAttempt(req Request) bool {
+	if req.Attempt == "" {
+		return true
+	}
+	if len(req.Attempt) > 64 || (req.Cmd != TunnelUp && req.Cmd != TunnelDown) {
+		return false
+	}
+	for _, r := range req.Attempt {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-') {
+			return false
+		}
+	}
+	return true
 }

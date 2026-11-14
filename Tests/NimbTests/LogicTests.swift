@@ -122,7 +122,8 @@ import Testing
     @Test func everyServiceGetsEveryProviderAndAutomatic() {
         let line = DNSManager.sudoersRule(for: "daniil", services: ["Wi-Fi"])[1]
         #expect(line.contains("-setdnsservers Wi-Fi Empty"))
-        for provider in DNSProvider.all { #expect(line.contains("-setdnsservers Wi-Fi \(provider.addresses.joined(separator: " "))")) }
+        for provider in DNSProvider.available { #expect(line.contains("-setdnsservers Wi-Fi \(provider.addresses.joined(separator: " "))")) }
+        for provider in DNSProvider.all where provider.retired { #expect(!line.contains("-setdnsservers Wi-Fi \(provider.addresses.joined(separator: " "))")) }
     }
 
     @Test func spacesInANameAreEscaped() {
@@ -171,8 +172,8 @@ import Testing
     }
 
     @Test func thePageListsProvidersByName() {
-        #expect(DNSProvider.byName.map(\.name) == ["Comss.one", "GeoHide (EU)", "GeoHide (RU)", "GeoHide (US)", "MagicDNS", "malw.link"])
-        #expect(Set(DNSProvider.byName.map(\.id)) == Set(DNSProvider.all.map(\.id)))
+        #expect(DNSProvider.byName.map(\.name) == ["GeoHide (EU)", "GeoHide (RU)", "GeoHide (US)", "MagicDNS", "malw.link"])
+        #expect(Set(DNSProvider.byName.map(\.id)) == Set(DNSProvider.available.map(\.id)))
     }
 
     @Test func perplexityIsChecked() {
@@ -186,10 +187,10 @@ import Testing
         SiteProbe(name: "p", url: "https://example.com/\(code)\(failure ?? "")\(seconds)", code: code, seconds: seconds, failure: failure)
     }
 
-    @Test func aProbeAnswersWithAnythingButAServerError() {
+    @Test func refusalsAndMissingResourcesDoNotPass() {
         #expect(probe(200).answered)
-        #expect(probe(404).answered, "a 404 of the site itself still means the site is reachable")
-        #expect(probe(403).answered)
+        #expect(!probe(404).answered)
+        #expect(!probe(403).answered)
         #expect(!probe(500).answered)
         #expect(!probe(0).answered)
         #expect(!probe(200, failure: "время ожидания вышло").answered)
@@ -198,7 +199,7 @@ import Testing
     @Test func allAnsweredWorks() {
         let check = SiteCheck(name: "YouTube", probes: [probe(200), probe(204), probe(301)])
         #expect(check.verdict == .works)
-        #expect(check.result.hasPrefix("открывается"))
+        #expect(check.result.hasPrefix("адреса доступны"))
     }
 
     @Test func someAnsweredIsPartial() {

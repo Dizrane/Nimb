@@ -20,15 +20,17 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         self.telegram = telegram
         self.warp = warp
         AllServices.shared.configure(dns: dns, telegram: telegram, warp: warp)
-        subscription = Publishers.CombineLatest4(telegram.$isRunning, BackgroundMode.shared.$enabled, dns.$active, warp.$phase)
+        subscription = Publishers.CombineLatest4(telegram.$isRunning, BackgroundMode.shared.$enabled, dns.$hasProviderDNS, warp.$phase)
+            .combineLatest(dns.$active)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] running, background, active, tunnel in
+            .sink { [weak self] services, active in
+                let (running, background, dnsOn, tunnel) = services
                 var tunnelOn = false
                 if case .on = tunnel { tunnelOn = true }
-                let count = [active != nil, running, tunnelOn].filter { $0 }.count
+                let count = [dnsOn, running, tunnelOn].filter { $0 }.count
                 let total = tunnel == .unavailable ? 2 : 3
-                let state: IconState = count == 0 ? .off : (count == total ? .all : .partial)
-                self?.update(visible: running || background || tunnelOn || active != nil, state: state)
+                let state: IconState = count == 0 ? .off : (count == total && active != nil ? .all : .partial)
+                self?.update(visible: running || background || tunnelOn || dnsOn, state: state)
                 Self.updateDockIcon(active: count > 0)
             }
     }
@@ -177,14 +179,14 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
             updateItem.isHidden = true
             updateSeparator.isHidden = true
         }
-        master.title = all.isRunning ? "Подождите…" : (all.allOn ? "Выключить всё" : "Включить всё")
-        master.isEnabled = !all.isBusy
+        master.title = all.canCancelWarp ? "Отменить подключение WARP" : all.isRunning ? "Подождите…" : (all.allOn ? "Выключить всё" : "Включить всё")
+        master.isEnabled = all.canCancelWarp || !all.isBusy
 
         // Neural networks: a check mark when it works, a dash while it is being switched.
         let aiBusy = dns.isBusy || dns.isProbing || dns.isSettingUp
-        aiItem.state = aiBusy ? .mixed : (dns.active != nil ? .on : .off)
-        aiItem.attributedTitle = titled("Нейросети", detail: aiBusy ? "переключаю…" : dns.active?.name)
-        aiToggle.title = dns.active != nil ? "Выключить" : "Включить (\(dns.selected.name))"
+        aiItem.state = aiBusy || (dns.hasProviderDNS && dns.active == nil) ? .mixed : (dns.hasProviderDNS ? .on : .off)
+        aiItem.attributedTitle = titled("Нейросети", detail: aiBusy ? "переключаю…" : (dns.active?.name ?? (dns.hasProviderDNS ? "включено частично" : nil)))
+        aiToggle.title = dns.hasProviderDNS ? "Выключить" : "Включить (\(dns.selected.name))"
         aiToggle.isEnabled = !dns.isLocked
         for (entry, provider) in zip(aiProviders, DNSProvider.all) {
             entry.state = (dns.active ?? dns.selected) == provider ? .on : .off
@@ -207,7 +209,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
             if case .working(let text) = warp.phase {
                 warpItem.state = .mixed
                 warpItem.attributedTitle = titled("YouTube и Discord", detail: text.lowercased())
-                warpItem.isEnabled = false
+                warpItem.isEnabled = warp.canCancelStartup
             } else {
                 warpItem.state = warp.isOn ? .on : .off
                 warpItem.attributedTitle = titled("YouTube и Discord", detail: nil)
@@ -275,6 +277,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     }
 
     @objc private func toggleAll() {
+        if AllServices.shared.canCancelWarp { AllServices.shared.cancelWarpStartup(); return }
         let all = AllServices.shared
         if all.allOn { all.disableAll() } else { all.enableAll() }
     }

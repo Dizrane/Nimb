@@ -5,6 +5,7 @@
 package tunnel
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -24,6 +25,7 @@ import (
 
 // Options of a tunnel.
 type Options struct {
+	Context context.Context
 	// Name of the adapter, as the system shows it.
 	Name string
 	// DNS of the adapter. Without it the system keeps asking the router of the home network, which the tunnel does not reach,
@@ -59,6 +61,13 @@ type Tunnel struct {
 
 // Up creates the adapter and brings the tunnel up. On any failure everything it made is taken away again.
 func Up(cfg *awgconf.Config, opt Options) (t *Tunnel, err error) {
+	ctx := opt.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	logf := opt.Logf
 	if logf == nil {
 		logf = func(string, ...any) {}
@@ -133,12 +142,12 @@ func Up(cfg *awgconf.Config, opt Options) (t *Tunnel, err error) {
 	}
 	go t.rebindLoop()
 
-	if err = t.configureInterface(cfg, opt.DNS); err != nil {
+	if err = t.configureInterface(ctx, cfg, opt.DNS); err != nil {
 		return t, err
 	}
 	logf("адрес, маршруты и DNS заданы")
 
-	if err = t.waitHandshake(timeout); err != nil {
+	if err = t.waitHandshake(ctx, timeout); err != nil {
 		return t, err
 	}
 	logf("рукопожатие с сервером есть")
@@ -239,18 +248,22 @@ func (t *Tunnel) Counters() (rx, tx int64) {
 	return rx, tx
 }
 
-func (t *Tunnel) waitHandshake(timeout time.Duration) error {
+func (t *Tunnel) waitHandshake(ctx context.Context, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if !t.Handshake().IsZero() {
 			return nil
 		}
-		time.Sleep(250 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
 	}
 	return ErrNoHandshake
 }
 
-func (t *Tunnel) configureInterface(cfg *awgconf.Config, dns []netip.Addr) error {
+func (t *Tunnel) configureInterface(ctx context.Context, cfg *awgconf.Config, dns []netip.Addr) error {
 	var v4, v6 []netip.Prefix
 	for _, a := range cfg.Addresses {
 		if a.Addr().Is4() {
@@ -272,14 +285,14 @@ func (t *Tunnel) configureInterface(cfg *awgconf.Config, dns []netip.Addr) error
 		// The routes first, the address after. Setting the routes replaces every route of the adapter, and that includes the
 		// local route that the system makes for the address: without it the system drops every answer as "not locally
 		// destined" and nothing is received (found in the Windows 11 VM, 2026-10-21).
-		if err := retryNotFound(func() error { return t.luid.SetRoutesForFamily(family, routes) }); err != nil {
+		if err := retryNotFound(ctx, func() error { return t.luid.SetRoutesForFamily(family, routes) }); err != nil {
 			return fmt.Errorf("не удалось добавить маршруты: %w", err)
 		}
-		if err := retryNotFound(func() error { return t.luid.SetIPAddressesForFamily(family, addrs) }); err != nil {
+		if err := retryNotFound(ctx, func() error { return t.luid.SetIPAddressesForFamily(family, addrs) }); err != nil {
 			return fmt.Errorf("не удалось назначить адрес: %w", err)
 		}
 		var ipif *winipcfg.MibIPInterfaceRow
-		err := retryNotFound(func() (e error) { ipif, e = t.luid.IPInterface(family); return e })
+		err := retryNotFound(ctx, func() (e error) { ipif, e = t.luid.IPInterface(family); return e })
 		if err != nil {
 			return fmt.Errorf("не удалось настроить интерфейс: %w", err)
 		}
@@ -291,7 +304,7 @@ func (t *Tunnel) configureInterface(cfg *awgconf.Config, dns []netip.Addr) error
 		// The routes of the tunnel must win over the real network.
 		ipif.UseAutomaticMetric = false
 		ipif.Metric = 0
-		if err := retryNotFound(ipif.Set); err != nil {
+		if err := retryNotFound(ctx, ipif.Set); err != nil {
 			return fmt.Errorf("не удалось настроить интерфейс: %w", err)
 		}
 		var servers []netip.Addr
@@ -300,7 +313,7 @@ func (t *Tunnel) configureInterface(cfg *awgconf.Config, dns []netip.Addr) error
 				servers = append(servers, d)
 			}
 		}
-		if err := retryNotFound(func() error { return t.luid.SetDNS(family, servers, nil) }); err != nil {
+		if err := retryNotFound(ctx, func() error { return t.luid.SetDNS(family, servers, nil) }); err != nil {
 			return fmt.Errorf("не удалось задать DNS: %w", err)
 		}
 	}
@@ -409,13 +422,20 @@ func uplink(family winipcfg.AddressFamily, except winipcfg.LUID) (index uint32, 
 // retryNotFound runs f again for a few seconds while it says "element not found". The adapter that was made a moment ago is not always
 // known to the part of Windows that sets addresses and routes yet, and the first call after a quick off and on of the tunnel fell on that
 // (seen in the VM: «не удалось добавить маршруты: Element not found»).
-func retryNotFound(f func() error) error {
+func retryNotFound(ctx context.Context, f func() error) error {
 	var err error
 	for i := 0; i < 20; i++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err = f(); !errors.Is(err, windows.ERROR_NOT_FOUND) {
 			return err
 		}
-		time.Sleep(250 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
 	}
 	return err
 }

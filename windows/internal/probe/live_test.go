@@ -14,7 +14,7 @@ func TestLive(t *testing.T) {
 	if os.Getenv("NIMB_LIVE") == "" {
 		t.Skip("set NIMB_LIVE=1 to ask the real providers")
 	}
-	reports := (&Prober{}).Run(context.Background(), dnsx.Providers, func(done, total int) {})
+	reports := (&Prober{}).Run(context.Background(), dnsx.Available(), func(done, total int) {})
 	for _, r := range reports {
 		m, _ := r.Median()
 		fmt.Printf("== %s: works %d of %d, median %.2f s\n", r.Provider.Name, r.WorkingCount(), len(Services()), m)

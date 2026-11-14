@@ -32,12 +32,13 @@ struct WarpPage: View {
                 isBusy: warp.isWorking,
                 title: title,
                 subtitle: subtitle,
-                accessibility: warp.isOn ? "Выключить туннель WARP" : "Включить туннель WARP",
-                disabled: warp.phase == .unavailable || warp.isWorking,
+                accessibility: warp.canCancelStartup ? "Отменить подключение WARP" : warp.isOn ? "Выключить туннель WARP" : "Включить туннель WARP",
+                disabled: warp.phase == .unavailable || (warp.isWorking && !warp.canCancelStartup),
                 action: { if warp.phase == .notInstalled { warp.enable() } else { warp.toggle() } }
             )
         } right: {
             VStack(spacing: Space.gap) {
+                    if warp.canCancelStartup { OutlineButton(title: "Отменить подключение", color: Theme.textPrimary, action: warp.cancelStartup) }
                     if warp.isOn {
                         checkCard
                     } else if warp.phase == .notInstalled {

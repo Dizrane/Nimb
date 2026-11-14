@@ -12,6 +12,7 @@ import (
 
 	"github.com/Dizrane/Nimb/windows/internal/autoreport"
 	"github.com/Dizrane/Nimb/windows/internal/background"
+	"github.com/Dizrane/Nimb/windows/internal/dnsx"
 )
 
 // Settings are what the window remembers between runs. They hold no keys of the tunnel (those stay with the service) and nothing
@@ -82,7 +83,7 @@ func loadSettings() *settingsStore {
 		rand.Read(b)
 		st.s.TelegramSecret = hex.EncodeToString(b)
 	}
-	if st.s.Provider == "" {
+	if p, ok := dnsx.Find(st.s.Provider); !ok || p.Retired {
 		st.s.Provider = "geohide-eu"
 	}
 	st.saveLocked()

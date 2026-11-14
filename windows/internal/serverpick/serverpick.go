@@ -33,7 +33,7 @@ const SearchPause = 10 * time.Minute
 const (
 	ProbeWeb   = "https://www.cloudflare.com/cdn-cgi/trace"
 	ProbeVideo = "https://www.youtube.com/generate_204"
-	ProbeChat  = "https://discord.com/"
+	ProbeChat  = "https://discord.com/api/v10/gateway"
 )
 
 // Valid says whether a kept server is one of the known ones (a file that holds anything else is ignored).
@@ -59,7 +59,7 @@ func WithHost(endpoint, host string) (string, error) {
 	return net.JoinHostPort(host, port), nil
 }
 
-// Opens says whether a site answers through the tunnel: any answer of the server counts, since the name and the handshake of TLS went through.
+// Opens requires a successful response or redirect, not a refusal or a server error.
 func Opens(ctx context.Context, client *http.Client, url string) bool {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -72,7 +72,7 @@ func Opens(ctx context.Context, client *http.Client, url string) bool {
 		return false
 	}
 	resp.Body.Close()
-	return true
+	return resp.StatusCode >= 200 && resp.StatusCode < 400
 }
 
 // OpenBoth asks both sites at the same time.

@@ -122,7 +122,7 @@ func (a *App) runProbeOnce(ctx context.Context, progress func(done, total int)) 
 		func() {
 			ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 			defer cancel()
-			reports = (&probe.Prober{}).Run(ctx, dnsx.Providers, progress)
+			reports = (&probe.Prober{}).Run(ctx, dnsx.Available(), progress)
 		}()
 		if _, after := a.tunnelState(); after == before {
 			break

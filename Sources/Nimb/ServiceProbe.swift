@@ -64,6 +64,8 @@ struct ServiceResult: Identifiable {
     /// Requests that were answered with a refusal (region, address, limit).
     let blocked: Int
     let total: Int
+    /// The site and API must each pass: a large API pool cannot hide a broken site, or vice versa.
+    var hasFailingTarget = false
 
     var id: String { name }
 
@@ -73,7 +75,7 @@ struct ServiceResult: Identifiable {
     var status: ServiceStatus {
         if answered == 0 { return blocked > 0 ? .blocked : .down }
         // A dead address is skipped by the browser, but a refusal page is not: it hits every visit that lands on that address.
-        if blocked > 0 { return .unstable }
+        if blocked > 0 || hasFailingTarget { return .unstable }
         return Double(answered) / Double(total) >= Self.workingShare ? .works : .unstable
     }
 }
@@ -87,7 +89,12 @@ struct ProviderReport: Identifiable {
     var services: [ServiceResult] {
         ProbeTarget.services.map { name in
             let own = samples.filter { $0.target.service == name }
-            return ServiceResult(name: name, answered: own.filter(\.ok).count, blocked: own.filter { $0.blockReason != nil }.count, total: own.count)
+            let failingTarget = [ProbeTarget.Kind.site, .api].contains { kind in
+                let target = own.filter { $0.target.kind == kind }
+                return target.isEmpty || Double(target.filter(\.ok).count) / Double(target.count) < ServiceResult.workingShare
+            }
+            return ServiceResult(name: name, answered: own.filter(\.ok).count, blocked: own.filter { $0.blockReason != nil }.count, total: own.count,
+                                 hasFailingTarget: failingTarget)
         }
     }
 
@@ -146,7 +153,7 @@ struct ProviderReport: Identifiable {
 /// the provider's DNS server is asked directly, then every address it returns is requested over HTTPS.
 enum ServiceProbe {
     static func run(
-        providers: [DNSProvider] = DNSProvider.all,
+        providers: [DNSProvider] = DNSProvider.available,
         progress: @escaping @Sendable (_ done: Int, _ total: Int) -> Void
     ) -> [ProviderReport] {
         let lock = NSLock()
@@ -172,20 +179,14 @@ enum ServiceProbe {
 
         var samples = [ProbeSample?](repeating: nil, count: jobs.count)
         var done = 0
-        // An address that could not be connected to holds every request for the whole time out (three seconds): it is asked once, and the
-        // rest of the requests to it are counted as failed at once. The answer of the check is the same, and it comes much sooner.
-        var dead = Set<String>()
         progress(0, jobs.count)
         inLanes(jobs.count, lanes: providers.count, laneOf: { jobs[$0].provider }) { i in
             let job = jobs[i]
             var outcome = ProbeOutcome.failed
             if let address = job.address {
-                lock.lock(); let known = dead.contains(address); lock.unlock()
-                if !known {
-                    let result = request(job.target, address: address)
-                    outcome = result.outcome
-                    if !result.connected { lock.lock(); dead.insert(address); lock.unlock() }
-                }
+                // A timeout is local to this request; another host on the same IP may still answer.
+                outcome = request(job.target, address: address).outcome
+                if outcome == .failed { outcome = request(job.target, address: address).outcome }
             }
             lock.lock()
             samples[i] = ProbeSample(target: job.target, address: job.address, outcome: outcome)
@@ -203,9 +204,7 @@ enum ServiceProbe {
         }
     }
 
-    /// How many requests go to one provider at a time. The providers are asked side by side, so the whole check lasts as long as the
-    /// slowest of them. Measured on 185 requests: 20 to 24 s with ten at a time (the number of cores), 8.5 s with 16 per provider, 7.7 s
-    /// with 24; the answers were the same each time. The time that is left is the waiting of the slowest requests (six seconds).
+    /// Limit concurrency per provider while checking providers side by side.
     static let perProvider = 16
 
     /// Runs `work` for 0..<count. Each lane (a provider) has `perLane` workers of its own; the lanes go side by side. Returns when all
@@ -242,10 +241,12 @@ enum ServiceProbe {
 
     /// IPv4 answers of the provider's own DNS server for `host`; the second server is a fallback.
     private static func resolve(_ host: String, using servers: [String]) -> [String] {
-        for server in servers {
-            let output = capture("/usr/bin/dig", ["+time=2", "+tries=1", "+short", "@\(server)", host, "A"]) ?? ""
-            let addresses = output.split(separator: "\n").map(String.init).filter(isUsableIPv4)
-            if !addresses.isEmpty { return addresses }
+        for _ in 0..<2 {
+            for server in servers {
+                let output = capture("/usr/bin/dig", ["+time=2", "+tries=1", "+short", "@\(server)", host, "A"]) ?? ""
+                let addresses = output.split(separator: "\n").map(String.init).filter(isUsableIPv4)
+                if !addresses.isEmpty { return addresses }
+            }
         }
         return []
     }
@@ -277,7 +278,7 @@ enum ServiceProbe {
     }
 
     /// Requests the target at `address` (the provider's proxy) and judges the answer. `connected` is false when no connection could be made:
-    /// the address is dead, and the same will be true of the next request to it.
+    /// this request did not connect (it says nothing about other hosts or later attempts at that IP).
     private static func request(_ target: ProbeTarget, address: String) -> (outcome: ProbeOutcome, connected: Bool) {
         let output = capture("/usr/bin/curl", [
             "-s", "-i", "--connect-timeout", "3", "--max-time", "6",
@@ -338,6 +339,7 @@ enum ServiceProbe {
             if headers["cf-mitigated"] != nil { return .ok(seconds) }
             return .blocked("403: доступ закрыт")
         }
+        if target.kind == .site && code >= 400 { return .failed }
         // Refusal pages are short; the big pages of the apps carry such phrases only inside their translations.
         let isJSON = headers["content-type"]?.contains("json") == true
         if bodySize < 30_000 || isJSON {

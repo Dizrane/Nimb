@@ -1,6 +1,6 @@
 import Foundation
 
-/// A site (YouTube, Discord) as several probes: the page, an address that answers with nothing, the files and videos.
+/// Basic HTTP reachability of a site, its API and a public image. Playback, messages and calls need a client check.
 /// One slow answer is not an outage, so the verdict looks at all of them.
 struct SiteCheck: Identifiable, Equatable {
     enum Verdict { case works, partial, down }
@@ -24,7 +24,7 @@ struct SiteCheck: Identifiable, Equatable {
 
     var result: String {
         switch verdict {
-        case .works: "открывается" + (seconds.map { " \($0.formatted(.number.precision(.fractionLength(1)))) с" } ?? "")
+        case .works: "адреса доступны" + (seconds.map { " \($0.formatted(.number.precision(.fractionLength(1)))) с" } ?? "")
         case .partial: "частично: \(answered) из \(probes.count)"
         case .down: "не отвечает"
         }

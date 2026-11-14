@@ -34,7 +34,7 @@ func (h *Helper) serverSteps(ctx context.Context, cfg *awgconf.Config) serverpic
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 	return serverpick.Steps{
-		BringUp:  func(host string) error { return h.bringUpAt(cfg, host) },
+		BringUp:  func(host string) error { return h.bringUpAt(ctx, cfg, host) },
 		NoAnswer: func(err error) bool { return errors.Is(err, tunnel.ErrNoHandshake) },
 		Web:      func() bool { return serverpick.Opens(ctx, client, serverpick.ProbeWeb) },
 		Opens:    func() bool { return serverpick.OpenBoth(ctx, client, serverpick.ProbeVideo, serverpick.ProbeChat) },
@@ -79,11 +79,18 @@ func (h *Helper) serverSteps(ctx context.Context, cfg *awgconf.Config) serverpic
 // bringUpAt takes the tunnel that is up down and starts one at the server host ("" is the one in the account). The server in the account
 // gets the whole schedule (two attempts, see tunnelrestart); any other server one attempt, so that looking through the servers does not take
 // minutes.
-func (h *Helper) bringUpAt(cfg *awgconf.Config, host string) error {
+func (h *Helper) bringUpAt(ctx context.Context, cfg *awgconf.Config, host string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	h.closeTunnel()
 	if wait := tunnelrestart.SettleWait(time.Since(h.lastClosed), !h.lastClosed.IsZero()); wait > 0 {
 		h.logf("туннель: прошлый закрыт только что, жду %.0f с, чтобы он ушёл совсем", wait.Seconds())
-		time.Sleep(wait)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(wait):
+		}
 	}
 	endpoint, err := serverpick.WithHost(cfg.Endpoint, host)
 	if err != nil {
@@ -97,7 +104,7 @@ func (h *Helper) bringUpAt(cfg *awgconf.Config, host string) error {
 	}
 	var t *tunnel.Tunnel
 	for attempt, timeout := range timeouts {
-		t, err = tunnel.Up(&at, tunnel.Options{Name: "Nimb", DNS: h.tunnelDNS(), Logf: h.logf, DeviceLogf: h.tlog.Logf, HandshakeTimeout: timeout})
+		t, err = tunnel.Up(&at, tunnel.Options{Context: ctx, Name: "Nimb", DNS: h.tunnelDNS(), Logf: h.logf, DeviceLogf: h.tlog.Logf, HandshakeTimeout: timeout})
 		// Two things went wrong at a start right after a stop, and both were gone on a second try: no answer to the handshake, and an adapter
 		// that Windows did not know yet («Element not found» while the routes were set). The tunnel of the failed attempt is already taken
 		// down. One more try, so that the person does not see an error for a start that a moment later would have worked.
@@ -107,7 +114,11 @@ func (h *Helper) bringUpAt(cfg *awgconf.Config, host string) error {
 		}
 		h.tlog.Mark("start failed, trying once more: " + err.Error())
 		h.logf("туннель: не вышло (%v), пробую ещё раз", err)
-		time.Sleep(tunnelrestart.RetryPause)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(tunnelrestart.RetryPause):
+		}
 	}
 	if err != nil {
 		return err

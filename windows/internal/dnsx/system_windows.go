@@ -3,6 +3,7 @@
 package dnsx
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -15,25 +16,58 @@ import (
 // of Nimb, other VPNs, virtual switches of Hyper-V, WSL and virtual machines are not among them (their DNS is not the person's
 // to change).
 func Adapters() ([]Adapter, error) {
-	all, err := winipcfg.GetAdaptersAddresses(windows.AF_UNSPEC, winipcfg.GAAFlagDefault)
+	return adapters(false)
+}
+
+// RestoreAdapters also includes disconnected and disabled physical adapters whose settings can be read. An absent or
+// unreadable adapter stays in PendingRestore, so it does not prevent the other adapters from getting their settings back.
+func RestoreAdapters() ([]Adapter, error) {
+	return adapters(true)
+}
+
+func adapters(restoring bool) ([]Adapter, error) {
+	flags := winipcfg.GAAFlagDefault
+	if restoring {
+		flags |= winipcfg.GAAFlagIncludeAllInterfaces
+	}
+	all, err := winipcfg.GetAdaptersAddresses(windows.AF_UNSPEC, flags)
 	if err != nil {
 		return nil, err
 	}
 	var out []Adapter
 	for _, a := range all {
-		if a.OperStatus != winipcfg.IfOperStatusUp || (a.IfType != winipcfg.IfTypeEthernetCSMACD && a.IfType != winipcfg.IfTypeIEEE80211) || a.Flags&winipcfg.IPAAFlagIpv4Enabled == 0 {
+		physicalKind := a.IfType == winipcfg.IfTypeEthernetCSMACD || a.IfType == winipcfg.IfTypeIEEE80211
+		if !physicalKind {
 			continue
 		}
 		row, err := a.LUID.Interface()
-		if err != nil || row.InterfaceAndOperStatusFlags&winipcfg.IAOSFHardwareInterface == 0 {
+		if err != nil {
+			continue
+		}
+		if !includeAdapter(a.OperStatus == winipcfg.IfOperStatusUp, row.InterfaceAndOperStatusFlags&winipcfg.IAOSFHardwareInterface != 0,
+			a.Flags&winipcfg.IPAAFlagIpv4Enabled != 0, restoring) {
 			continue
 		}
 		guid, err := a.LUID.GUID()
 		if err != nil {
 			continue
 		}
+		static4, err := staticServers(guid.String(), false)
+		if err != nil {
+			if restoring {
+				continue
+			}
+			return nil, fmt.Errorf("не удалось прочитать DNS на «%s»: %w", row.Alias(), err)
+		}
+		static6, err := staticServers(guid.String(), true)
+		if err != nil {
+			if restoring {
+				continue
+			}
+			return nil, fmt.Errorf("не удалось прочитать DNS IPv6 на «%s»: %w", row.Alias(), err)
+		}
 		_, v6 := dnsServers(a)
-		out = append(out, Adapter{GUID: guid.String(), Name: row.Alias(), NameServer: static(guid.String(), false), NameServer6: static(guid.String(), true), V6: len(v6) > 0})
+		out = append(out, Adapter{GUID: guid.String(), Name: row.Alias(), NameServer: static4, NameServer6: static6, V6: len(v6) > 0})
 	}
 	return out, nil
 }
@@ -58,20 +92,32 @@ func dnsServers(a *winipcfg.IPAdapterAddresses) (v4, v6 []string) {
 
 // static is what is set by hand on the adapter, read the way the system keeps it. Empty: the adapter gets its DNS from the network.
 func static(guid string, ipv6 bool) string {
+	v, _ := staticServers(guid, ipv6)
+	return v
+}
+
+// Reading a setting that is absent means DHCP; an inaccessible setting is not DHCP and must not let a restore discard its backup.
+func staticServers(guid string, ipv6 bool) (string, error) {
 	path := `SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces\`
 	if ipv6 {
 		path = `SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters\Interfaces\`
 	}
 	key, err := registry.OpenKey(registry.LOCAL_MACHINE, path+guid, registry.QUERY_VALUE)
 	if err != nil {
-		return ""
+		if errors.Is(err, registry.ErrNotExist) {
+			return "", nil
+		}
+		return "", err
 	}
 	defer key.Close()
 	v, _, err := key.GetStringValue("NameServer")
 	if err != nil {
-		return ""
+		if errors.Is(err, registry.ErrNotExist) {
+			return "", nil
+		}
+		return "", err
 	}
-	return v
+	return v, nil
 }
 
 // Write sets the servers of one adapter; an empty value gives it back to the network (DHCP). Only the servers change, not the
@@ -103,9 +149,9 @@ func Flush() {
 	windows.NewLazySystemDLL("dnsapi.dll").NewProc("DnsFlushResolverCache").Call()
 }
 
-// Current is the state of one adapter now, by GUID.
+// Current is the state of one physical adapter now, by GUID, including one whose link is down: a restore must be verified too.
 func Current(guid string) (Adapter, bool) {
-	all, err := Adapters()
+	all, err := RestoreAdapters()
 	if err != nil {
 		return Adapter{}, false
 	}

@@ -136,6 +136,7 @@ struct OnboardingView: View {
                 PrimaryButton(title: "Далее", action: onboarding.next)
             } else if warp.isWorking {
                 if case .working(let text) = warp.phase { BusyRow(text: text) }
+                if warp.canCancelStartup { SkipButton(title: "Отменить подключение", action: warp.cancelStartup) }
             } else if warp.phase == .unavailable {
                 Text("В этой сборке Nimb нет туннеля, шаг пропускается.")
                     .font(Typo.small)

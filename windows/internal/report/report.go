@@ -37,7 +37,7 @@ const DeveloperHandle = "i17th"
 // MessageLimit is what one Telegram message takes.
 const MessageLimit = 4000
 
-// sendLimit: the relay takes at most 100 KB; a longer report loses the middle of the diary, not its head or its end.
+// sendLimit budgets the JSON-encoded text in bytes, reserving room for metadata and the signature.
 const sendLimit = 60_000
 
 // Environment says what names the person on this computer; Clean takes it out of a text.
@@ -253,17 +253,20 @@ func send(ctx context.Context, appVersion, id, text string, extra map[string]any
 	if len(k) == 0 {
 		return ErrNoKey // a build that is not an official one sends nothing
 	}
-	if utf8.RuneCountInString(text) > sendLimit {
-		r := []rune(text)
-		text = string(r[:sendLimit/2]) + "\n…\n" + string(r[len(r)-sendLimit/2:])
-	}
+	text = fittedPayloadText(text)
 	payload := map[string]any{"v": 1, "id": id, "app": appVersion, "platform": "windows", "text": text}
 	for k, v := range extra {
 		payload[k] = v
 	}
 	install, _ := extra["install"].(string)
 	payload["sig"] = Signature(Message(id, appVersion, "windows", install, text), k)
-	body, _ := json.Marshal(payload)
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	if len(body) > 100_000 {
+		return errors.New("Отчёт слишком большой для отправки.")
+	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "POST", Endpoint(), bytes.NewReader(body))
@@ -324,4 +327,24 @@ func IsRefused(err error) bool {
 	var r *Refused
 	var o *Outdated
 	return (errors.As(err, &r) && r.Code >= 400 && r.Code < 500) || errors.As(err, &o) || errors.Is(err, ErrNoKey)
+}
+
+// fittedPayloadText preserves both ends without splitting UTF-8, including JSON escaping in the byte budget.
+func fittedPayloadText(text string) string {
+	size := func(s string) int { b, _ := json.Marshal(s); return len(b) }
+	if size(text) <= sendLimit {
+		return text
+	}
+	r := []rune(text)
+	cut := func(n int) string { return string(r[:(n+1)/2]) + "\n…\n" + string(r[len(r)-n/2:]) }
+	low, high := 0, len(r)
+	for low < high {
+		middle := low + (high-low+1)/2
+		if size(cut(middle)) <= sendLimit {
+			low = middle
+		} else {
+			high = middle - 1
+		}
+	}
+	return cut(low)
 }

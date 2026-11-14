@@ -24,6 +24,7 @@ import (
 	"github.com/Dizrane/Nimb/windows/internal/ipc"
 	"github.com/Dizrane/Nimb/windows/internal/logfile"
 	"github.com/Dizrane/Nimb/windows/internal/serverpick"
+	"github.com/Dizrane/Nimb/windows/internal/startup"
 	"github.com/Dizrane/Nimb/windows/internal/tgproxy"
 	"github.com/Dizrane/Nimb/windows/internal/tunnel"
 	"github.com/Dizrane/Nimb/windows/internal/tunneldrop"
@@ -56,8 +57,9 @@ type Helper struct {
 	dir  string
 	logf func(format string, args ...any)
 
-	mu  sync.Mutex
-	tun *tunnel.Tunnel
+	starts startup.Controller
+	mu     sync.Mutex
+	tun    *tunnel.Tunnel
 
 	// backup is what the adapters had before Smart DNS; nil when Smart DNS is off.
 	backup  *dnsx.Backup
@@ -100,6 +102,8 @@ func New(dir string, logf func(string, ...any)) (*Helper, error) {
 	h.backup = h.loadBackup()
 	h.drop = h.loadDrop()
 	h.loadTelegram()
+	initial := ipc.Response{OK: true, Tunnel: h.status(), DNS: h.dnsStatus(), Telegram: h.telegramStatus()}
+	h.lastStatus.Store(&initial)
 	h.startWatching()
 	h.startTelegramWatch()
 	return h, nil
@@ -108,6 +112,7 @@ func New(dir string, logf func(string, ...any)) (*Helper, error) {
 // Close takes the tunnel down. Smart DNS stays as it is: the settings are on the adapters and the backup is on the disk, and
 // the window (or the uninstaller) gives them back when the person asks.
 func (h *Helper) Close() {
+	h.starts.Cancel("")
 	h.stopWatching()
 	if h.tgStop != nil {
 		close(h.tgStop)
@@ -122,6 +127,13 @@ func (h *Helper) Close() {
 
 // Handle implements ipc.Handler.
 func (h *Helper) Handle(ctx context.Context, req ipc.Request) ipc.Response {
+	if req.Cmd == ipc.TunnelUp {
+		var done func()
+		ctx, done = h.starts.Begin(ctx, req.Attempt)
+		defer done()
+	} else if req.Cmd == ipc.TunnelDown {
+		h.starts.Cancel(req.Attempt)
+	}
 	// A start of the tunnel can take half a minute with the lock held. The window asks for the status every few seconds and must not stand
 	// waiting for it: while the lock is taken it is given the last status that was made (the window itself knows that it is busy).
 	switch req.Cmd {
@@ -162,8 +174,17 @@ func (h *Helper) Handle(ctx context.Context, req ipc.Request) ipc.Response {
 		}
 		return ipc.Response{OK: true, DNS: h.dnsStatus()}
 	case ipc.TunnelUp:
+		if ctx.Err() != nil {
+			return ipc.Response{OK: true}
+		}
 		h.cancelRestart() // the person decides now: nothing that was started before them goes on
 		if err := h.up(ctx, true); err != nil {
+			if errors.Is(err, context.Canceled) {
+				return ipc.Response{OK: true}
+			}
+			if errors.Is(err, context.DeadlineExceeded) {
+				return ipc.Response{Error: "Не удалось подключиться за 2 минуты. Туннель остановлен. Проверьте сеть и попробуйте ещё раз.", Tunnel: h.status()}
+			}
 			h.logf("туннель: включить не вышло: %v", err)
 			return ipc.Response{Error: err.Error(), Tunnel: h.status()}
 		}
@@ -211,7 +232,15 @@ func (h *Helper) status() *ipc.TunnelStatus {
 
 // up brings the tunnel up. search says whether the server may be looked for (see package serverpick): a start the person asked for may, a
 // restart that the service makes itself after the program of the tunnel ended may not (it is quick).
-func (h *Helper) up(ctx context.Context, search bool) error {
+func (h *Helper) up(ctx context.Context, search bool) (result error) {
+	defer func() {
+		if result != nil {
+			h.closeTunnel()
+		}
+	}()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if h.tun != nil {
 		return nil
 	}
@@ -225,6 +254,9 @@ func (h *Helper) up(ctx context.Context, search bool) error {
 	}
 	h.logf("включаю туннель")
 	server, err := serverpick.Start(h.serverSteps(ctx, cfg), search)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	if err != nil {
 		if errors.Is(err, tunnel.ErrNoHandshake) {
 			return errors.New("сервер не ответил, интернет остался прежним")
@@ -322,9 +354,14 @@ func (h *Helper) restart(cancel chan struct{}) {
 			return
 		}
 		h.tlog.Mark("restarting")
-		ctx, stop := context.WithTimeout(context.Background(), time.Minute)
+		ctx, done := h.starts.BeginRecovery(context.Background())
 		err := h.up(ctx, false)
-		stop()
+		cancelled := ctx.Err() != nil
+		done()
+		if cancelled {
+			h.mu.Unlock()
+			return
+		}
 		if err == nil {
 			h.saveRestart(time.Now())
 			h.tlog.Mark("restarted")

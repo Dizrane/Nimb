@@ -1,17 +1,21 @@
 #!/bin/sh
-# Runs every check of the project: the Swift tests, the tests of the relay of reports (Node.js), of the tunnel helper and of the installer script.
+# Runs Mac, Windows, relay, helper and installer checks with one command.
 #   ./scripts/test.sh
 # The Swift tests are built outside the project folder: in a folder synced by iCloud, macOS puts marks on the files and the signature fails.
 cd "$(dirname "$0")/.." || exit 1
 status=0
 echo "== Swift"
 log=$(mktemp)
+# Testing macros may live in CLT or in the selected Xcode toolchain on CI.
+plugins="$(dirname "$(xcrun --find swiftc)")/../lib/swift/host/plugins/testing"
+[ -d "$plugins" ] || plugins=/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing
 swift test --scratch-path "${TMPDIR:-/tmp}/nimb-tests-build" \
-    -Xswiftc -plugin-path -Xswiftc /Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing > "$log" 2>&1 || status=1
+    -Xswiftc -plugin-path -Xswiftc "$plugins" > "$log" 2>&1 || status=1
 grep -v "ld: warning" "$log" | grep -E "✘|Test run|error:|Build complete" | cut -c1-200
 rm -f "$log"
+./scripts/test_windows.sh || status=1
 echo "== Relay of reports"
-(cd report-relay && { [ -d node_modules ] || npm install --no-audit --no-fund >/dev/null; } && node test.mjs) || status=1
+(cd report-relay && node test.mjs) || status=1
 echo "== Key of a version"
 # The build script and the relay (report-relay/test.mjs) must make the same key of a version from the master key.
 keyfile=$(mktemp)

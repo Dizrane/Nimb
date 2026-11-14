@@ -185,7 +185,7 @@ export class Onboarding {
       const s = S.ai, p = S.probe;
       const progress = p.phase === 'enabling' ? 'Включаю…' : p.total > 0 ? `Проверено ${p.done} из ${p.total}` : 'Определяю адреса…';
       return head('Нейросети', 'Из-за региона ChatGPT, Claude и другие нейросети могут не открываться. Nimb переключит DNS на подходящий сервис.')
-        + (p.running ? busy(progress) : s.on ? done(`Включено: ${providerName}`) + next() : s.busy ? busy('Включаю…')
+        + (p.running ? busy(progress) : s.on ? done(`Включено: ${providerName}`) + next() : s.busy ? busy(s.canCancel ? 'Включаю…' : 'Останавливаю…') + (s.canCancel ? go('media', 'Отменить подключение') : '')
           : `<button class="btn main wide" data-a="onbbest" data-f="onbgo" id="onbgo" ${S.serviceOk ? '' : 'disabled'}>Подобрать и включить</button>` + skip())
         + banner(s.error || (S.serviceOk ? '' : S.serviceError));
     }
@@ -200,7 +200,7 @@ export class Onboarding {
       const s = S.media;
       return head('YouTube и Discord', 'Nimb создаст анонимный аккаунт Cloudflare WARP и включит туннель. Пока он включён, весь трафик идёт через Cloudflare: если не открывается банк или Госуслуги, выключите его.')
         + (s.on ? done('Туннель работает') + next()
-          : s.busy ? busy('Включаю…')
+          : s.busy ? busy(s.canCancel ? 'Включаю…' : 'Останавливаю…') + (s.canCancel ? go('media', 'Отменить подключение') : '')
           : go('media', 'Включить', !S.serviceOk) + `<div class="sm" style="text-align:center;font-size:12px;color:var(--t2)">Включая, вы принимаете условия Cloudflare WARP.</div>
              <button class="link center-link" data-a="terms" data-f="terms" id="terms" style="color:#6ea8ff">Условия Cloudflare WARP</button>` + skip())
         + banner(s.error || (S.serviceOk ? '' : S.serviceError));

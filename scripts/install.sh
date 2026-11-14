@@ -48,8 +48,37 @@ pick_release() { # pick_release FILE: prints "<archive address>" and the notes o
     return 1
 }
 
+# Verify the author's Ed25519 signature before unpacking or replacing anything. The public keys are the same as
+# Updater.trustedKeys. macOS's LibreSSL cannot verify Ed25519, so use the system CryptoKit through Swift; with no
+# developer tools available, fail closed instead of treating a hash from the same release as proof of authorship.
+verify_signature() { # verify_signature ARCHIVE SIGNATURE [VERIFIER_OUTPUT]
+    verifier="$WORK/verify-signature.swift"
+    cat > "$verifier" <<'SWIFT'
+    import CryptoKit
+    import Foundation
+
+    let trustedKeys = ["A8Hv9MEsL+jtyYnniwH1PART5CiHUZqgJofpqRz/ttE="]
+    let args = CommandLine.arguments
+    guard args.count == 3,
+          let data = try? Data(contentsOf: URL(fileURLWithPath: args[1])),
+          let text = try? String(contentsOfFile: args[2], encoding: .utf8),
+          let signature = Data(base64Encoded: text.trimmingCharacters(in: .whitespacesAndNewlines)),
+          signature.count == 64 else { exit(1) }
+    let valid = trustedKeys.contains { encoded in
+        guard let raw = Data(base64Encoded: encoded),
+              let key = try? Curve25519.Signing.PublicKey(rawRepresentation: raw) else { return false }
+        return key.isValidSignature(signature, for: data)
+    }
+    exit(valid ? 0 : 1)
+SWIFT
+    /usr/bin/swift -module-cache-path "$WORK/swift-cache" "$verifier" "$1" "$2" > "${3:-/dev/null}" 2>&1
+}
+
 echo "Ищу последнюю версию…"
 command -v plutil >/dev/null 2>&1 || fail "не нашёл plutil: нужна macOS 12 или новее."
+# Check without invoking xcrun/swift first: on a Mac without Command Line Tools they can open an installation dialog.
+/usr/bin/xcode-select -p >/dev/null 2>&1 && /usr/bin/xcrun --find swift >/dev/null 2>&1 \
+    || fail "для проверки подписи нужен Swift из Command Line Tools или Xcode. Установите инструменты Apple либо скачайте DMG со страницы релиза вручную. Установка не начата."
 curl -fsSL -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/releases?per_page=20" -o "$WORK/release.json" \
     || fail "GitHub не отвечает."
 
@@ -60,10 +89,15 @@ NAME="${URL##*/}"
 HASH="$(printf '%s\n' "$NOTES" | grep -o "[0-9a-f]\{64\}  *$NAME" | head -1 | cut -c1-64)"
 [ -n "$HASH" ] || fail "в описании релиза нет SHA-256 для $NAME, установка отменена."
 
-echo "Скачиваю $NAME…"
+echo "Скачиваю ${NAME}…"
 curl -fL --progress-bar "$URL" -o "$WORK/$NAME" || fail "не удалось скачать $NAME."
 SUM="$(shasum -a 256 "$WORK/$NAME" | cut -d' ' -f1)"
 [ "$SUM" = "$HASH" ] || fail "SHA-256 скачанного файла не совпадает с указанным в релизе, установка отменена."
+
+curl -fsSL "$URL.sig" -o "$WORK/$NAME.sig" || fail "не удалось скачать подпись автора $NAME.sig, установка отменена."
+echo "Проверяю подпись автора…"
+verify_signature "$WORK/$NAME" "$WORK/$NAME.sig" "$WORK/verify.log" \
+    || fail "не удалось проверить подпись автора. Файл мог быть изменён или средства проверки недоступны. Установка отменена."
 
 ditto -x -k "$WORK/$NAME" "$WORK/unpacked" || fail "не удалось распаковать архив."
 APP="$WORK/unpacked/Nimb.app"

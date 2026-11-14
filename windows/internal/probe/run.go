@@ -76,6 +76,9 @@ func (p *Prober) Run(ctx context.Context, providers []dnsx.Provider, progress fu
 		out := Outcome{Status: Failed}
 		if j.address != "" {
 			out = p.request(ctx, j.target, j.address)
+			if out.Status == Failed && ctx.Err() == nil {
+				out = p.request(ctx, j.target, j.address)
+			}
 		}
 		samples[i] = Sample{Target: j.target, Address: j.address, Outcome: out}
 		// The count and the call that tells it go together, so that the calls come in the order of the count (the last one is the whole).
@@ -118,25 +121,27 @@ func (p *Prober) Resolve(ctx context.Context, host string, servers []string) []s
 // resolve gives the IPv4 answers of the provider's own DNS server for host; the second server is a fallback.
 func (p *Prober) resolve(ctx context.Context, host string, servers []string) []string {
 	port := or(p.DNSPort, "53")
-	for _, server := range servers {
-		server := net.JoinHostPort(server, port)
-		r := &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
-			return (&net.Dialer{Timeout: dnsTimeout}).DialContext(ctx, network, server)
-		}}
-		c, cancel := context.WithTimeout(ctx, dnsTimeout)
-		ips, err := r.LookupNetIP(c, "ip4", host+".")
-		cancel()
-		if err != nil {
-			continue
-		}
-		var out []string
-		for _, ip := range ips {
-			if a := ip.Unmap().String(); p.usable(a) {
-				out = append(out, a)
+	for attempt := 0; attempt < 2 && ctx.Err() == nil; attempt++ {
+		for _, server := range servers {
+			server := net.JoinHostPort(server, port)
+			r := &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+				return (&net.Dialer{Timeout: dnsTimeout}).DialContext(ctx, network, server)
+			}}
+			c, cancel := context.WithTimeout(ctx, dnsTimeout)
+			ips, err := r.LookupNetIP(c, "ip4", host+".")
+			cancel()
+			if err != nil {
+				continue
 			}
-		}
-		if len(out) > 0 {
-			return out
+			var out []string
+			for _, ip := range ips {
+				if a := ip.Unmap().String(); p.usable(a) {
+					out = append(out, a)
+				}
+			}
+			if len(out) > 0 {
+				return out
+			}
 		}
 	}
 	return nil

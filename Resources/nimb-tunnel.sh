@@ -1,5 +1,5 @@
 #!/bin/sh
-# nimb-tunnel 19: brings the Nimb WARP tunnel up and down. It runs as root, from /usr/local/libexec/nimb, which only root
+# nimb-tunnel 20: brings the Nimb WARP tunnel up and down. It runs as root, from /usr/local/libexec/nimb, which only root
 # can write to. The settings are read from warp.conf next to it, a file of plain key=value lines that Nimb wrote after
 # checking every value; nothing in it is ever executed.
 #
@@ -48,7 +48,7 @@ DEAD_AFTER=600              # a handshake older than this (seconds) is the begin
 DEAD_LOOKS=2                # looks in a row (internet dead through the tunnel too) before the tunnel is revived
 PROBE_WEB=https://www.cloudflare.com/cdn-cgi/trace
 PROBE_VIDEO=https://www.youtube.com/generate_204
-PROBE_CHAT=https://discord.com/
+PROBE_CHAT=https://discord.com/api/v10/gateway
 if [ -n "${NIMB_TUNNEL_TEST:-}" ]; then SERVERS="${NIMB_TUNNEL_SERVERS:-$SERVERS}"; HANDSHAKE_WAIT="${NIMB_TUNNEL_HANDSHAKE_WAIT:-$HANDSHAKE_WAIT}"
     DEAD_EVERY="${NIMB_TUNNEL_DEAD_EVERY:-0}"; DEAD_AFTER="${NIMB_TUNNEL_DEAD_AFTER:-$DEAD_AFTER}"
 fi
@@ -226,7 +226,7 @@ take_down() {
 }
 
 # A restart that the watcher started must not outlive a `down` of the person that came in the meantime.
-stopped_by_person() { [ -n "${NIMB_TUNNEL_RESTART:-}" ] && [ -f "$RUN.stopped" ]; }
+stopped_by_person() { [ -f "$RUN.stopped" ]; }
 
 # The server that was found to open YouTube (written by the search below); nothing if it is not one of the known servers.
 saved_server() {
@@ -237,11 +237,10 @@ saved_server() {
     return 0
 }
 
-# The site answers through the tunnel (any answer of the server: the name and the handshake of TLS went through).
+# A refusal or server error must not make the endpoint look suitable for YouTube and Discord.
 probe_ok() {
     code=$(curl -sI -o /dev/null -m 5 --connect-timeout 3 -w '%{http_code}' "$1" 2>/dev/null)
-    case "$code" in ''|000) return 1 ;; esac
-    return 0
+    case "$code" in 2??|3??) return 0 ;; *) return 1 ;; esac
 }
 
 good_now() { probe_ok "$PROBE_VIDEO" && probe_ok "$PROBE_CHAT"; }
@@ -367,6 +366,7 @@ start_watcher() {
 }
 
 cmd_up() {
+    trap 'cmd_down; exit 130' TERM INT
     pid=$(state_get pid)
     if alive "$pid"; then say "already up"; return 0; fi
     take_down
@@ -475,6 +475,7 @@ bring_up() {
     log_mark "up"
     WG_TUN_NAME_FILE="$RUN.name" LOG_LEVEL="$loglevel" "$BIN" -f utun >>"$LOG" 2>&1 &
     pid=$!
+    printf 'pid=%s\n' "$pid" > "$STATE"; chmod 644 "$STATE"
     i=0; while [ ! -s "$RUN.name" ] && alive "$pid" && [ $i -lt 40 ]; do sleep 0.25; i=$((i + 1)); done
     iface=$(cat "$RUN.name" 2>/dev/null)
     if [ -z "$iface" ] || ! alive "$pid"; then kill "$pid" 2>/dev/null; UPERR="amneziawg-go не запустился (см. $LOG)"; return 1; fi
@@ -482,7 +483,7 @@ bring_up() {
     i=0; while [ ! -S "$sock" ] && [ $i -lt 40 ]; do sleep 0.25; i=$((i + 1)); done
     [ -S "$sock" ] || { kill "$pid" 2>/dev/null; UPERR="нет управляющего сокета $sock"; return 1; }
 
-    { printf 'pid=%s\ninterface=%s\nserver=%s\n' "$pid" "$iface" "$host"; } > "$STATE"
+    { printf 'interface=%s\nserver=%s\n' "$iface" "$host"; } >> "$STATE"
     chmod 644 "$STATE"
     stopped_by_person && { take_down; UPERR="остановлено"; return 1; }
 
@@ -533,6 +534,7 @@ allowed_ip=$cidr"; done
     # 5. Wait for the handshake; without it a full tunnel would swallow all traffic, so take everything down again.
     i=0; shake=0
     while [ $i -lt "$HANDSHAKE_WAIT" ]; do
+        stopped_by_person && { take_down; UPERR="остановлено"; return 1; }
         shake=$(printf 'get=1\n\n' | uapi "$sock" | tr -d '\r' | sed -n 's/^last_handshake_time_sec=//p' | head -1)
         [ -n "$shake" ] && [ "$shake" != 0 ] && break
         shake=0

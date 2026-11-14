@@ -22,11 +22,16 @@ func Cleanup(dir string, logf func(string, ...any)) (problems []string) {
 	}
 	h := &Helper{dir: dir, logf: logf, started: time.Now()}
 	h.backup = h.loadBackup()
+	hadBackup := h.backup != nil
 
 	if err := h.dnsRestore(); err != nil {
-		problems = append(problems, err.Error())
+		return []string{err.Error()} // The uninstaller must stop, keeping the installation available for a retry.
 	}
-	if adapters, err := dnsx.Adapters(); err == nil {
+	if !hadBackup {
+		adapters, err := dnsx.RestoreAdapters()
+		if err != nil {
+			return []string{"не удалось проверить DNS: " + err.Error()}
+		}
 		for _, a := range adapters {
 			for _, p := range dnsx.Providers {
 				if p.Matches(a.NameServer) {
@@ -37,12 +42,18 @@ func Cleanup(dir string, logf func(string, ...any)) (problems []string) {
 					}
 					if dnsx.Same6(a.NameServer6, p.Servers6()) {
 						a.NameServer6 = ""
-						h.write6(a)
+						if err := h.write6Checked(a); err != nil {
+							problems = append(problems, err.Error())
+						}
 					}
 				}
 			}
 		}
 		dnsx.Flush()
+	}
+
+	if len(problems) > 0 {
+		return problems
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)

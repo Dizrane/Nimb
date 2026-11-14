@@ -9,14 +9,12 @@ enum SiteChecker {
         ("YouTube", [
             ("Сайт", "https://www.youtube.com/"),
             ("Проверочный адрес", "https://www.youtube.com/generate_204"),
-            ("Картинки", "https://i.ytimg.com/"),
-            ("Видео", "https://redirector.googlevideo.com/"),
+            ("Картинки", "https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg"),
         ]),
         ("Discord", [
             ("Сайт", "https://discord.com/"),
-            ("Служебный адрес", "https://discord.com/api/v9/gateway"),
-            ("Файлы", "https://cdn.discordapp.com/"),
-            ("Сообщения", "https://gateway.discord.gg/"),
+            ("Служебный адрес", "https://discord.com/api/v10/gateway"),
+            ("Файлы", "https://cdn.discordapp.com/embed/avatars/0.png"),
         ]),
     ]
 

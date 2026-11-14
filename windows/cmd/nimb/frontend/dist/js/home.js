@@ -57,8 +57,8 @@ export class HomeHero {
       : s.count === 0 ? 'Одна кнопка включает нейросети, Telegram, YouTube и Discord.' : 'Включите остальное кнопкой или переключателями.';
     setText(this.title, title, 350);
     setText(this.sub, sub, 350);
-    this.button.disabled = s.busy;
-    morph(this.button, `${s.running ? '<span class="spin"></span>' : ''}<span>${s.all ? 'Выключить всё' : 'Включить всё'}</span>`);
+    this.button.disabled = s.busy && !s.canCancel;
+    morph(this.button, `${s.running ? '<span class="spin"></span>' : ''}<span>${s.canCancel ? 'Отменить подключение WARP' : s.all ? 'Выключить всё' : 'Включить всё'}</span>`);
   }
 
   draw(t) {

@@ -35,6 +35,7 @@ import (
 // autoState is what the automatic reports keep between looks.
 type autoState struct {
 	mu           sync.Mutex // one decision at a time: the history is read, extended and written
+	consent      autoreport.Consent
 	tracker      autoreport.MismatchTracker
 	retrying     bool
 	boxMu        sync.Mutex // the file of the black box
@@ -44,6 +45,39 @@ type autoState struct {
 
 func blackBoxPath() string { return filepath.Join(dataDir(), "blackbox.log") }
 func pendingPath() string  { return filepath.Join(dataDir(), "pending-reports.json") }
+
+// autoSession captures consent before asynchronous work starts. On a restart the persisted opt-in gets a fresh cancellation context.
+func (a *App) autoSession() *autoreport.ConsentSession {
+	a.auto.mu.Lock()
+	defer a.auto.mu.Unlock()
+	s := a.settings.get()
+	if !s.HelpTesting {
+		return nil
+	}
+	if session := a.auto.consent.Current(); session != nil {
+		return session
+	}
+	if s.HelpInstall == "" {
+		s.HelpInstall = newInstallID()
+		a.settings.update(func(saved *Settings) { saved.HelpInstall = s.HelpInstall })
+	}
+	return a.auto.consent.Replace(s.HelpInstall)
+}
+
+func (a *App) validAuto(session *autoreport.ConsentSession) bool {
+	if !a.auto.consent.Valid(session) {
+		return false
+	}
+	words, _ := a.reportsPaused()
+	return words == ""
+}
+
+// Keep writes and counters atomic with opting out. Network requests use the session context instead of holding these locks.
+func (a *App) withAuto(session *autoreport.ConsentSession, operation func()) bool {
+	a.auto.mu.Lock()
+	defer a.auto.mu.Unlock()
+	return a.auto.consent.With(session, operation)
+}
 
 // ---- the black box ------------------------------------------------------------------------------------------------------------------
 
@@ -123,7 +157,8 @@ func (a *App) recordBlackBox() {
 	}
 	a.writeBlackBox(autoreport.Line(time.Now(), time.Since(processStarted), f))
 
-	if !a.settings.get().HelpTesting {
+	session := a.autoSession()
+	if session == nil {
 		return
 	}
 	// What the rules are fed with. The questions to the net are asked only when the answer is needed (a disagreement or a silent server).
@@ -135,7 +170,7 @@ func (a *App) recordBlackBox() {
 		trace := cloudflareTrace()
 		l.silent = autoreport.TunnelSilent(ago, trace != nil && trace["warp"] == "on")
 	}
-	a.observeAuto(l)
+	a.observeAuto(l, session)
 }
 
 func (a *App) writeBlackBox(line string) {
@@ -200,25 +235,28 @@ func processMemoryMB() int {
 // ---- the causes ---------------------------------------------------------------------------------------------------------------------
 
 // observeAuto is one look of the black box: a service that disagrees with what it should be, for long enough, is a cause.
-func (a *App) observeAuto(l look) {
-	t := &a.auto
-	t.mu.Lock()
-	dns, tg, tun, silent := t.tracker.Observe("dns", l.dnsAgrees), t.tracker.Observe("telegram", l.telegramAgrees), t.tracker.Observe("tunnel", l.tunnelAgrees), t.tracker.Observe("handshake", !l.silent)
-	t.mu.Unlock()
+func (a *App) observeAuto(l look, session *autoreport.ConsentSession) {
+	var dns, tg, tun, silent bool
+	if !a.withAuto(session, func() {
+		t := &a.auto
+		dns, tg, tun, silent = t.tracker.Observe("dns", l.dnsAgrees), t.tracker.Observe("telegram", l.telegramAgrees), t.tracker.Observe("tunnel", l.tunnelAgrees), t.tracker.Observe("handshake", !l.silent)
+	}) {
+		return
+	}
 	if dns {
-		a.notifyAuto(autoreport.Mismatch(autoreport.DNS))
+		a.notifyAutoFor(session, autoreport.Mismatch(autoreport.DNS))
 	}
 	if tg {
-		a.notifyAuto(autoreport.Mismatch(autoreport.Telegram))
+		a.notifyAutoFor(session, autoreport.Mismatch(autoreport.Telegram))
 	}
 	if tun {
-		a.notifyAuto(autoreport.Mismatch(autoreport.Tunnel))
+		a.notifyAutoFor(session, autoreport.Mismatch(autoreport.Tunnel))
 	}
 	if silent {
-		a.notifyAuto(autoreport.TunnelSilentCause)
+		a.notifyAutoFor(session, autoreport.TunnelSilentCause)
 	}
-	a.sendDigestIfDue()
-	a.retryPending()
+	a.sendDigestIfDue(session)
+	a.retryPending(session)
 }
 
 // autoError: an error that the person is shown when a service is switched on or off. What the network does to the tunnel (the server does
@@ -266,30 +304,39 @@ func (a *App) noteOutdated(err error) {
 // notifyAuto writes a cause of a fault down for the report of the day (nothing is sent at once: one report a day), and the first one of the day
 // also leaves a snapshot of the state, which the report would not see any more when it goes.
 func (a *App) notifyAuto(trigger autoreport.Trigger) {
-	if !a.settings.get().HelpTesting {
-		return
-	}
-	if words, _ := a.reportsPaused(); words != "" {
+	a.notifyAutoFor(a.autoSession(), trigger)
+}
+
+func (a *App) notifyAutoFor(session *autoreport.ConsentSession, trigger autoreport.Trigger) {
+	if !a.validAuto(session) {
 		return
 	}
 	now := time.Now()
-	a.auto.mu.Lock()
-	causes := autoreport.Recorded(a.settings.get().HelpCauses, trigger.Key, trigger.Title, now)
-	a.settings.update(func(s *Settings) { s.HelpCauses = causes })
-	_, haveSnapshot := os.Stat(snapshotPath())
-	take := haveSnapshot != nil && !a.auto.snapshotting
-	if take {
-		a.auto.snapshotting = true
+	var take bool
+	if !a.withAuto(session, func() {
+		causes := autoreport.Recorded(a.settings.get().HelpCauses, trigger.Key, trigger.Title, now)
+		a.settings.update(func(s *Settings) { s.HelpCauses = causes })
+		_, haveSnapshot := os.Stat(snapshotPath())
+		take = haveSnapshot != nil && !a.auto.snapshotting
+		if take {
+			a.auto.snapshotting = true
+		}
+	}) {
+		return
 	}
-	a.auto.mu.Unlock()
 	logLine("тестирование: записал для сводки дня: " + trigger.Title)
 	if take {
 		goSafe("авто-отчёт: снимок первого сбоя", func() {
-			defer func() { a.auto.mu.Lock(); a.auto.snapshotting = false; a.auto.mu.Unlock() }()
+			defer a.withAuto(session, func() { a.auto.snapshotting = false })
+			if !a.validAuto(session) {
+				return
+			}
 			snap := autoreport.FaultSnapshot{Title: trigger.Title, At: now.Unix(), Text: a.collectFacts(true)}
 			if raw, err := json.Marshal(snap); err == nil {
-				os.MkdirAll(filepath.Dir(snapshotPath()), 0o700)
-				os.WriteFile(snapshotPath(), raw, 0o600)
+				a.withAuto(session, func() {
+					os.MkdirAll(filepath.Dir(snapshotPath()), 0o700)
+					os.WriteFile(snapshotPath(), raw, 0o600)
+				})
 			}
 		})
 	}
@@ -313,59 +360,69 @@ func takeSnapshot() *autoreport.FaultSnapshot {
 
 // sendDigestIfDue: the report of the day goes when a day has passed since the last one (or since the switch was turned on). A computer that
 // was asleep sends it at the first look after waking. It lists the causes of the day and carries the snapshot of the first fault.
-func (a *App) sendDigestIfDue() {
-	if words, _ := a.reportsPaused(); words != "" {
+func (a *App) sendDigestIfDue(session *autoreport.ConsentSession) {
+	if !a.validAuto(session) {
 		return
 	}
 	now := time.Now()
-	stamp := a.settings.get().HelpDigest
-	if stamp <= 0 { // turned on by an older version: the day starts now
-		a.settings.update(func(s *Settings) { s.HelpDigest = now.Unix() })
-		return
+	var summary string
+	a.withAuto(session, func() {
+		s := a.settings.get()
+		if s.HelpDigest <= 0 { // turned on by an older version: the day starts now
+			a.settings.update(func(s *Settings) { s.HelpDigest = now.Unix() })
+			return
+		}
+		since := time.Unix(s.HelpDigest, 0)
+		if !autoreport.DigestDue(now, since, processStarted) {
+			return
+		}
+		// The causes and the snapshot go into this report; a report that fails to go waits whole in the queue.
+		a.settings.update(func(s *Settings) { s.HelpDigest, s.HelpCauses = now.Unix(), nil })
+		summary = autoreport.Summary(autoreport.LinesSince(blackBoxTail(autoreport.KeepLines), since), s.HelpCauses)
+		if snap := takeSnapshot(); snap != nil {
+			summary += "\n\n" + snap.Section()
+		}
+	})
+	if summary != "" {
+		goSafe("авто-отчёт: сводка", func() { a.deliverAuto(session, autoreport.DailyDigestCause, summary) })
 	}
-	since := time.Unix(stamp, 0)
-	if !autoreport.DigestDue(now, since, processStarted) {
-		return
-	}
-	causes := a.settings.get().HelpCauses
-	// The causes and the snapshot go into this report; a report that fails to go waits whole in the queue.
-	a.settings.update(func(s *Settings) { s.HelpDigest, s.HelpCauses = now.Unix(), nil })
-	summary := autoreport.Summary(autoreport.LinesSince(blackBoxTail(autoreport.KeepLines), since), causes)
-	if snap := takeSnapshot(); snap != nil {
-		summary += "\n\n" + snap.Section()
-	}
-	goSafe("авто-отчёт: сводка", func() { a.deliverAuto(autoreport.DailyDigestCause, summary) })
 }
 
 // deliverAuto collects the report and sends it; a report that cannot go is kept for the next looks (the net may be down just because of
 // the fault that is being told).
-func (a *App) deliverAuto(trigger autoreport.Trigger, summary string) {
-	install := a.settings.get().HelpInstall
-	if install == "" {
-		install = newInstallID()
+func (a *App) deliverAuto(session *autoreport.ConsentSession, trigger autoreport.Trigger, summary string) {
+	if !a.validAuto(session) {
+		return
 	}
+	install := session.Install
 	id := report.NewID()
 	text := report.Head(id, "авто: "+trigger.Title+" (установка "+install+")", "", reportEnv()) + "\n\n"
 	if summary != "" {
 		text += summary + "\n\n"
 	}
 	text += a.collectReportFacts()
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
-	defer cancel()
-	if err := report.SendAuto(ctx, Version, id, text, trigger.Key, install); err != nil {
-		a.noteOutdated(err)
-		if report.IsRefused(err) {
-			// The relay will never take it: it is dropped, not kept for the next look.
-			logLine("тестирование: отчёт " + id + " не принят: " + err.Error())
-			return
-		}
-		item := autoreport.PendingItem{ID: id, Trigger: trigger.Key, Install: install, Text: text, At: time.Now()}
-		savePending(append(readPending(), item))
-		logLine("тестирование: отчёт " + id + " не отправлен, будет ещё попытка: " + err.Error())
+	if !a.validAuto(session) {
 		return
 	}
-	a.recordSent()
-	logLine("тестирование: отчёт " + id + " отправлен: " + trigger.Title)
+	ctx, cancel := context.WithTimeout(session.Context(), 25*time.Second)
+	defer cancel()
+	err := report.SendAuto(ctx, Version, id, text, trigger.Key, install)
+	a.withAuto(session, func() {
+		if err != nil {
+			a.noteOutdated(err)
+			if report.IsRefused(err) {
+				// The relay will never take it: it is dropped, not kept for the next look.
+				logLine("тестирование: отчёт " + id + " не принят: " + err.Error())
+				return
+			}
+			item := autoreport.PendingItem{ID: id, Trigger: trigger.Key, Install: install, Text: text, At: time.Now()}
+			savePending(append(readPending(), item))
+			logLine("тестирование: отчёт " + id + " не отправлен, будет ещё попытка: " + err.Error())
+			return
+		}
+		a.recordSent()
+		logLine("тестирование: отчёт " + id + " отправлен: " + trigger.Title)
+	})
 }
 
 func (a *App) recordSent() {
@@ -400,28 +457,47 @@ func savePending(items []autoreport.PendingItem) {
 }
 
 // retryPending tries again, at each look of the black box, the reports that did not go, oldest first, until one fails (the net is still down).
-func (a *App) retryPending() {
-	a.auto.mu.Lock()
-	if a.auto.retrying {
-		a.auto.mu.Unlock()
+func (a *App) retryPending(session *autoreport.ConsentSession) {
+	if !a.validAuto(session) {
 		return
 	}
-	items := autoreport.FreshPending(readPending(), time.Now())
+	var items []autoreport.PendingItem
+	a.withAuto(session, func() {
+		if a.auto.retrying {
+			return
+		}
+		for _, item := range autoreport.FreshPending(readPending(), time.Now()) {
+			if item.Install == session.Install {
+				items = append(items, item)
+			}
+		}
+		if len(items) == 0 {
+			os.Remove(pendingPath())
+			return
+		}
+		a.auto.retrying = true
+	})
 	if len(items) == 0 {
-		a.auto.mu.Unlock()
-		os.Remove(pendingPath())
 		return
 	}
-	a.auto.retrying = true
-	a.auto.mu.Unlock()
 	goSafe("авто-отчёт: повторная отправка", func() {
-		defer func() { a.auto.mu.Lock(); a.auto.retrying = false; a.auto.mu.Unlock() }()
+		defer a.withAuto(session, func() { a.auto.retrying = false })
 		left := items
 		for _, it := range items {
-			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+			if !a.validAuto(session) {
+				return
+			}
+			ctx, cancel := context.WithTimeout(session.Context(), 25*time.Second)
 			err := report.SendAuto(ctx, Version, it.ID, it.Text, it.Trigger, it.Install)
 			cancel()
-			a.noteOutdated(err)
+			if !a.withAuto(session, func() {
+				a.noteOutdated(err)
+				if err == nil {
+					a.recordSent()
+				}
+			}) {
+				return
+			}
 			if report.IsRefused(err) {
 				left = left[1:]
 				logLine("тестирование: отчёт " + it.ID + " не принят и убран из очереди")
@@ -431,10 +507,9 @@ func (a *App) retryPending() {
 				break
 			}
 			left = left[1:]
-			a.recordSent()
 			logLine("тестирование: отчёт " + it.ID + " отправлен позже, когда сеть вернулась")
 		}
-		savePending(left)
+		a.withAuto(session, func() { savePending(left) })
 	})
 }
 
@@ -469,16 +544,20 @@ func (a *App) SetHelpTesting(on bool) Result {
 		logLine("тестирование: не включено: сборка изменена")
 		return Result{Error: buildcheck.PausedShort}
 	}
+	a.auto.mu.Lock()
+	defer a.auto.mu.Unlock()
 	if on == a.settings.get().HelpTesting {
 		return Result{OK: true}
 	}
-	a.auto.mu.Lock()
+	a.auto.consent.Replace("")                    // cancel transports and invalidate preparation before clearing any files
 	a.auto.tracker = autoreport.MismatchTracker{} // the looks of the time before do not count
-	a.auto.mu.Unlock()
+	a.auto.retrying, a.auto.snapshotting = false, false
 	if on {
+		install := newInstallID()
 		a.settings.update(func(s *Settings) {
-			s.HelpTesting, s.HelpInstall, s.HelpDigest = true, newInstallID(), time.Now().Unix()
+			s.HelpTesting, s.HelpInstall, s.HelpDigest = true, install, time.Now().Unix()
 		})
+		a.auto.consent.Replace(install)
 		logLine("тестирование: включено: одна сводка раз в сутки отправляется сама")
 	} else {
 		a.settings.update(func(s *Settings) {
