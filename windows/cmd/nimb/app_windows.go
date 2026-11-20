@@ -54,6 +54,9 @@ type App struct {
 
 	// restoring: the tunnel that was on before the computer was restarted is being switched on again (restoreTunnel).
 	restoring atomic.Bool
+	// Closing a window may hide it; an explicit quit must always reach Wails and end the process.
+	quitRequested atomic.Bool
+	quitting      atomic.Bool
 
 	serviceMu   sync.Mutex
 	serviceDown bool // the service did not answer the last time it was asked (see noteService)
@@ -84,14 +87,11 @@ func (a *App) startup(ctx context.Context) {
 	a.sizeWindow()
 	var upgradedFrom string
 	a.previousEndedBadly, upgradedFrom = beginSession(Version, previousLastLine)
-	a.watchSessionEnd()
+	a.watchWindowMessages()
 	balloonClick = a.balloonClicked
 	hideTitleBarIcon()
 	startPulse()
 	logLine(fmt.Sprintf("запуск Nimb %s (процесс %d)", Version, os.Getpid()))
-	if afterWebView2Crash {
-		logLine("Nimb запущен заново: прошлый процесс закончился, потому что завершился браузерный процесс WebView2 (строка «wails: … kind 0» выше)")
-	}
 	if a.previousEndedBadly {
 		logLine("прошлый запуск закончился неожиданно (сбой, принудительное закрытие или выключение питания)")
 		explainPreviousEnd()
@@ -113,14 +113,10 @@ func (a *App) startup(ctx context.Context) {
 	startTray(a)
 }
 
-// beforeClose: with the working in the background on, closing the window hides it (HideWindowOnClose) and Nimb goes on working from the
-// tray; with it off, closing the window quits Nimb as «Выйти» of the menu of the icon does (it asks when an update is being installed;
-// if the person says no, the window stays). The question is asked off the thread of the window, which is told at once that the close is taken.
-func (a *App) beforeClose(ctx context.Context) bool {
-	if a.settings.get().ClosingQuits() {
-		go a.quitFrom("закрытие окна при выключенной работе в фоне")
-		return true
-	}
+// beforeClose receives an actual quit, including a direct WM_CLOSE from Windows. The title-bar close command is handled separately
+// by watchWindowMessages. Never hide or veto an external termination request, even while background mode or an update is active.
+func (a *App) beforeClose(_ context.Context) bool {
+	a.prepareQuit("системная команда завершения")
 	return false
 }
 
@@ -149,11 +145,18 @@ func (a *App) ShowWindow() {
 	runtime.WindowShow(a.ctx)
 }
 
-// Quit closes Nimb. The proxy of Telegram, DNS and the tunnel stay as they are: they live in the service.
+// Quit turns off all three features before closing Nimb.
 func (a *App) Quit() { a.quitFrom("кнопка «Выйти из Nimb» в окне") }
 
 // quitFrom closes Nimb and writes down who asked for it.
 func (a *App) quitFrom(reason string) bool {
+	if a.quitting.Load() {
+		return true
+	}
+	if !a.quitRequested.CompareAndSwap(false, true) {
+		return false
+	}
+	defer a.quitRequested.Store(false)
 	// The update is being installed: a quit now would stop it half-way (the same question as on the Mac).
 	a.upd.mu.Lock()
 	installing := a.upd.installing != "" && !a.upd.restarting
@@ -167,11 +170,22 @@ func (a *App) quitFrom(reason string) bool {
 			return false
 		}
 	}
+	if problems := a.shutdownServices(callService); len(problems) > 0 && !a.confirmQuitLeaving(problems) {
+		return false
+	}
+	a.prepareQuit(reason)
+	runtime.Quit(a.ctx)
+	return true
+}
+
+// prepareQuit is shared by ordinary Quit and Windows termination. It also prevents OnBeforeClose from recursively requesting Quit.
+func (a *App) prepareQuit(reason string) {
+	if !a.quitting.CompareAndSwap(false, true) {
+		return
+	}
 	logExit("по команде человека: " + reason)
 	endSession()
 	stopTray()
-	runtime.Quit(a.ctx)
-	return true
 }
 
 // ---- the state the page draws ----------------------------------------------------------------------------------------
@@ -192,11 +206,12 @@ type State struct {
 	ServiceError string `json:"serviceError,omitempty"`
 
 	AI struct {
-		On       bool     `json:"on"`
-		Provider string   `json:"provider"` // the one chosen (and in use when On)
-		Busy     bool     `json:"busy"`
-		Error    string   `json:"error,omitempty"`
-		Warnings []string `json:"warnings"` // what may keep Smart DNS from working, while it is on
+		On          bool     `json:"on"`
+		LegacyHosts bool     `json:"legacyHosts,omitempty"`
+		Provider    string   `json:"provider"` // the one chosen (and in use when On)
+		Busy        bool     `json:"busy"`
+		Error       string   `json:"error,omitempty"`
+		Warnings    []string `json:"warnings"` // what may keep Smart DNS from working, while it is on
 	} `json:"ai"`
 	Telegram struct {
 		On    bool          `json:"on"`
@@ -265,11 +280,12 @@ func (a *App) GetState() State {
 		errs[k] = v
 	}
 	a.mu.Unlock()
-	st.AI.Busy, st.AI.Error = busy["ai"], errs["ai"]
-	st.Telegram.Busy, st.Telegram.Error = busy["telegram"], errs["telegram"]
-	st.Media.Busy, st.Media.Error = busy["media"], errs["media"]
+	exiting := a.exitInProgress()
+	st.AI.Busy, st.AI.Error = busy["ai"] || exiting, errs["ai"]
+	st.Telegram.Busy, st.Telegram.Error = busy["telegram"] || exiting, errs["telegram"]
+	st.Media.Busy, st.Media.Error = busy["media"] || exiting, errs["media"]
 	a.mu.Lock()
-	st.Media.CanCancel = a.busy["media"] && a.mediaAttempt != "" && !a.mediaStopping
+	st.Media.CanCancel = !exiting && a.busy["media"] && a.mediaAttempt != "" && !a.mediaStopping
 	a.mu.Unlock()
 
 	var tg *ipc.TelegramStatus
@@ -282,7 +298,10 @@ func (a *App) GetState() State {
 		tg = resp.Telegram
 		if resp.DNS != nil && resp.DNS.Active {
 			st.AI.On = true
-			st.AI.Provider = resp.DNS.Provider
+			st.AI.LegacyHosts = resp.DNS.LegacyHosts
+			if resp.DNS.Provider != "" {
+				st.AI.Provider = resp.DNS.Provider
+			}
 			if p, ok := dnsx.Find(resp.DNS.Provider); ok && p.Retired {
 				st.AI.Warnings = append(st.AI.Warnings, p.Name+" больше не поддерживает доступ к нейросетям. Выберите другой DNS или выключите сервис, чтобы вернуть прежние настройки.")
 			}
@@ -489,7 +508,7 @@ func (a *App) tunnelState() (switching bool, epoch int) {
 func (a *App) enter(name string) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.busy[name] {
+	if a.busy[name] || a.exitInProgress() {
 		return false
 	}
 	a.noteSwitch(name)
@@ -543,6 +562,9 @@ func (a *App) SetAI(on bool) Result {
 
 // applyAI does the work of SetAI; the service is already marked as busy.
 func (a *App) applyAI(on bool) Result {
+	if on && a.exitInProgress() {
+		return a.end("ai", nil)
+	}
 	var err error
 	if on {
 		logLine("нейросети: включаю, провайдер " + providerName(a.settings.get().Provider))
@@ -593,6 +615,10 @@ func (a *App) applyMedia(on bool) Result { return a.applyMediaWith(on, callServi
 
 func (a *App) applyMediaWith(on bool, request func(ipc.Request) (ipc.Response, error)) Result {
 	a.mu.Lock()
+	if on && a.exitInProgress() {
+		a.mu.Unlock()
+		return a.end("media", nil)
+	}
 	if !on && a.mediaStopping {
 		a.mu.Unlock()
 		return Result{OK: true}
@@ -629,7 +655,7 @@ func (a *App) applyMediaWith(on bool, request func(ipc.Request) (ipc.Response, e
 	if err != nil {
 		a.errs["media"] = err.Error()
 	}
-	if on && err == nil {
+	if on && err == nil && !a.exitInProgress() {
 		a.settings.update(func(s *Settings) { s.TunnelWanted = true })
 	}
 	a.mu.Unlock()
@@ -651,6 +677,9 @@ func (a *App) SetTelegram(on bool) Result {
 
 // applyTelegram does the work of SetTelegram; the service is already marked as busy.
 func (a *App) applyTelegram(on bool) Result {
+	if on && a.exitInProgress() {
+		return a.end("telegram", nil)
+	}
 	if on {
 		logLine("Telegram: включаю прокси")
 	} else {
@@ -739,11 +768,15 @@ func (a *App) migrateTelegram() {
 		return
 	}
 	for i := 0; i < 30; i++ {
-		set := a.settings.get()
-		if _, err := callService(ipc.Request{Cmd: ipc.TelegramUp, Secret: set.TelegramSecret, Port: set.TelegramPort}); err == nil {
-			a.settings.update(func(s *Settings) { s.TelegramAuto = false })
-			logLine("Telegram: прокси, который был включён в окне, теперь работает в службе (ключ и порт те же)")
+		if a.exitInProgress() {
 			return
+		}
+		if a.enter("telegram") {
+			if result := a.applyTelegram(true); result.OK && !a.exitInProgress() {
+				a.settings.update(func(s *Settings) { s.TelegramAuto = false })
+				logLine("Telegram: прокси, который был включён в окне, теперь работает в службе (ключ и порт те же)")
+				return
+			}
 		}
 		time.Sleep(2 * time.Second)
 	}

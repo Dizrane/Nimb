@@ -1,5 +1,5 @@
 // Package background is the setting «Работа в фоне»: with it on, closing the window hides it and Nimb stays at the clock; with it off,
-// closing the window quits Nimb as «Выйти» in the menu of the icon does (the proxy, the DNS and the tunnel stay in the service either way).
+// closing the window quits Nimb as «Выйти» in the menu of the icon does, turning off the proxy, Smart DNS and the tunnel first.
 // It is on until the person turns it off, which is how Nimb for Windows has always behaved.
 package background
 

@@ -9,20 +9,21 @@ enum WarpTerms {
 
 /// Where the helper lives. The directory belongs to root, so a program running as the user cannot swap what runs as root.
 enum WarpPaths {
-    static let dir = "/usr/local/libexec/nimb"
+    static let dir = "/usr/local/libexec/\(AppIdentity.systemName)"
+    private static let run = "/var/run/\(AppIdentity.systemName)-tunnel"
     static let helper = "\(dir)/nimb-tunnel"
     static let binary = "\(dir)/amneziawg-go"
     static let config = "\(dir)/warp.conf"
-    static let stateFile = "/var/run/nimb-tunnel.state"
+    static let stateFile = "\(run).state"
     /// The note the helper leaves when it takes the tunnel down itself (the server stopped answering).
-    static let droppedFile = "/var/run/nimb-tunnel.dropped"
-    static let daemonLog = "/var/run/nimb-tunnel.log"
+    static let droppedFile = "\(run).dropped"
+    static let daemonLog = "\(run).log"
     /// The helper starts the program of the tunnel again when it ends by itself: each restart is a unix time on a line of `restartsFile`, and
     /// `restartingFile` is there while one is going on.
-    static let restartsFile = "/var/run/nimb-tunnel.restarts"
-    static let restartingFile = "/var/run/nimb-tunnel.restarting"
+    static let restartsFile = "\(run).restarts"
+    static let restartingFile = "\(run).restarting"
     /// The sudoers rule that lets the person start and stop the tunnel without a password (opt-in, like the one for DNS).
-    static let sudoersPath = "/etc/sudoers.d/nimb-tunnel"
+    static let sudoersPath = "/etc/sudoers.d/\(AppIdentity.systemName)-tunnel"
     static let passwordlessCommands = ["\(helper) up", "\(helper) down"]
 
     /// The folders on the way to the helper. The rule «без пароля» starts the helper as root, so nobody but root may be able to put another one
@@ -51,7 +52,7 @@ enum WarpPaths {
     }
 
     /// Stops the tunnel and deletes everything that was installed. Used by "remove" and by the uninstall.
-    static let removeScript = "[ ! -x '\(helper)' ] || { '\(helper)' down; '\(helper)' unregister || true; }; /bin/rm -f '\(sudoersPath)'; /bin/rm -rf '\(dir)' /var/run/nimb-tunnel.state /var/run/nimb-tunnel.log /var/run/nimb-tunnel.name /var/run/nimb-tunnel.dropped /var/run/nimb-tunnel.restarts /var/run/nimb-tunnel.restarting /var/run/nimb-tunnel.stopped"
+    static let removeScript = "[ ! -x '\(helper)' ] || { '\(helper)' down; '\(helper)' unregister || true; }; /bin/rm -f '\(sudoersPath)'; /bin/rm -rf '\(dir)' '\(stateFile)' '\(daemonLog)' '\(run).name' '\(droppedFile)' '\(restartsFile)' '\(restartingFile)' '\(run).stopped'"
 }
 
 /// The tunnel ended without the person: the program of the tunnel exited by itself (`daemon-exited`; an older helper also wrote

@@ -52,7 +52,7 @@ func setAutostart(on bool) error {
 
 // A file that exists while Nimb runs and holds the version that made it: if it is there at the start, the last run did not end by
 // itself (a crash, a power cut). A run that ended because the installer put a newer version in its place (the file names another version)
-// or because Windows was shutting down (the window removes the file, see watchSessionEnd) is not unexpected.
+// or because Windows was shutting down (the window removes the file, see watchWindowMessages) is not unexpected.
 func sessionMarker() string { return filepath.Join(dataDir(), "session.marker") }
 
 // beginSession reads what the last run left and makes the mark of this one. upgradedFrom is the version that was running when the

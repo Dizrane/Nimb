@@ -19,8 +19,7 @@ final class BlackBox {
     private let fileURL: URL
 
     private init() {
-        let base = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first ?? URL(fileURLWithPath: NSHomeDirectory())
-        let dir = base.appendingPathComponent("Logs/Nimb", isDirectory: true)
+        let dir = AppIdentity.logs
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         fileURL = dir.appendingPathComponent("blackbox.log")
     }
@@ -85,8 +84,7 @@ final class BlackBox {
 
     /// The last lines for a report, oldest first.
     nonisolated static func lastLines(_ count: Int = reportLines) -> [String] {
-        let base = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first ?? URL(fileURLWithPath: NSHomeDirectory())
-        let url = base.appendingPathComponent("Logs/Nimb/blackbox.log")
+        let url = AppIdentity.logs.appendingPathComponent("blackbox.log")
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
         return Array(text.split(separator: "\n", omittingEmptySubsequences: true).map(String.init).suffix(count))
     }

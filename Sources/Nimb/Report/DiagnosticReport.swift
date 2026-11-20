@@ -53,6 +53,7 @@ enum DiagnosticReport {
                 let services = report.services.map { "\($0.name) \($0.answered)/\($0.total)" }.joined(separator: ", ")
                 var lines = ["\(report.provider.name): работает \(report.workingCount) из \(report.services.count) (\(services))" + (report.medianSeconds.map { ", медиана \(String(format: "%.1f", $0)) с" } ?? "")]
                 lines += report.refusals.map { "  отказ: \($0)" }
+                lines += report.failures.map { "  сбой: \($0)" }
                 let dead = report.deadAddresses
                 if !dead.isEmpty { lines.append("  без нормального ответа: \(dead.joined(separator: ", "))") }
                 return lines

@@ -111,7 +111,7 @@ final class AllServices: ObservableObject {
     func detail(_ page: AppPage) -> String {
         guard let dns, let telegram, let warp else { return "" }
         switch page {
-        case .ai: return dns.active?.name ?? (dns.hasProviderDNS ? "DNS задан на части подключений" : "ChatGPT, Claude, Gemini и другие")
+        case .ai: return dns.accessName ?? (dns.hasProviderDNS ? "DNS задан на части подключений" : "ChatGPT, Claude, Gemini и другие")
         case .telegram: return telegram.isRunning ? "Прокси работает" : "Прокси для Telegram Desktop"
         case .media: return warp.isOn ? "Туннель работает" : (warp.phase == .unavailable ? "Недоступно в этой сборке" : "Туннель WARP")
         default: return ""
@@ -129,7 +129,7 @@ final class AllServices: ObservableObject {
     }
 
     var effectiveCount: Int { let e = effective; return [e.ai, e.telegram, e.media].filter { $0 }.count }
-    var allOn: Bool { onCount == total && dns?.active != nil }
+    var allOn: Bool { onCount == total && dns?.accessName != nil }
 
     /// Something is changing, so that another change has to wait.
     var isBusy: Bool {
@@ -149,8 +149,8 @@ final class AllServices: ObservableObject {
         Task {
             defer { isRunning = false; intent = .none }
             if !telegram.isRunning { telegram.start(); await settle() }
-            let needDNS = dns.active == nil, needWarp = warpAvailable && !warp.isOn
-            if needDNS && needWarp && dns.asksPassword(turningOn: true) && warp.asksPassword(turningOn: true) {
+            let needDNS = dns.accessName == nil, needWarp = warpAvailable && !warp.isOn
+            if needDNS && needWarp && !dns.hasLegacyHosts && dns.asksPassword(turningOn: true) && warp.asksPassword(turningOn: true) {
                 // Both want the administrator password: it is asked once, for the two together.
                 PrivilegedBatch.shared.expect(2)
                 dns.enable()
@@ -161,7 +161,7 @@ final class AllServices: ObservableObject {
             if needDNS {
                 dns.enable(); await settle()
                 // The password was refused: do not ask again for the next one.
-                if dns.active == nil { return }
+                if dns.accessName == nil { return }
             }
             if needWarp { toggleWarp(); await settle() }
         }
@@ -174,7 +174,7 @@ final class AllServices: ObservableObject {
         Task {
             defer { isRunning = false; intent = .none }
             if telegram.isRunning { telegram.stop() }
-            if dns.hasProviderDNS && warp.isOn && dns.asksPassword && warp.asksPassword(turningOn: false) {
+            if dns.hasProviderDNS && warp.isOn && !dns.hasLegacyHosts && dns.asksPassword && warp.asksPassword(turningOn: false) {
                 PrivilegedBatch.shared.expect(2)
                 dns.disable()
                 warp.disconnect()
@@ -192,7 +192,7 @@ final class AllServices: ObservableObject {
     /// Whether anything of Nimb is still working: a service that would go on after the program is gone.
     var anythingWorks: Bool {
         guard let dns, let telegram, let warp else { return false }
-        return dns.hasProviderDNS || telegram.isRunning || warp.isOn || warp.startAttempt != nil
+        return dns.hasProviderDNS || dns.isBusy || telegram.isRunning || warp.isOn || warp.startAttempt != nil
     }
 
     /// The services that still work, by name.

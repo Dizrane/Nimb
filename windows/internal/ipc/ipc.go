@@ -91,8 +91,9 @@ type TelegramStatus struct {
 
 // DNSStatus is the state of Smart DNS.
 type DNSStatus struct {
-	Active   bool   `json:"active"`
-	Provider string `json:"provider,omitempty"`
+	Active      bool   `json:"active"`
+	Provider    string `json:"provider,omitempty"`
+	LegacyHosts bool   `json:"recovery,omitempty"` // Keep the wire name for older helpers.
 }
 
 // TunnelStatus is the state of the tunnel.

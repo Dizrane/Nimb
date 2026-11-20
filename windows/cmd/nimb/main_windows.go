@@ -28,22 +28,21 @@ func main() {
 			os.Exit(2)
 		}
 	}()
-	afterWebView2Crash = waitForPreviousProcess()
 	useOwnTaskbarIcon()
 	app := NewApp()
 	err := wails.Run(&options.App{
 		Title: "Nimb",
 		// The size of the window with a frame; sizeWindow makes it exactly right for a client area of 1100 by 660 as soon as it is up.
-		Width:             1116,
-		Height:            699,
-		MinWidth:          1116,
-		MinHeight:         699,
-		BackgroundColour:  &options.RGBA{R: 0, G: 0, B: 0, A: 255},
-		AssetServer:       &assetserver.Options{Assets: assets},
-		OnStartup:         app.startup,
-		OnBeforeClose:     app.beforeClose,
-		HideWindowOnClose: true,
-		StartHidden:       app.settings.get().StartsHidden(os.Args[1:]),
+		Width:            1116,
+		Height:           699,
+		MinWidth:         1116,
+		MinHeight:        699,
+		DisableResize:    true,
+		BackgroundColour: &options.RGBA{R: 0, G: 0, B: 0, A: 255},
+		AssetServer:      &assetserver.Options{Assets: assets},
+		OnStartup:        app.startup,
+		OnBeforeClose:    app.beforeClose,
+		StartHidden:      app.settings.get().StartsHidden(os.Args[1:]),
 		OnShutdown: func(context.Context) {
 			logExit("приложение закрывается (Wails вызвал OnShutdown)")
 			endSession()

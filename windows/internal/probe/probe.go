@@ -71,7 +71,7 @@ const (
 type Outcome struct {
 	Status  Status
 	Seconds float64 // the time to the first byte of a normal answer
-	Reason  string  // why it was refused
+	Reason  string  // why it was refused or which DNS/HTTPS stage failed
 }
 
 // Sample is the result of one HTTPS request to one pool address of a provider.

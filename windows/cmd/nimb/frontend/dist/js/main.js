@@ -151,7 +151,13 @@ async function readAutostart() {
 
 // -------------------------------------------------------------------------------------------------------------------- state
 
-async function refresh() {
+// Timer, focus and progress polling share one pending read; slow replies cannot pile up or arrive out of order.
+let refreshInFlight = null;
+function refresh() {
+  if (!refreshInFlight) refreshInFlight = readState().finally(() => { refreshInFlight = null; });
+  return refreshInFlight;
+}
+async function readState() {
   let next;
   try { next = await api().GetState(); } catch (e) { return; }
   if (prevOn) for (const k of ORDER) if (next[k].on && !prevOn[k]) playIcon(SV[k].icon);

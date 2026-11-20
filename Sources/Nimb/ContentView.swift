@@ -6,6 +6,7 @@ final class DNSViewModel: ObservableObject {
     @Published var active: DNSProvider? { didSet { if active != oldValue { AppLog.shared.add("dns", "DNS: \(active?.name ?? "выключен")") } } }
     /// Also true for partial or mixed application: these connections must be cleaned up before quitting.
     @Published private(set) var hasProviderDNS = false
+    @Published private(set) var hasLegacyHosts = false
     @Published var isBusy = false
     @Published var errorMessage: String? { didSet { if let message = errorMessage { AppLog.shared.add("dns", "ошибка: \(message)") } } }
     @Published var warnings: [String] = []
@@ -24,19 +25,21 @@ final class DNSViewModel: ObservableObject {
         let current = configuration.active
         active = current
         hasProviderDNS = configuration.needsCleanup
+        hasLegacyHosts = configuration.hasLegacyHosts
         if let current {
             if !current.retired { selected = current }
-            warnings = DNSManager.overrideWarnings(for: current)
+            warnings = DNSManager.overrideWarnings(for: current, servers: configuration.servers)
         }
     }
 
     var passwordless: Bool { access.enabled }
+    var accessName: String? { hasLegacyHosts ? nil : active?.name }
 
     /// A change of DNS goes to the password prompt (there is no rule for it that covers every connection).
     var asksPassword: Bool { asksPassword(turningOn: !hasProviderDNS) }
 
     func asksPassword(turningOn: Bool) -> Bool {
-        access.asksPassword(for: turningOn ? selected : nil) || (!turningOn && DNSManager.restorationAsksPassword)
+        hasLegacyHosts || access.asksPassword(for: turningOn ? selected : nil) || (!turningOn && DNSManager.restorationAsksPassword)
     }
 
     /// True while a DNS change or a service check is running; both need the network undisturbed.
@@ -69,7 +72,7 @@ final class DNSViewModel: ObservableObject {
         Task.detached {
             let result = ServiceProbe.run { done, total in
                 Task { @MainActor in
-                    guard self.isProbing else { return }
+                    guard self.isProbing, total > 0 else { return }
                     self.probeProgress = "Проверено \(done) из \(total)"
                     self.probeFraction = total == 0 ? 0 : Double(done) / Double(total)
                 }
@@ -87,7 +90,7 @@ final class DNSViewModel: ObservableObject {
     func enableBest() {
         probe { [self] in
             if let best, best.workingCount > 0 { selected = best.provider }
-            if active != selected { change(to: selected) }
+            if active != selected || hasLegacyHosts { change(to: selected) }
         }
     }
 
@@ -112,10 +115,11 @@ final class DNSViewModel: ObservableObject {
             let active = configuration.active
             var warnings: [String] = []
             if let active {
-                warnings = DNSManager.overrideWarnings(for: active)
-            } else if let partial = DNSManager.partialProvider(on: services) {
+                warnings = DNSManager.overrideWarnings(for: active, servers: configuration.servers)
+            } else if (!AppIdentity.isTest || !configuration.managedServices.isEmpty),
+                      let partial = DNSManager.partialProvider(on: services, servers: configuration.servers) {
                 warnings = ["\(partial.provider.name) задан не на всех подключениях (нет на: \(partial.missing.joined(separator: ", "))). Выключите DNS кнопкой или выберите провайдера, чтобы применить его заново."]
-                    + DNSManager.overrideWarnings(for: partial.provider)
+                    + DNSManager.overrideWarnings(for: partial.provider, servers: configuration.servers)
             }
             return (configuration, warnings, DNSManager.passwordlessState(for: services))
         }.value
@@ -124,6 +128,7 @@ final class DNSViewModel: ObservableObject {
         if access != read.access { access = read.access }
         if active != read.configuration.active { active = read.configuration.active }
         if hasProviderDNS != read.configuration.needsCleanup { hasProviderDNS = read.configuration.needsCleanup }
+        if hasLegacyHosts != read.configuration.hasLegacyHosts { hasLegacyHosts = read.configuration.hasLegacyHosts }
         if warnings != read.warnings { warnings = read.warnings }
         if let active = read.configuration.active, !active.retired, selected != active { selected = active }
     }
@@ -139,9 +144,9 @@ final class DNSViewModel: ObservableObject {
 
     /// Picking another provider while one is active switches straight to it.
     func select(_ provider: DNSProvider) {
-        guard !provider.retired else { return }
+        guard !isLocked, !provider.retired else { return }
         selected = provider
-        if hasProviderDNS, active != provider { change(to: provider) }
+        if hasProviderDNS, active != provider || hasLegacyHosts { change(to: provider) }
     }
 
     func togglePasswordless() { setPasswordless(!passwordless, confirm: true) }
@@ -188,9 +193,9 @@ final class DNSViewModel: ObservableObject {
 
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Удалить Nimb?"
+        alert.messageText = "Удалить \(AppIdentity.name)?"
         alert.informativeText = """
-            Сначала Nimb отключится от DNS-сервисов: DNS вернётся к настройкам, сохранённым перед включением Nimb (для старых включений без сохранённой копии — к автоматическому), а правило «без пароля» и туннель WARP, если они включены, будут удалены. Для этого понадобится пароль администратора.
+            Сначала \(AppIdentity.name) отключится от DNS-сервисов: DNS вернётся к настройкам, сохранённым перед включением \(AppIdentity.name) (для старых включений без сохранённой копии — к автоматическому), а правило «без пароля» и туннель WARP, если они включены, будут удалены. Для этого понадобится пароль администратора.
 
             Затем приложение закроется и удалит само себя вместе с настройками и кэшем. Действие необратимо.
             """
@@ -208,7 +213,7 @@ final class DNSViewModel: ObservableObject {
             let removeTunnel = WarpPaths.isInstalled
             var failure: Error?
             do {
-                if !services.isEmpty || DNSManager.hasSavedDNS || removeRule || removeTunnel {
+                if !services.isEmpty || DNSManager.hasSavedDNS || LegacyGeoHideHosts.hasEntries || removeRule || removeTunnel {
                     try DNSManager.resetBeforeUninstall(services, removingRule: removeRule, removingTunnel: removeTunnel)
                 }
                 // The entry in «Объекты входа» goes away with the app, not later by itself.
@@ -253,9 +258,8 @@ final class DNSViewModel: ObservableObject {
                 // menu and "turn everything off" still saw the old state.
                 self.active = configuration.active
                 self.hasProviderDNS = configuration.needsCleanup
-                if case .success = result {
-                    if let provider, self.selected != provider { self.selected = provider }
-                }
+                self.hasLegacyHosts = configuration.hasLegacyHosts
+                if case .success = result, let provider, self.selected != provider { self.selected = provider }
                 self.isBusy = false
                 if case .failure(let error) = result {
                     if case DNSError.cancelled = error {} else { self.errorMessage = error.localizedDescription }
@@ -291,7 +295,7 @@ final class UpdateViewModel: ObservableObject {
     /// Called once when the program starts: a check now, then one every `UpdateSchedule.interval` for as long as the program runs,
     /// whether or not its window is open or in front, and one at once when it comes to the front after a long time.
     func start() {
-        guard timer == nil else { return }
+        guard timer == nil, !AppIdentity.isTest else { return }
         if UpdatePreview.mode != nil {
             // To look at the window of the update: an offered update that does not exist, and no real checks to take it away.
             let fake = UpdatePreview.offered(for: UpdatePreview.mode ?? "ok")
@@ -438,9 +442,10 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             FooterBar(updates: updates, canInstall: !model.isLocked)
         }
-        .frame(minWidth: WindowConfigurator.minimumSize.width, maxWidth: .infinity, minHeight: WindowConfigurator.minimumSize.height, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background { NimbBackground(lit: all.effectiveCount > 0) }
         .ignoresSafeArea()
+        .frame(width: WindowConfigurator.contentSize.width, height: WindowConfigurator.contentSize.height)
         .preferredColorScheme(.dark)
         .background(WindowConfigurator())
         // The one key of the keyboard that Nimb answers: Escape goes back to «Главная».
@@ -474,7 +479,7 @@ struct ContentView: View {
                     return
                 }
                 MoveToApplications.offer()
-                onboarding.showIfFresh(existingSetup: model.active != nil || WarpPaths.isInstalled || UserDefaults.standard.object(forKey: "telegramProxyPort") != nil)
+                onboarding.showIfFresh(existingSetup: model.accessName != nil || WarpPaths.isInstalled || UserDefaults.standard.object(forKey: "telegramProxyPort") != nil)
             }
         }
     }
@@ -489,7 +494,7 @@ struct DNSHero: View {
         VStack(spacing: 6) {
             HeroButton(mode: model.mode, lit: model.hasProviderDNS, region: model.active?.region ?? model.selected.region, action: model.toggle)
                 .disabled(model.isLocked)
-                .accessibilityLabel(model.hasProviderDNS ? "Выключить Smart DNS" : "Включить Smart DNS")
+                .accessibilityLabel(model.hasProviderDNS ? "Выключить доступ к нейросетям" : "Включить \(model.selected.name)")
 
             Text(title)
                 .font(Typo.status)
@@ -497,7 +502,7 @@ struct DNSHero: View {
                 .contentTransition(.opacity)
 
             VStack(spacing: 4) {
-                if let active = model.active, !model.isLocked {
+                if let active = model.active, !model.hasLegacyHosts, !model.isLocked {
                     HStack(spacing: 7) {
                         Circle().fill(Theme.ok).frame(width: 6, height: 6)
                         Text(active.name)
@@ -524,7 +529,7 @@ struct DNSHero: View {
     private var title: String {
         switch model.mode {
         case .off: return "Выключено"
-        case .on: return model.active == nil ? "Включено частично" : "Включено"
+        case .on: return model.hasLegacyHosts ? "Требуется очистка" : model.active == nil ? "Включено частично" : "Включено"
         case .probing: return "Проверка сервисов"
         case .busy: return model.isSettingUp ? "Настраиваю доступ" : "Применяю DNS"
         }
@@ -533,7 +538,7 @@ struct DNSHero: View {
     private var subtitle: String {
         switch model.mode {
         case .off: return "Включите, чтобы открывались ChatGPT, Claude, Gemini и другие нейросети"
-        case .on: return model.active == nil ? "DNS задан на части подключений" : ""
+        case .on: return model.hasLegacyHosts ? "Выключите «Нейросети», чтобы удалить старые записи из hosts" : model.active == nil ? "DNS задан на части подключений" : ""
         case .probing: return "Спрашиваю DNS и запрашиваю сайты и API"
         case .busy: return !model.asksPassword && !model.isSettingUp ? "Меняю DNS на всех подключениях" : "Подтвердите пароль администратора"
         }
@@ -567,7 +572,7 @@ struct ProvidersSection: View {
                       spacing: Space.gap) {
                 ForEach(DNSProvider.byName) { provider in
                     ProviderCard(
-                        provider: provider,
+                        name: provider.name,
                         report: model.report(for: provider),
                         isSelected: model.selected == provider,
                         isActive: model.active == provider,
@@ -652,7 +657,7 @@ private struct ProbeButton: View {
 }
 
 struct ProviderCard: View {
-    let provider: DNSProvider
+    let name: String
     let report: ProviderReport?
     let isSelected: Bool
     let isActive: Bool
@@ -694,9 +699,9 @@ struct ProviderCard: View {
         .animation(.easeInOut(duration: 0.3), value: isSelected)
         // One element that VoiceOver can read and press: a tap gesture alone is not an action for it.
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(provider.name)
+        .accessibilityLabel(name)
         .accessibilityValue(spokenState)
-        .accessibilityHint(locked ? "" : "Переключить DNS на этот сервис")
+        .accessibilityHint(locked ? "" : "Выбрать DNS-провайдера")
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         .accessibilityAction(.default, onSelect)
         .accessibilityAction(named: "Подробности проверки") { if report != nil { details.value.toggle() } }
@@ -735,7 +740,7 @@ struct ProviderCard: View {
 
     private var title: some View {
         HStack(spacing: 8) {
-            Text(provider.name)
+            Text(name)
                 .font(Typo.name)
                 .foregroundStyle(Theme.textPrimary)
                 .lineLimit(1)
@@ -912,6 +917,13 @@ private struct DetailsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+            if !report.failures.isEmpty {
+                Divider()
+                ForEach(report.failures, id: \.self) { line in
+                    Text(line).font(.system(size: 11.5)).foregroundStyle(Theme.warn)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
             if !report.deadAddresses.isEmpty {
                 Divider()
                 Label("Без нормального ответа: \(report.deadAddresses.joined(separator: ", "))", systemImage: "exclamationmark.triangle")
@@ -919,7 +931,7 @@ private struct DetailsView: View {
                     .foregroundStyle(Theme.warn)
             }
             Divider()
-            Text("Цифры — сколько адресов ответило как положено. Для сайта и API нужно не менее 75% успешных ответов отдельно. Отказы из-за региона не считаются. Проверка браузера Cloudflare подтверждает только доступность адреса: вход и работу нейросети проверьте вручную.")
+            Text("Цифры — сколько адресов ответило как положено. Для сайта и API нужно не менее 75% успешных ответов отдельно. Отказы из-за региона не считаются. Проверка браузера Cloudflare подтверждает только доступность адреса: вход и работу нейросети проверьте вручную. Проверка использует текущее подключение: при включённом VPN доступ без него не подтверждён.")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

@@ -42,8 +42,6 @@ type Settings struct {
 	UpdateTold string `json:"updateTold,omitempty"`
 	// UpdateNotifyOff: the person turned the notifications about new versions off (they are on until then).
 	UpdateNotifyOff bool `json:"updateNotifyOff,omitempty"`
-	// WindowSized: the window has been given its size (client area 1100 by 660) once; after that the size the person left is kept.
-	WindowSized bool `json:"windowSized,omitempty"`
 
 	// «Помогать тестированию» (off until the person turns it on, see autoreport_windows.go). HelpInstall is the random number of this
 	// installation (it is wiped when the switch is turned off, and so is everything below); HelpCauses are the causes that came up since the last

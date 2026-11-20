@@ -100,10 +100,10 @@ struct TelegramPage: View {
         .card()
     }
 
-    /// Without it, quitting (Command-Q) switches the proxy off, and Telegram stops working. Closing the window does not.
+    /// Background mode keeps the proxy working with a closed window; quitting always stops it.
     private var backgroundHint: some View {
         HStack(alignment: .top, spacing: 10) {
-            Text("После выхода из Nimb (⌘Q) прокси остановится. «Работать в фоне» оставит его работать.")
+            Text("Включите «Работать в фоне» и закрывайте окно. Выход из Nimb (⌘Q) остановит прокси.")
                 .font(Typo.small)
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)

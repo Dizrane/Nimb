@@ -42,8 +42,9 @@ enum MoveToApplications {
         guard shouldOffer, !askedThisRun else { return }
         askedThisRun = true
         let alert = NSAlert()
-        alert.messageText = "Переместить Nimb в «Программы»?"
-        alert.informativeText = "Так Nimb сможет обновляться сам. Копия в «Программах», если есть, будет заменена."
+        alert.messageText = "Переместить \(AppIdentity.name) в «Программы»?"
+        let updateDescription = AppIdentity.isTest ? "" : "Так Nimb сможет обновляться сам. "
+        alert.informativeText = "\(updateDescription)Копия \(AppIdentity.name) в «Программах», если есть, будет заменена."
             + (movesOriginalToTrash(Bundle.main.bundleURL.path) ? " Эта копия переедет в Корзину." : "")
         alert.addButton(withTitle: "Переместить")
         alert.addButton(withTitle: "Не сейчас")
@@ -59,8 +60,8 @@ enum MoveToApplications {
         } catch {
             let failure = NSAlert()
             failure.alertStyle = .warning
-            failure.messageText = "Не удалось переместить Nimb"
-            failure.informativeText = "\(error.localizedDescription)\nПеретащите Nimb.app в «Программы» вручную."
+            failure.messageText = "Не удалось переместить \(AppIdentity.name)"
+            failure.informativeText = "\(error.localizedDescription)\nПеретащите \(AppIdentity.bundleName) в «Программы» вручную."
             failure.runModal()
         }
     }
@@ -70,11 +71,11 @@ enum MoveToApplications {
     private static func move() throws {
         let fm = FileManager.default
         let source = Bundle.main.bundleURL
-        let destination = URL(fileURLWithPath: applicationsFolder).appendingPathComponent("Nimb.app")
+        let destination = URL(fileURLWithPath: applicationsFolder).appendingPathComponent(AppIdentity.bundleName)
 
-        let stage = fm.temporaryDirectory.appendingPathComponent("Nimb-move-\(UUID().uuidString)")
+        let stage = fm.temporaryDirectory.appendingPathComponent("\(AppIdentity.name)-move-\(UUID().uuidString)")
         try fm.createDirectory(at: stage, withIntermediateDirectories: true)
-        let staged = stage.appendingPathComponent("Nimb.app")
+        let staged = stage.appendingPathComponent(AppIdentity.bundleName)
         // Without the extended attributes: a folder synced with iCloud adds some, and they invalidate the signature check.
         // The quarantine flag goes too, since the person has just opened this app on purpose.
         try run("/usr/bin/ditto", ["--norsrc", "--noextattr", "--noqtn", source.path, staged.path])
@@ -91,7 +92,7 @@ enum MoveToApplications {
             rm -rf "$BACKUP"
             case "$ORIGINAL" in
                 /Volumes/*|*/AppTranslocation/*) ;;
-                *) mv "$ORIGINAL" "$HOME/.Trash/Nimb $(date +%H%M%S).app" 2>/dev/null ;;
+                *) mv "$ORIGINAL" "$HOME/.Trash/\(AppIdentity.name) $(date +%H%M%S).app" 2>/dev/null ;;
             esac
             open "$DEST"
         else

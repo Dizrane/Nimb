@@ -48,6 +48,7 @@ struct ProbeSample {
     let target: ProbeTarget
     let address: String?
     let outcome: ProbeOutcome
+    var failureReason: String? = nil
 
     /// Time to first byte of a normal answer.
     var seconds: Double? { if case .ok(let seconds) = outcome { return seconds } else { return nil } }
@@ -117,6 +118,16 @@ struct ProviderReport: Identifiable {
         return lines
     }
 
+    /// Keep transport failures distinct from DNS failures and refusals returned by the AI service.
+    var failures: [String] {
+        var counts: [String: Int] = [:]
+        for sample in samples where sample.outcome == .failed {
+            let reason = sample.address == nil ? "DNS: не получен IPv4-адрес" : (sample.failureReason ?? "HTTPS: нет нормального ответа")
+            counts[reason, default: 0] += 1
+        }
+        return counts.keys.sorted().map { "\($0) — запросов: \(counts[$0]!)" }
+    }
+
     /// Pool addresses that did not give a normal answer to a single request.
     var deadAddresses: [String] {
         let addresses = Set(samples.compactMap(\.address))
@@ -134,6 +145,7 @@ struct ProviderReport: Identifiable {
             lines.append("\(service): сайт \(count(.site)), API \(count(.api))")
         }
         lines += refusals.map { "Отказ: \($0)" }
+        lines += failures.map { "Сбой: \($0)" }
         let dead = deadAddresses
         if !dead.isEmpty { lines.append("Без нормального ответа адреса: \(dead.joined(separator: ", "))") }
         return lines.joined(separator: "\n")
@@ -154,53 +166,58 @@ struct ProviderReport: Identifiable {
 enum ServiceProbe {
     static func run(
         providers: [DNSProvider] = DNSProvider.available,
+        resolver: @escaping (String, [String]) -> [String] = resolve,
+        requester: ((ProbeTarget, String) -> ProbeOutcome)? = nil,
         progress: @escaping @Sendable (_ done: Int, _ total: Int) -> Void
     ) -> [ProviderReport] {
         let lock = NSLock()
-
-        // 1. Ask each provider's DNS for every target.
         let pairs = providers.indices.flatMap { p in ProbeTarget.all.map { (p, $0) } }
-        var resolved = [[String]](repeating: [], count: pairs.count)
+        var samples = [[ProbeSample?]](repeating: [], count: pairs.count)
+        var resolved = 0, total = 0, done = 0
+        // HTTPS can start as soon as a target resolves. A silent DNS provider must not hold the other providers at a global barrier.
+        let queues = providers.map { _ -> OperationQueue in
+            let queue = OperationQueue()
+            queue.maxConcurrentOperationCount = perProvider
+            queue.qualityOfService = .utility
+            return queue
+        }
+        progress(0, 0)
         inLanes(pairs.count, lanes: providers.count, laneOf: { pairs[$0].0 }) { i in
-            let addresses = resolve(pairs[i].1.host, using: providers[pairs[i].0].addresses)
-            lock.lock(); resolved[i] = addresses; lock.unlock()
-        }
-
-        // 2. Request every returned address. A target with no usable answer counts as one failure.
-        struct Job { let provider: Int; let target: ProbeTarget; let address: String? }
-        var jobs: [Job] = []
-        for (i, pair) in pairs.enumerated() {
-            if resolved[i].isEmpty {
-                jobs.append(Job(provider: pair.0, target: pair.1, address: nil))
-            } else {
-                jobs += resolved[i].map { Job(provider: pair.0, target: pair.1, address: $0) }
-            }
-        }
-
-        var samples = [ProbeSample?](repeating: nil, count: jobs.count)
-        var done = 0
-        progress(0, jobs.count)
-        inLanes(jobs.count, lanes: providers.count, laneOf: { jobs[$0].provider }) { i in
-            let job = jobs[i]
-            var outcome = ProbeOutcome.failed
-            if let address = job.address {
-                // A timeout is local to this request; another host on the same IP may still answer.
-                outcome = request(job.target, address: address).outcome
-                if outcome == .failed { outcome = request(job.target, address: address).outcome }
-            }
+            let (p, target) = pairs[i]
+            let addresses = resolver(target.host, providers[p].addresses)
+            let jobs: [String?] = addresses.isEmpty ? [nil] : addresses.map { $0 }
             lock.lock()
-            samples[i] = ProbeSample(target: job.target, address: job.address, outcome: outcome)
-            done += 1
-            let finished = done
+            samples[i] = [ProbeSample?](repeating: nil, count: jobs.count)
+            total += jobs.count
+            resolved += 1
+            // The denominator is final only after every DNS answer; callbacks stay ordered under the same lock.
+            if resolved == pairs.count { progress(done, total) }
             lock.unlock()
-            progress(finished, jobs.count)
+            for (j, address) in jobs.enumerated() {
+                queues[p].addOperation {
+                    var outcome = ProbeOutcome.failed
+                    var failure: String?
+                    if let address {
+                        func attempt() -> (outcome: ProbeOutcome, failure: String?) {
+                            if let requester { return (requester(target, address), nil) }
+                            let result = request(target, address: address)
+                            return (result.outcome, result.failure)
+                        }
+                        // A timeout belongs to this host and request, never to every host sharing the address.
+                        (outcome, failure) = attempt()
+                        if outcome == .failed { (outcome, failure) = attempt() }
+                    }
+                    lock.lock()
+                    samples[i][j] = ProbeSample(target: target, address: address, outcome: outcome, failureReason: failure)
+                    done += 1
+                    if resolved == pairs.count { progress(done, total) }
+                    lock.unlock()
+                }
+            }
         }
-
+        queues.forEach { $0.waitUntilAllOperationsAreFinished() }
         return providers.indices.map { p in
-            ProviderReport(
-                provider: providers[p],
-                samples: jobs.indices.filter { jobs[$0].provider == p }.compactMap { samples[$0] }
-            )
+            ProviderReport(provider: providers[p], samples: pairs.indices.filter { pairs[$0].0 == p }.flatMap { samples[$0].compactMap { $0 } })
         }
     }
 
@@ -209,23 +226,22 @@ enum ServiceProbe {
 
     /// Runs `work` for 0..<count. Each lane (a provider) has `perLane` workers of its own; the lanes go side by side. Returns when all
     /// are done.
-    static func inLanes(_ count: Int, lanes: Int, laneOf: (Int) -> Int, perLane: Int = perProvider, _ work: (Int) -> Void) {
+    static func inLanes(_ count: Int, lanes: Int, laneOf: (Int) -> Int, perLane: Int = perProvider, _ work: @escaping (Int) -> Void) {
+        // Dispatch can retain a worker block briefly after group.leave(); its captured work really is escaping.
         let group = DispatchGroup()
         let queue = DispatchQueue(label: "nimb.probe", attributes: .concurrent)
-        withoutActuallyEscaping(work) { work in
-            for lane in 0..<lanes {
-                let indices = (0..<count).filter { laneOf($0) == lane }
-                let next = Counter()
-                for _ in 0..<min(perLane, indices.count) {
-                    group.enter()
-                    queue.async {
-                        while let k = next.take(below: indices.count) { work(indices[k]) }
-                        group.leave()
-                    }
+        for lane in 0..<lanes {
+            let indices = (0..<count).filter { laneOf($0) == lane }
+            let next = Counter()
+            for _ in 0..<min(perLane, indices.count) {
+                group.enter()
+                queue.async {
+                    while let k = next.take(below: indices.count) { work(indices[k]) }
+                    group.leave()
                 }
             }
-            group.wait()
         }
+        group.wait()
     }
 
     private final class Counter: @unchecked Sendable {
@@ -279,16 +295,30 @@ enum ServiceProbe {
 
     /// Requests the target at `address` (the provider's proxy) and judges the answer. `connected` is false when no connection could be made:
     /// this request did not connect (it says nothing about other hosts or later attempts at that IP).
-    private static func request(_ target: ProbeTarget, address: String) -> (outcome: ProbeOutcome, connected: Bool) {
-        let output = capture("/usr/bin/curl", [
-            "-s", "-i", "--connect-timeout", "3", "--max-time", "6",
+    private static func request(_ target: ProbeTarget, address: String) -> (outcome: ProbeOutcome, connected: Bool, failure: String?) {
+        let result = captureResult("/usr/bin/curl", [
+            "-q", "--noproxy", "*", "-s", "-i", "--connect-timeout", "3", "--max-time", "6",
             "--resolve", "\(target.host):443:\(address)",
             "-w", "\n\(marker)%{http_code} %{time_starttransfer} %{size_download} %{time_connect}",
             "https://\(target.host)\(target.path)",
-        ]) ?? ""
-        guard let (head, trailer) = splitTrailer(output) else { return (.failed, false) }
+        ])
+        guard let result, let (head, trailer) = splitTrailer(result.output) else {
+            return (.failed, false, "Проверка: не удалось получить результат curl")
+        }
         let (headers, body) = parse(head)
-        return (classify(target, code: trailer.code, seconds: trailer.seconds, bodySize: trailer.size, headers: headers, body: body), trailer.connected)
+        let outcome = classify(target, code: trailer.code, seconds: trailer.seconds, bodySize: trailer.size, headers: headers, body: body)
+        return (outcome, trailer.connected, outcome == .failed ? failureReason(exitStatus: result.status, httpCode: trailer.code) : nil)
+    }
+
+    static func failureReason(exitStatus: Int32, httpCode: Int) -> String {
+        switch exitStatus {
+        case 28: return "HTTPS: истекло время ожидания соединения или ответа"
+        case 35: return "TLS: не удалось установить защищённое соединение"
+        case 51, 58, 60: return "TLS: ошибка проверки сертификата"
+        case 52, 55, 56: return "HTTPS: соединение прервано"
+        case 7: return "HTTPS: не удалось соединиться с адресом"
+        default: return httpCode > 0 ? "HTTP: ответ \(httpCode)" : "HTTPS: нет ответа"
+        }
     }
 
     /// Headers (lower-cased names) and the start of the body of the final response in `curl -i` output. Interim
@@ -351,15 +381,21 @@ enum ServiceProbe {
 
     /// Standard output of a command regardless of its exit status; nil if it cannot start.
     private static func capture(_ path: String, _ args: [String]) -> String? {
+        captureResult(path, args)?.output
+    }
+
+    private static func captureResult(_ path: String, _ args: [String]) -> (output: String, status: Int32)? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = args
         let out = Pipe()
         process.standardOutput = out
         process.standardError = FileHandle.nullDevice
+        let finished = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in finished.signal() }
         guard (try? process.run()) != nil else { return nil }
         let data = out.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        return String(decoding: data, as: UTF8.self)
+        finished.wait()
+        return (String(decoding: data, as: UTF8.self), process.terminationStatus)
     }
 }

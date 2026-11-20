@@ -4,16 +4,14 @@ import SwiftUI
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     static var openMainWindow: (() -> Void)?
-    private static var reallyQuit = false
 
     /// Set when the program goes on to run (an update, a move to «Программы», the uninstall, which has already turned everything
     /// off): the services are then left as they are.
     private static var keepServices = false
 
-    /// Quits for real, even in background mode: the menu bar item, an update, the uninstall. By default all three services are
+    /// Quits the application: the menu bar item, an update, the uninstall. By default all three services are
     /// turned off first: the program that is gone must not leave DNS, the proxy or the tunnel behind.
     static func quit(stoppingServices: Bool = true) {
-        reallyQuit = true
         keepServices = !stoppingServices
         NSApp.terminate(nil)
     }
@@ -56,8 +54,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
-    /// In background mode, Command-Q (and Quit in the Dock menu) only hides the window. A shutdown, restart or log out
-    /// carries a reason in its Apple event and always goes through.
+    /// Quit always ends the application, including Command-Q, the Dock and requests from macOS.
+    /// Background mode affects closing the window, not terminating the process.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         // The update is being installed: a quit now would stop it half-way. The update's own quit (it keeps the services) and a shutdown go through.
         if case .installing = UpdateViewModel.shared.state, !Self.keepServices, !Self.isSystemQuit {
@@ -69,15 +67,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             alert.addButton(withTitle: "Подождать")
             alert.addButton(withTitle: "Всё равно выйти")
             if alert.runModal() == .alertFirstButtonReturn {
-                Self.reallyQuit = false
                 return .terminateCancel
             }
         }
-        if !Self.reallyQuit && BackgroundMode.shared.enabled && !Self.isSystemQuit {
-            sender.windows.filter { $0.canBecomeMain }.forEach { $0.close() }
-            return .terminateCancel
-        }
-        // A full quit, by «Выйти» or by ⌘Q when the person has allowed it: first everything that works is turned off, which may
+        // A quit first turns off everything that works, which may
         // ask for the administrator password. The quit is put off for that time and made again when it is done (waiting inside
         // the first one does not work: the program does not run its own tasks while a quit is pending). A shutdown or a log out
         // must not wait for a password, and the tunnel does not survive a restart anyway.
@@ -90,8 +83,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if left.isEmpty || Self.confirmQuit(leaving: left) {
                 Self.servicesTurnedOff = true
                 NSApp.terminate(nil)
-            } else {
-                Self.reallyQuit = false
             }
         }
         return .terminateCancel
@@ -136,14 +127,14 @@ struct NimbApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("Nimb", id: "main") {
+        WindowGroup(AppIdentity.name, id: "main") {
             ContentView()
                 .environmentObject(telegram)
                 .environmentObject(dns)
                 .environmentObject(warp)
         }
         .windowStyle(.hiddenTitleBar)
-        .defaultSize(width: 1100, height: 660)
-        .windowResizability(.contentMinSize)
+        .defaultSize(width: WindowConfigurator.contentSize.width, height: WindowConfigurator.contentSize.height)
+        .windowResizability(.contentSize)
     }
 }

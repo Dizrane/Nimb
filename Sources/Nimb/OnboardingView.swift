@@ -82,14 +82,14 @@ struct OnboardingView: View {
     }
 
     private var aiStep: some View {
-        let done = model.active != nil
+        let done = model.accessName != nil
         return StepFrame(
             kind: .ai,
             title: "Нейросети",
             text: "Из-за региона ChatGPT, Claude и другие нейросети могут не открываться. Nimb переключит DNS на подходящий сервис."
         ) {
             if done {
-                DoneRow(text: "Включено: \(model.active?.name ?? "")")
+                DoneRow(text: "Включено: \(model.accessName ?? "")")
                 PrimaryButton(title: "Далее", action: onboarding.next)
             } else if model.isLocked {
                 BusyRow(text: model.isProbing ? model.probeProgress : "Подтвердите пароль администратора…")

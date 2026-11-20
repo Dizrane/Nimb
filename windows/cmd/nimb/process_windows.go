@@ -5,23 +5,19 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
-	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 
 	"github.com/wailsapp/wails/v2/pkg/logger"
 
 	"github.com/Dizrane/Nimb/windows/internal/logfile"
-	"github.com/Dizrane/Nimb/windows/internal/tunnelrestart"
 	"github.com/Dizrane/Nimb/windows/internal/winevents"
 )
 
@@ -30,9 +26,6 @@ import (
 // window and to the section «Процесс окна» of a report.
 
 var processStarted = time.Now()
-
-// afterWebView2Crash: this process was started by the one that ended because WebView2 did.
-var afterWebView2Crash bool
 
 func crashPath() string         { return filepath.Join(dataDir(), "crash.log") }
 func crashPreviousPath() string { return filepath.Join(dataDir(), "crash-previous.log") }
@@ -219,7 +212,11 @@ func (wailsLog) Warning(message string) { logLine("wails: предупрежде
 func (wailsLog) Error(message string) {
 	logLine("wails: ОШИБКА: " + message)
 	if strings.Contains(message, "WebVie2wProcess failed with kind 0") { // the browser process of WebView2 is gone
-		restartAfterWebView2Crash()
+		// WebView2 does not say whether it crashed or the person ended it in Task Manager. Never resurrect Nimb, or leave Wails'
+		// hidden error dialog waiting for a click. End this process; keep the session marker for diagnostics on the next manual launch.
+		logExit("браузерный процесс WebView2 завершён: Nimb закрывается без автоматического перезапуска")
+		stopTray()
+		os.Exit(1)
 	}
 }
 func (wailsLog) Fatal(message string) { logLine("wails: ФАТАЛЬНАЯ ОШИБКА: " + message) }
@@ -269,62 +266,4 @@ func webView2Version() string {
 		}
 	}
 	return "версия не найдена"
-}
-
-// ---- the browser process of WebView2 is gone --------------------------------------------------------------------------------
-
-// When the browser process of WebView2 exits (it is killed, or the runtime is replaced, or a cleaner takes it), Wails writes the line that
-// wailsLog sees, shows a message box (in English, owned by a window that is hidden while Nimb sits in the tray) and then ends the whole
-// program with os.Exit(-1): the icon at the clock goes, and the proxy of Telegram goes with it, while the service goes on with the DNS and
-// the tunnel. A person sees the tray icon vanish and Telegram stop, nothing more (reproduced in the VM by ending that process).
-// The way out that is within reach: start the program again by ourselves, at once, before Wails does what it does. The new process waits for
-// this one to go (it holds the lock of the single instance), and comes up in the tray (or with the window, if the window was in front).
-
-// restartAfterWebView2Crash starts a new Nimb and ends this process; it returns only when it decided not to (too often, or it could not).
-func restartAfterWebView2Crash() {
-	text, _ := os.ReadFile(webView2RestartsPath())
-	now := time.Now()
-	if !tunnelrestart.Allowed(tunnelrestart.Recent(string(text), now, tunnelrestart.Window), now) {
-		logLine("WebView2 завершается слишком часто (три раза за десять минут): сам не перезапускаюсь, дальше всё как у Wails")
-		return
-	}
-	exe, err := os.Executable()
-	if err != nil {
-		logLine("перезапуск после падения WebView2: не нашёл свой файл: " + err.Error())
-		return
-	}
-	args := []string{fmt.Sprintf("--wait-pid=%d", os.Getpid()), "--after-webview2-crash"}
-	if !windowInFront() {
-		args = append(args, "--hidden")
-	}
-	cmd := exec.Command(exe, args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.DETACHED_PROCESS | windows.CREATE_NEW_PROCESS_GROUP}
-	if err := cmd.Start(); err != nil {
-		logLine("перезапуск после падения WebView2 не вышел: " + err.Error())
-		return
-	}
-	os.WriteFile(webView2RestartsPath(), []byte(tunnelrestart.Add(string(text), now)), 0o600)
-	logExit(fmt.Sprintf("браузерный процесс WebView2 завершился, Nimb запускается заново (новый процесс %d)", cmd.Process.Pid))
-	endSession()
-	os.Exit(0)
-}
-
-func webView2RestartsPath() string { return filepath.Join(dataDir(), "webview2.restarts") }
-
-// waitForPreviousProcess is at the start of a process that was started by restartAfterWebView2Crash: it waits for the old one to go.
-func waitForPreviousProcess() (afterCrash bool) {
-	for _, arg := range os.Args[1:] {
-		if arg == "--after-webview2-crash" {
-			afterCrash = true
-		}
-		if v, ok := strings.CutPrefix(arg, "--wait-pid="); ok {
-			if pid, err := strconv.Atoi(v); err == nil {
-				if h, err := windows.OpenProcess(windows.SYNCHRONIZE, false, uint32(pid)); err == nil {
-					windows.WaitForSingleObject(h, 30_000)
-					windows.CloseHandle(h)
-				}
-			}
-		}
-	}
-	return afterCrash
 }

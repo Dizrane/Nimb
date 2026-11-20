@@ -417,7 +417,7 @@ func TestRequestJudgesTheAnswer(t *testing.T) {
 			w.Header().Set("Cf-Mitigated", "challenge")
 			w.WriteHeader(403)
 		}, OK, ""},
-		{"a server error", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(503) }, Failed, ""},
+		{"a server error", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(503) }, Failed, "HTTP: ответ 503"},
 		{"a phrase of refusal", func(w http.ResponseWriter, r *http.Request) {
 			w.Write([]byte("This service is not available in your region."))
 		}, Blocked, "«not available in your region»"},
@@ -447,7 +447,7 @@ func TestRequestSendsTheNameOfTheTarget(t *testing.T) {
 func TestRequestRefusesACertificateOfAnotherName(t *testing.T) {
 	p := tlsPool(t, func(w http.ResponseWriter, r *http.Request) {})
 	// the certificate of the test server is for example.com: for any other name the check must not count it as an answer
-	if got := p.request(context.Background(), Target{"Test", "chatgpt.com", Site, "/"}, "127.0.0.1"); got.Status != Failed {
+	if got := p.request(context.Background(), Target{"Test", "chatgpt.com", Site, "/"}, "127.0.0.1"); got.Status != Failed || !strings.HasPrefix(got.Reason, "TLS:") {
 		t.Errorf("got %+v", got)
 	}
 }
@@ -459,7 +459,7 @@ func TestRequestGivesUpOnASlowAnswer(t *testing.T) {
 	p := tlsPool(t, func(w http.ResponseWriter, r *http.Request) { time.Sleep(requestTimeout + time.Second) })
 	start := time.Now()
 	got := p.request(context.Background(), Target{"Test", "example.com", Site, "/"}, "127.0.0.1")
-	if got.Status != Failed || time.Since(start) > requestTimeout+time.Second {
+	if got.Status != Failed || !strings.HasPrefix(got.Reason, "HTTPS:") || time.Since(start) > requestTimeout+time.Second {
 		t.Errorf("got %+v after %v", got, time.Since(start))
 	}
 }

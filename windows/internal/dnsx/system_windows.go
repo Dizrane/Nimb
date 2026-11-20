@@ -124,8 +124,7 @@ func staticServers(guid string, ipv6 bool) (string, error) {
 // search list or anything else of the adapter.
 func Write(a Adapter) error { return write(a, a.NameServer, 0) }
 
-// Write6 does the same for the IPv6 servers of the adapter (a.NameServer6). It is apart from Write because it is a lesser
-// matter: when it fails, Smart DNS still works for the adapter on IPv4.
+// Write6 does the same for the IPv6 servers of the adapter (a.NameServer6). A failure can leave another DNS preferred by the system.
 func Write6(a Adapter) error { return write(a, a.NameServer6, winipcfg.DnsInterfaceSettingsFlagIPv6) }
 
 func write(a Adapter, servers string, flags uint64) error {

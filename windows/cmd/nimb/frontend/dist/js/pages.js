@@ -74,8 +74,8 @@ function details(p, name) {
   const rows = p.services.map((s) => `<div class="drow"><span>${esc(s.name)}</span><span class="mono">сайт ${s.site} · API ${s.api}</span></div>`).join('');
   const refusals = p.refusals.map((l) => `<div class="dnote bad">${esc(l)}</div>`).join('');
   const dead = p.dead.length ? `<div class="dnote warn">Без нормального ответа: ${esc(p.dead.join(', '))}</div>` : '';
-  return `<div class="det" style="margin:0">${rows}${refusals}${dead}
-    <div class="dfoot">Цифры — сколько адресов ответило как положено. Для сайта и API нужно не менее 75% успешных ответов отдельно. Отказы из-за региона не считаются. Проверка браузера Cloudflare подтверждает только доступность адреса: вход и работу нейросети проверьте вручную.</div></div>`;
+  return `<div class="det" style="margin:0">${rows}${refusals}${(p.failures || []).map((l) => `<div class="dnote warn">${esc(l)}</div>`).join('')}${dead}
+    <div class="dfoot">Цифры — сколько адресов ответило как положено. Для сайта и API нужно не менее 75% успешных ответов отдельно. Отказы из-за региона не считаются. Проверка браузера Cloudflare подтверждает только доступность адреса: вход и работу нейросети проверьте вручную. Проверка использует текущее подключение: при включённом VPN доступ без него не подтверждён.</div></div>`;
 }
 
 const probeLabel = (pr) => (pr.running ? (pr.phase === 'enabling' ? 'Включаю…' : pr.total > 0 ? `Проверено ${pr.done} из ${pr.total}` : 'Определяю адреса…') : 'Проверить сервисы');
@@ -99,8 +99,8 @@ export class AIPage {
     const a = S.ai, pr = S.probe, name = (S.providers.find((p) => p.id === a.provider) || {}).name || '';
     this.hero.update({
       on: a.on && !pr.running, busy: a.busy || pr.running, region: PROVIDER_REGION[a.provider] || 'eu', disabled: a.busy || pr.running || !S.serviceOk,
-      title: pr.running ? 'Проверяю сервисы' : a.busy ? 'Применяю DNS' : a.on ? 'Включено' : 'Выключено', providerName: esc(name),
-      subtitle: pr.running ? 'Спрашиваю DNS и запрашиваю сайты и API' : a.busy ? 'Меняю DNS на всех подключениях' : 'Включите, чтобы открывались ChatGPT, Claude, Gemini и другие нейросети',
+      title: pr.running ? 'Проверяю сервисы' : a.busy ? 'Настраиваю доступ' : a.legacyHosts ? 'Требуется очистка' : a.on ? 'Включено' : 'Выключено', providerName: a.legacyHosts ? '' : esc(name),
+      subtitle: pr.running ? 'Спрашиваю DNS и запрашиваю сайты и API' : a.busy ? 'Подождите' : a.legacyHosts ? 'Выключите «Нейросети», чтобы удалить старые записи из hosts' : 'Включите, чтобы открывались ChatGPT, Claude, Gemini и другие нейросети',
       label: a.on ? 'Выключить Smart DNS' : 'Включить Smart DNS',
     });
     if (same(this, 'rj', [a, S.providers, pr])) return;
@@ -123,7 +123,7 @@ export class AIPage {
     if (!two) this.appear = false;
     this.hadReports = two; // after the check the cards stand two by two, as on the Mac
     const cards = S.providers.map((p) => {
-      const sel = p.id === a.provider, r = view[p.id], isBest = best && best.id === p.id, active = sel && a.on;
+      const sel = p.id === a.provider, r = view[p.id], isBest = best && best.id === p.id, active = sel && a.on && !a.legacyHosts;
       const radio = `<span class="radio" style="border-color:rgba(255,255,255,${sel ? 0.9 : 0.28})"><i style="opacity:${sel ? 1 : 0}"></i></span>`;
       const gem = isBest ? '<span class="gem" title="Лучший по итогам проверки">◆</span>' : '';
       const row = `<button class="prov" role="radio" aria-checked="${sel}" data-a="prov" data-v="${p.id}" data-f="prov-${p.id}" id="prov-${p.id}" ${locked ? 'disabled' : ''}>

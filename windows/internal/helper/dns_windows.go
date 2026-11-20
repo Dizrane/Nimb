@@ -52,10 +52,11 @@ func (h *Helper) dropBackup() {
 }
 
 func (h *Helper) dnsStatus() *ipc.DNSStatus {
+	legacyHosts := dnsx.HasLegacyGeoHideHosts()
 	if h.backup == nil || h.backup.Restoring {
-		return &ipc.DNSStatus{}
+		return &ipc.DNSStatus{Active: legacyHosts, LegacyHosts: legacyHosts}
 	}
-	return &ipc.DNSStatus{Active: true, Provider: h.backup.Provider}
+	return &ipc.DNSStatus{Active: true, Provider: h.backup.Provider, LegacyHosts: legacyHosts}
 }
 
 // tunnelDNS: the DNS of the tunnel adapter is first in the order of the system (its metric is the lowest), so with Smart DNS
@@ -95,6 +96,9 @@ func (h *Helper) dnsSet(provider dnsx.Provider) error {
 	if len(now) == 0 {
 		return errors.New("нет подключённой сети (Wi-Fi или Ethernet)")
 	}
+	if err := dnsx.RemoveLegacyGeoHideHosts(); err != nil {
+		return err
+	}
 	next := &dnsx.Backup{}
 	if h.backup != nil {
 		dup := *h.backup
@@ -120,6 +124,9 @@ func (h *Helper) dnsSet(provider dnsx.Provider) error {
 
 // dnsRestore gives back what the adapters had. It is safe to call when Smart DNS is off.
 func (h *Helper) dnsRestore() error {
+	if err := dnsx.RemoveLegacyGeoHideHosts(); err != nil {
+		return err
+	}
 	if h.backup == nil {
 		return nil
 	}
@@ -182,31 +189,9 @@ func (h *Helper) dnsRestore() error {
 	return nil
 }
 
-// writeAll sets the servers on the adapters, reads them back, and returns the names of the adapters where it did not work. The
-// IPv6 servers are a lesser matter: when they do not take, it is written to the log and the adapter still counts as done.
+// IPv6 failure matters too: the system can keep using those servers ahead of the selected provider.
 func (h *Helper) writeAll(adapters []dnsx.Adapter, provider dnsx.Provider) (failed []string) {
-	for _, a := range adapters {
-		a.NameServer, a.NameServer6 = provider.Servers(), provider.Servers6()
-		if err := dnsx.Write(a); err != nil {
-			failed = append(failed, a.Name)
-			continue
-		}
-		if after, ok := dnsx.Current(a.GUID); ok && !dnsx.Same(after.NameServer, a.NameServer) {
-			failed = append(failed, a.Name)
-			continue
-		}
-		if a.Set6 {
-			h.write6(a)
-		}
-	}
-	return failed
-}
-
-// write6 writes the IPv6 servers of an adapter and checks them; a failure is only logged.
-func (h *Helper) write6(a dnsx.Adapter) {
-	if err := h.write6Checked(a); err != nil {
-		h.logf("DNS: серверы IPv6 на «%s» не заданы: %v", a.Name, err)
-	}
+	return writeDNSAdapters(adapters, provider, dnsx.Write, dnsx.Write6, dnsx.Current, h.logf)
 }
 
 // A restore must keep its backup when IPv6 could not be restored too (for example a disabled adapter rejects the write).

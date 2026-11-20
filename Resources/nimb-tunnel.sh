@@ -26,6 +26,10 @@ PATH=/usr/bin:/bin:/usr/sbin:/sbin
 if [ -n "${NIMB_TUNNEL_TEST:-}" ] && [ -n "${NIMB_TUNNEL_PATH:-}" ]; then PATH="$NIMB_TUNNEL_PATH:$PATH"; fi
 DIR=/usr/local/libexec/nimb
 RUN=/var/run/nimb-tunnel
+if [ "$0" = /usr/local/libexec/nimbtest/nimb-tunnel ]; then
+    DIR=/usr/local/libexec/nimbtest
+    RUN=/var/run/nimbtest-tunnel
+fi
 if [ -n "${NIMB_TUNNEL_TEST:-}" ]; then DIR="${NIMB_TUNNEL_DIR:-$DIR}"; RUN="${NIMB_TUNNEL_RUN:-$RUN}"; fi
 CONF="$DIR/warp.conf"
 BIN="$DIR/amneziawg-go"

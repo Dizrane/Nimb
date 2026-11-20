@@ -49,8 +49,11 @@ func TestDNSTellsAboutTheServersOfIPv6(t *testing.T) {
 	taken := dnsx.Adapter{GUID: "a", NameServer: eu.Servers(), NameServer6: eu.Servers6(), V6: true}
 	loose := dnsx.Adapter{GUID: "b", NameServer: eu.Servers(), NameServer6: "2001:db8::1", V6: true}
 	c := DNS(DNSFacts{Active: &eu, Adapters: []dnsx.Adapter{taken, loose, onAdapter("c", eu.Servers())}, Host: "h", SystemAnswer: []string{"2.2.2.2"}, ProviderAnswer: []string{"2.2.2.2"}})
-	if !strings.Contains(c.Seen, "у 2 есть серверы IPv6") || !strings.Contains(c.Seen, "заняты Nimb: 1") {
+	if c.Agrees || !strings.Contains(c.Seen, "у 2 есть серверы IPv6") || !strings.Contains(c.Seen, "заняты Nimb: 1") {
 		t.Errorf("%s", c.Seen)
+	}
+	if !DNS(DNSFacts{Active: &eu, Adapters: []dnsx.Adapter{taken}, Host: "h", SystemAnswer: []string{"2.2.2.2"}, ProviderAnswer: []string{"2.2.2.2"}}).Agrees {
+		t.Error("matching IPv4 and IPv6 must agree")
 	}
 }
 

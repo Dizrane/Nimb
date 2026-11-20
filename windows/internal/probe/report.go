@@ -141,6 +141,34 @@ func (r ProviderReport) Refusals() []string {
 	return lines
 }
 
+// Failures keeps DNS and transport errors distinct from refusals returned by a service.
+func (r ProviderReport) Failures() []string {
+	counts := map[string]int{}
+	for _, s := range r.Samples {
+		if s.Outcome.Status != Failed {
+			continue
+		}
+		reason := s.Outcome.Reason
+		if s.Address == "" && reason == "" {
+			reason = "DNS: не получен IPv4-адрес"
+		}
+		if reason == "" {
+			reason = "HTTPS: нет нормального ответа"
+		}
+		counts[reason]++
+	}
+	var reasons []string
+	for reason := range counts {
+		reasons = append(reasons, reason)
+	}
+	slices.Sort(reasons)
+	lines := make([]string, 0, len(reasons))
+	for _, reason := range reasons {
+		lines = append(lines, fmt.Sprintf("%s — запросов: %d", reason, counts[reason]))
+	}
+	return lines
+}
+
 // DeadAddresses are the pool addresses that did not give a normal answer to a single request.
 func (r ProviderReport) DeadAddresses() []string {
 	answered := map[string]bool{}
@@ -186,6 +214,9 @@ func (r ProviderReport) Details() string {
 	}
 	for _, line := range r.Refusals() {
 		lines = append(lines, "Отказ: "+line)
+	}
+	for _, line := range r.Failures() {
+		lines = append(lines, "Сбой: "+line)
 	}
 	if dead := r.DeadAddresses(); len(dead) > 0 {
 		lines = append(lines, "Без нормального ответа адреса: "+strings.Join(dead, ", "))
@@ -235,11 +266,12 @@ type ProviderView struct {
 	Services []ServiceView `json:"services"`
 	Refusals []string      `json:"refusals"`
 	Dead     []string      `json:"dead"`
+	Failures []string      `json:"failures"`
 }
 
 // View is the report as the page draws it.
 func (r ProviderReport) View() ProviderView {
-	v := ProviderView{ID: r.Provider.ID, Working: r.WorkingCount(), Total: len(Services()), Refusals: r.Refusals(), Dead: r.DeadAddresses()}
+	v := ProviderView{ID: r.Provider.ID, Working: r.WorkingCount(), Total: len(Services()), Refusals: r.Refusals(), Dead: r.DeadAddresses(), Failures: r.Failures()}
 	if v.Refusals == nil {
 		v.Refusals = []string{}
 	}
@@ -271,6 +303,9 @@ func Lines(reports []ProviderReport) []string {
 		lines = append(lines, line)
 		for _, l := range r.Refusals() {
 			lines = append(lines, "  отказ: "+l)
+		}
+		for _, l := range r.Failures() {
+			lines = append(lines, "  сбой: "+l)
 		}
 		if dead := r.DeadAddresses(); len(dead) > 0 {
 			lines = append(lines, "  без нормального ответа: "+strings.Join(dead, ", "))

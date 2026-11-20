@@ -95,6 +95,7 @@ enum DNSManager {
 
     /// Custom DNS are restored under the normal administrator prompt; the narrow sudo rule remains unchanged.
     static var restorationAsksPassword: Bool {
+        if LegacyGeoHideHosts.hasEntries { return true }
         guard let backup = try? DNSBackupStore.standard.load() else { return true }
         return backup.entries.values.contains { saved in
             !saved.servers.isEmpty && !DNSProvider.all.contains { sameServers($0.addresses, saved.servers) }
@@ -110,10 +111,13 @@ enum DNSManager {
         let current = Dictionary(uniqueKeysWithValues: services.map { ($0, servers(of: $0)) })
         var pending = false
         var restoredServices: Set<String> = []
+        // The test app has its own backup and must not adopt DNS configured by a separate installation.
+        var unownedServices = AppIdentity.isTest ? Set(services) : []
         if hasSavedDNS {
             do {
                 let backup = try DNSBackupStore.standard.load()
                 let names = try serviceNames()
+                unownedServices.subtract(backup.entries.keys.compactMap { names[$0] })
                 for (id, servers) in backup.restored ?? [:] {
                     if let name = names[id], let now = current[name], sameServers(servers, now) { restoredServices.insert(name) }
                 }
@@ -124,13 +128,15 @@ enum DNSManager {
                 }
             } catch { pending = true }
         }
-        return DNSConfiguration(services: services, servers: current, pendingRestoration: pending, restoredServices: restoredServices)
+        return DNSConfiguration(services: services, servers: current, pendingRestoration: pending,
+                                restoredServices: restoredServices.union(unownedServices), hasLegacyHosts: LegacyGeoHideHosts.hasEntries)
     }
 
     /// A provider that is set on some, but not all, of the services, with the services it is missing on.
-    static func partialProvider(on services: [String]) -> (provider: DNSProvider, missing: [String])? {
+    static func partialProvider(on services: [String], servers current: [String: [String]]? = nil) -> (provider: DNSProvider, missing: [String])? {
+        let current = current ?? Dictionary(uniqueKeysWithValues: services.map { ($0, servers(of: $0)) })
         for provider in DNSProvider.all {
-            let missing = services.filter { !provider.matches(servers(of: $0)) }
+            let missing = services.filter { !provider.matches(current[$0] ?? []) }
             if !missing.isEmpty, missing.count < services.count { return (provider, missing) }
         }
         return nil
@@ -139,11 +145,11 @@ enum DNSManager {
     // MARK: Overrides (read-only)
 
     /// Reasons why the DNS set on the services may not be the one the system actually uses.
-    static func overrideWarnings(for provider: DNSProvider) -> [String] {
+    static func overrideWarnings(for provider: DNSProvider, servers current: [String: [String]]? = nil) -> [String] {
         var warnings: [String] = []
         if provider.retired {
             warnings.append("\(provider.name) больше не поддерживает доступ к нейросетям. Выберите другой DNS или выключите сервис, чтобы вернуть прежние настройки.")
-        } else if physicalServices().contains(where: { provider.legacy.contains(servers(of: $0)) }) {
+        } else if !provider.legacy.isEmpty, (current ?? Dictionary(uniqueKeysWithValues: physicalServices().map { ($0, servers(of: $0)) })).values.contains(where: provider.legacy.contains) {
             warnings.append("Заданы прежние адреса \(provider.name). Выключите и включите DNS, чтобы применить обновлённые адреса.")
         }
 
@@ -215,6 +221,7 @@ enum DNSManager {
         changeLock.lock(); defer { changeLock.unlock() }
         if let provider {
             guard !provider.retired else { throw DNSError.failed("\(provider.name) больше не поддерживает доступ к нейросетям. Выберите другой DNS.") }
+            try LegacyGeoHideHosts.remove()
             let store = DNSBackupStore.standard
             var backup = try store.load()
             let names = try serviceNames()
@@ -245,6 +252,7 @@ enum DNSManager {
     }
 
     private static func restore(services: [String], removingRule: Bool = false, removingTunnel: Bool = false) throws {
+        try LegacyGeoHideHosts.remove()
         let store = DNSBackupStore.standard
         var backup = try store.load()
         let names = try serviceNames()
@@ -304,7 +312,7 @@ enum DNSManager {
 
     // MARK: Without a password (opt-in)
 
-    static let sudoersPath = "/etc/sudoers.d/nimb"
+    static let sudoersPath = "/etc/sudoers.d/\(AppIdentity.systemName)"
 
     /// What sudo currently allows this user to do without a password, as far as Nimb is concerned.
     struct PasswordlessState: Equatable {

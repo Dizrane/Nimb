@@ -127,38 +127,64 @@ struct PressableStyle: ButtonStyle {
     }
 }
 
-/// Window without a title bar that can be dragged by its background. It is wide rather than tall, and everything of every page (two
-/// columns of cards beside the figure) fits in it at once, so that nothing in the app has to be scrolled: it can be made larger,
-/// never smaller.
+/// Main window with a fixed content size. It can still be moved by its background and minimized.
 struct WindowConfigurator: NSViewRepresentable {
-    static let minimumSize = CGSize(width: 1100, height: 660)
+    static let contentSize = CGSize(width: 1100, height: 660)
 
-    final class Coordinator { var sized = false }
+    func makeNSView(context: Context) -> LockView { LockView() }
 
-    func makeCoordinator() -> Coordinator { Coordinator() }
+    func updateNSView(_ view: LockView, context: Context) { view.scheduleConfiguration() }
 
-    func makeNSView(context: Context) -> NSView { NSView() }
+    final class LockView: NSView {
+        private var scheduled = false
 
-    func updateNSView(_ view: NSView, context: Context) {
-        let coordinator = context.coordinator
-        DispatchQueue.main.async {
-            guard let window = view.window else { return }
-            window.titlebarAppearsTransparent = true
-            window.titleVisibility = .hidden
-            window.isMovableByWindowBackground = true
-            window.backgroundColor = NSColor(Theme.base)
-            window.standardWindowButton(.zoomButton)?.isEnabled = true
-            window.contentMinSize = Self.minimumSize
-            if !coordinator.sized {
-                // The very first time with this window design (also after an update from the narrow one) the window gets its usual
-                // size; after that the size the person left it with is kept.
-                let key = "desktopWindowSized"
-                if !UserDefaults.standard.bool(forKey: key) {
-                    window.setContentSize(Self.minimumSize)
-                    UserDefaults.standard.set(true, forKey: key)
-                }
-                coordinator.sized = true
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            let notifications = NotificationCenter.default
+            notifications.removeObserver(self, name: NSWindow.didResizeNotification, object: nil)
+            guard let window else { return }
+            // SwiftUI and macOS can restore a stored frame after the first layout pass.
+            notifications.addObserver(self, selector: #selector(windowDidResize), name: NSWindow.didResizeNotification, object: window)
+            scheduleConfiguration()
+        }
+
+        @objc private func windowDidResize(_ notification: Notification) {
+            scheduleConfiguration()
+        }
+
+        func scheduleConfiguration() {
+            guard !scheduled else { return }
+            scheduled = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.scheduled = false
+                if let window = self.window { WindowConfigurator.configure(window) }
             }
         }
+    }
+
+    private static func configure(_ window: NSWindow) {
+        let style = window.styleMask.union(.fullSizeContentView).subtracting(.resizable)
+        if window.styleMask != style { window.styleMask = style }
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.isMovableByWindowBackground = true
+        window.backgroundColor = NSColor(Theme.base)
+        let behavior = window.collectionBehavior.subtracting([.fullScreenPrimary, .fullScreenAuxiliary, .fullScreenAllowsTiling])
+            .union([.fullScreenNone, .fullScreenDisallowsTiling])
+        if window.collectionBehavior != behavior { window.collectionBehavior = behavior }
+        window.standardWindowButton(.zoomButton)?.isEnabled = false
+
+        // Take the system title-bar height into account even though the background draws behind it.
+        let content = CGRect(origin: .zero, size: contentSize)
+        let frameSize = NSWindow.frameRect(forContentRect: content, styleMask: style.subtracting(.fullSizeContentView)).size
+        if window.minSize != frameSize { window.minSize = frameSize }
+        if window.maxSize != frameSize { window.maxSize = frameSize }
+        let frame = window.frame
+        guard frame.size != frameSize else { return }
+        let target = CGRect(x: frame.minX, y: frame.maxY - frameSize.height, width: frameSize.width, height: frameSize.height)
+        let origin = window.constrainFrameRect(target, to: window.screen).origin
+        window.setFrame(CGRect(origin: origin, size: frameSize), display: true)
+        AppLog.shared.add("окно", "размер \(frame.size) → \(window.frame.size), рабочая область \(window.contentLayoutRect.size)")
     }
 }

@@ -106,7 +106,7 @@ struct SettingsView: View {
                     SettingsSection(title: "Удаление") {
                         HStack(spacing: Space.m) {
                             VStack(alignment: .leading, spacing: 3) {
-                                Text("Удалить Nimb")
+                                Text("Удалить \(AppIdentity.name)")
                                     .font(Typo.name)
                                     .foregroundStyle(Theme.textPrimary)
                                 Text("Вернёт DNS и удалит приложение с настройками.")
@@ -117,7 +117,7 @@ struct SettingsView: View {
                             Spacer(minLength: Space.s)
                             OutlineButton(title: "Удалить…", color: Theme.bad, action: model.uninstall)
                                 .disabled(model.isLocked)
-                                .accessibilityLabel("Удалить Nimb")
+                                .accessibilityLabel("Удалить \(AppIdentity.name)")
                         }
                         .card()
                     }

@@ -5,6 +5,15 @@ import Testing
 @Suite struct PartialDNSTests {
     private let provider = DNSProvider.all[0]
 
+    @Test func partialDetectionUsesTheSameSnapshotAsConfiguration() {
+        let servers = ["Wi-Fi": provider.addresses, "Ethernet": ["10.0.0.53"]]
+        let state = DNSConfiguration(services: ["Wi-Fi", "Ethernet"], servers: servers)
+        let partial = DNSManager.partialProvider(on: ["Wi-Fi", "Ethernet"], servers: state.servers)
+        #expect(partial?.provider == provider)
+        #expect(partial?.missing == ["Ethernet"])
+        #expect(DNSManager.partialProvider(on: ["Wi-Fi", "Ethernet"], servers: ["Wi-Fi": [], "Ethernet": []]) == nil)
+    }
+
     @Test func aPartialProviderStillNeedsCleanup() {
         let state = DNSConfiguration(services: ["Wi-Fi", "Ethernet"], servers: ["Wi-Fi": provider.addresses, "Ethernet": []])
         #expect(state.active == nil)

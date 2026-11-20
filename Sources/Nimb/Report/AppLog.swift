@@ -13,8 +13,7 @@ final class AppLog: @unchecked Sendable {
     private static let fileLimit = 200_000
 
     private init() {
-        let base = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first ?? URL(fileURLWithPath: NSHomeDirectory())
-        let dir = base.appendingPathComponent("Logs/Nimb", isDirectory: true)
+        let dir = AppIdentity.logs
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         fileURL = dir.appendingPathComponent("nimb.log")
         trimFile()

@@ -21,15 +21,15 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         self.warp = warp
         AllServices.shared.configure(dns: dns, telegram: telegram, warp: warp)
         subscription = Publishers.CombineLatest4(telegram.$isRunning, BackgroundMode.shared.$enabled, dns.$hasProviderDNS, warp.$phase)
-            .combineLatest(dns.$active)
+            .combineLatest(dns.$active, dns.$hasLegacyHosts)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] services, active in
+            .sink { [weak self] services, active, hasLegacyHosts in
                 let (running, background, dnsOn, tunnel) = services
                 var tunnelOn = false
                 if case .on = tunnel { tunnelOn = true }
                 let count = [dnsOn, running, tunnelOn].filter { $0 }.count
                 let total = tunnel == .unavailable ? 2 : 3
-                let state: IconState = count == 0 ? .off : (count == total && active != nil ? .all : .partial)
+                let state: IconState = count == 0 ? .off : (count == total && active != nil && !hasLegacyHosts ? .all : .partial)
                 self?.update(visible: running || background || tunnelOn || dnsOn, state: state)
                 Self.updateDockIcon(active: count > 0)
             }
@@ -184,8 +184,8 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
         // Neural networks: a check mark when it works, a dash while it is being switched.
         let aiBusy = dns.isBusy || dns.isProbing || dns.isSettingUp
-        aiItem.state = aiBusy || (dns.hasProviderDNS && dns.active == nil) ? .mixed : (dns.hasProviderDNS ? .on : .off)
-        aiItem.attributedTitle = titled("Нейросети", detail: aiBusy ? "переключаю…" : (dns.active?.name ?? (dns.hasProviderDNS ? "включено частично" : nil)))
+        aiItem.state = aiBusy || (dns.hasProviderDNS && dns.accessName == nil) ? .mixed : (dns.hasProviderDNS ? .on : .off)
+        aiItem.attributedTitle = titled("Нейросети", detail: aiBusy ? "переключаю…" : (dns.accessName ?? (dns.hasProviderDNS ? "включено частично" : nil)))
         aiToggle.title = dns.hasProviderDNS ? "Выключить" : "Включить (\(dns.selected.name))"
         aiToggle.isEnabled = !dns.isLocked
         for (entry, provider) in zip(aiProviders, DNSProvider.all) {

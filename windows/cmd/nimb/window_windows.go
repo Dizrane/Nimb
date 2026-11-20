@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"unsafe"
 
@@ -15,8 +16,8 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// The window is as the Mac one (WindowConfigurator.minimumSize in Sources/Nimb/Theme.swift): what the page sees, the client area
-// without the frame and the title bar, is at least 1100 by 660 and is exactly that the first time. Wails takes the size of the whole
+// The window is as the Mac one (WindowConfigurator.contentSize in Sources/Nimb/Theme.swift): what the page sees, the client area
+// without the frame and the title bar, is fixed at 1100 by 660. Wails takes the size of the whole
 // window (frame and title bar included), so the size of the frame is asked of the system for this window and this screen.
 const (
 	clientWidth  = 1100
@@ -34,10 +35,15 @@ var (
 	pGetClientRect    = user32.NewProc("GetClientRect")
 )
 
-const wmEndSession = 0x0016
+const (
+	wmEndSession = 0x0016
+	wmSysCommand = 0x0112
+	scClose      = 0xF060
+)
 
-// windowProc is the procedure that the window had before watchSessionEnd put its own in front of it.
-var windowProc uintptr
+// windowProc is the procedure that the window had before watchWindowMessages put its own in front of it.
+var windowProc atomic.Uintptr
+var windowApp atomic.Pointer[App]
 
 // Go keeps at most 2000 callbacks made by syscall.NewCallback per program and never frees one, so a callback must be made once, not on
 // every call: the tray asks for the window every 3 seconds, and a new callback each time killed the window (and the icon at the clock)
@@ -89,8 +95,7 @@ func outerSize(hwnd uintptr) (w, h int) {
 	return int(math.Ceil(float64(rect.Right-rect.Left) / scale)), int(math.Ceil(float64(rect.Bottom-rect.Top) / scale))
 }
 
-// sizeWindow makes the client area at least 1100 by 660, and exactly that the first time with this window design (after that the
-// size the person left it with is kept).
+// sizeWindow fixes the client area at 1100 by 660, accounting for the current frame and screen DPI.
 func (a *App) sizeWindow() {
 	hwnd := ownWindow()
 	if hwnd == 0 {
@@ -99,31 +104,48 @@ func (a *App) sizeWindow() {
 	}
 	w, h := outerSize(hwnd)
 	runtime.WindowSetMinSize(a.ctx, w, h)
-	if !a.settings.get().WindowSized {
-		runtime.WindowSetSize(a.ctx, w, h)
-		a.settings.update(func(s *Settings) { s.WindowSized = true })
-	}
+	runtime.WindowSetMaxSize(a.ctx, w, h)
+	runtime.WindowSetSize(a.ctx, w, h)
 	logLine("размер окна: чтобы рабочая область была 1100×660, он вместе с рамкой " + strconv.Itoa(w) + "×" + strconv.Itoa(h))
 }
 
-// watchSessionEnd: when Windows shuts down or the person logs off, the program is ended without being asked to close, and the mark of a
-// running program (see beginSession) would stay and be taken for a crash at the next start. Wails does not hand this message on, so a
-// procedure of ours stands in front of the window's: it removes the mark when the session ends, and passes every message on.
-func (a *App) watchSessionEnd() {
+// watchWindowMessages distinguishes the window close command (the cross, Alt+F4) from a direct WM_CLOSE sent by Windows, and records
+// the end of a Windows session. Only the former may hide the window; a system termination always reaches Wails.
+func (a *App) watchWindowMessages() {
 	hwnd := ownWindow()
 	if hwnd == 0 {
 		return
 	}
-	windowProc, _, _ = pSetWindowLong.Call(hwnd, ^uintptr(3), sessionEndProc()) // GWLP_WNDPROC (-4)
+	previous, _, _ := pGetWindowLong.Call(hwnd, ^uintptr(3)) // GWLP_WNDPROC (-4)
+	if previous == 0 {
+		logLine("закрытие окна: исходная оконная процедура не найдена")
+		return
+	}
+	// Publish the original procedure before installing the callback: the UI thread can receive a message immediately.
+	windowProc.Store(previous)
+	windowApp.Store(a)
+	if installed, _, err := pSetWindowLong.Call(hwnd, ^uintptr(3), windowMessageProc()); installed == 0 {
+		logLine("закрытие окна: не удалось установить обработчик: " + err.Error())
+	}
 }
 
-var sessionEndProc = sync.OnceValue(func() uintptr {
+var windowMessageProc = sync.OnceValue(func() uintptr {
 	return syscall.NewCallback(func(h, msg, wparam, lparam uintptr) uintptr {
+		if msg == wmSysCommand && wparam&0xFFF0 == scClose {
+			if a := windowApp.Load(); a != nil {
+				if a.settings.get().Enabled() {
+					runtime.WindowHide(a.ctx)
+				} else {
+					goSafe("закрытие окна", func() { a.quitFrom("закрытие окна при выключенной работе в фоне") })
+				}
+				return 0
+			}
+		}
 		if msg == wmEndSession && wparam != 0 {
 			endSession()
 			logExit("Windows завершает сеанс (выключение, перезагрузка или выход из учётной записи)")
 		}
-		r, _, _ := pCallWindowProc.Call(windowProc, h, msg, wparam, lparam)
+		r, _, _ := pCallWindowProc.Call(windowProc.Load(), h, msg, wparam, lparam)
 		return r
 	})
 })

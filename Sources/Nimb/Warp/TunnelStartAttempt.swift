@@ -10,7 +10,7 @@ final class TunnelStartAttempt: @unchecked Sendable {
     var marker: String { folder.appendingPathComponent("cancel").path }
 
     init() throws {
-        folder = FileManager.default.temporaryDirectory.appendingPathComponent("Nimb-start-\(UUID().uuidString)")
+        folder = FileManager.default.temporaryDirectory.appendingPathComponent("\(AppIdentity.name)-start-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
     }
     func cancel() throws {

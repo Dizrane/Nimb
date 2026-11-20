@@ -97,7 +97,7 @@ func DNS(f DNSFacts) ServiceCheck {
 		}
 	}
 	return ServiceCheck{Name: name, Expected: f.Active.Name + " на всех подключениях, и система получает ответы именно от него", Seen: seen,
-		Agrees: total > 0 && set == total && known && asks}
+		Agrees: total > 0 && set == total && v6taken == v6 && known && asks}
 }
 
 // inPool: every address of the system's answer is one the provider gives.

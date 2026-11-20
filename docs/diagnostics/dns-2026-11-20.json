@@ -1,0 +1,928 @@
+{
+  "date": "2026-11-20",
+  "network": "Existing third-party tunnel on macOS (utun4); Parallels shared network; no DNS or routing changes",
+  "macOS": [
+    {
+      "run": "before-2",
+      "seconds": 20.30509901046753,
+      "providers": [
+        {
+          "name": "GeoHide (EU)",
+          "working": 5,
+          "samples": 74
+        },
+        {
+          "name": "MagicDNS",
+          "working": 0,
+          "samples": 12
+        },
+        {
+          "name": "malw.link",
+          "working": 5,
+          "samples": 14
+        },
+        {
+          "name": "GeoHide (RU)",
+          "working": 5,
+          "samples": 44
+        },
+        {
+          "name": "GeoHide (US)",
+          "working": 5,
+          "samples": 44
+        }
+      ]
+    },
+    {
+      "run": "after-2",
+      "seconds": 9.347701072692871,
+      "providers": [
+        {
+          "name": "GeoHide (EU)",
+          "working": 5,
+          "samples": 74
+        },
+        {
+          "name": "MagicDNS",
+          "working": 0,
+          "samples": 12
+        },
+        {
+          "name": "malw.link",
+          "working": 5,
+          "samples": 14
+        },
+        {
+          "name": "GeoHide (RU)",
+          "working": 5,
+          "samples": 44
+        },
+        {
+          "name": "GeoHide (US)",
+          "working": 5,
+          "samples": 44
+        }
+      ]
+    },
+    {
+      "run": "before-3",
+      "seconds": 17.716274976730347,
+      "providers": [
+        {
+          "name": "GeoHide (EU)",
+          "working": 5,
+          "samples": 74
+        },
+        {
+          "name": "MagicDNS",
+          "working": 0,
+          "samples": 12
+        },
+        {
+          "name": "malw.link",
+          "working": 5,
+          "samples": 14
+        },
+        {
+          "name": "GeoHide (RU)",
+          "working": 5,
+          "samples": 44
+        },
+        {
+          "name": "GeoHide (US)",
+          "working": 5,
+          "samples": 44
+        }
+      ]
+    },
+    {
+      "run": "after-3",
+      "seconds": 10.002565026283264,
+      "providers": [
+        {
+          "name": "GeoHide (EU)",
+          "working": 5,
+          "samples": 74
+        },
+        {
+          "name": "MagicDNS",
+          "working": 0,
+          "samples": 12
+        },
+        {
+          "name": "malw.link",
+          "working": 5,
+          "samples": 14
+        },
+        {
+          "name": "GeoHide (RU)",
+          "working": 5,
+          "samples": 44
+        },
+        {
+          "name": "GeoHide (US)",
+          "working": 5,
+          "samples": 44
+        }
+      ]
+    },
+    {
+      "run": "final-closure-lifetime-fix",
+      "seconds": 12.305750012397766,
+      "providers": [
+        {
+          "name": "GeoHide (EU)",
+          "working": 5,
+          "samples": 74
+        },
+        {
+          "name": "MagicDNS",
+          "working": 0,
+          "samples": 12
+        },
+        {
+          "name": "malw.link",
+          "working": 5,
+          "samples": 14
+        },
+        {
+          "name": "GeoHide (RU)",
+          "working": 5,
+          "samples": 44
+        },
+        {
+          "name": "GeoHide (US)",
+          "working": 5,
+          "samples": 44
+        }
+      ]
+    }
+  ],
+  "windows_arm64": [
+    {
+      "run": "before-1",
+      "seconds": 28.77,
+      "providers": [
+        {
+          "name": "GeoHide (EU)",
+          "working": 5
+        },
+        {
+          "name": "MagicDNS",
+          "working": 0
+        },
+        {
+          "name": "malw.link",
+          "working": 5
+        },
+        {
+          "name": "GeoHide (RU)",
+          "working": 5
+        },
+        {
+          "name": "GeoHide (US)",
+          "working": 5
+        }
+      ]
+    },
+    {
+      "run": "after-1",
+      "seconds": 11.62,
+      "providers": [
+        {
+          "name": "GeoHide (EU)",
+          "working": 5
+        },
+        {
+          "name": "MagicDNS",
+          "working": 0
+        },
+        {
+          "name": "malw.link",
+          "working": 5
+        },
+        {
+          "name": "GeoHide (RU)",
+          "working": 5
+        },
+        {
+          "name": "GeoHide (US)",
+          "working": 5
+        }
+      ]
+    },
+    {
+      "run": "before-2",
+      "seconds": 23.85,
+      "providers": [
+        {
+          "name": "GeoHide (EU)",
+          "working": 5
+        },
+        {
+          "name": "MagicDNS",
+          "working": 0
+        },
+        {
+          "name": "malw.link",
+          "working": 5
+        },
+        {
+          "name": "GeoHide (RU)",
+          "working": 5
+        },
+        {
+          "name": "GeoHide (US)",
+          "working": 5
+        }
+      ]
+    },
+    {
+      "run": "after-2",
+      "seconds": 14.17,
+      "providers": [
+        {
+          "name": "GeoHide (EU)",
+          "working": 5
+        },
+        {
+          "name": "MagicDNS",
+          "working": 0
+        },
+        {
+          "name": "malw.link",
+          "working": 5
+        },
+        {
+          "name": "GeoHide (RU)",
+          "working": 5
+        },
+        {
+          "name": "GeoHide (US)",
+          "working": 5
+        }
+      ]
+    }
+  ],
+  "servers": [
+    {
+      "provider": "GeoHide EU",
+      "server": "143.20.64.192",
+      "protocol": "UDP",
+      "success": 3,
+      "attempts": 3,
+      "seconds": [
+        0.148,
+        0.19,
+        0.553
+      ],
+      "answers": [
+        [
+          "143.20.64.192",
+          "5.175.161.3",
+          "5.175.161.40",
+          "37.221.93.128",
+          "45.13.237.213",
+          "37.221.93.141",
+          "31.25.239.132"
+        ],
+        [
+          "31.25.239.132",
+          "143.20.64.192",
+          "37.221.93.141",
+          "5.175.161.3",
+          "45.13.237.213",
+          "37.221.93.128",
+          "5.175.161.40"
+        ],
+        [
+          "5.175.161.3",
+          "143.20.64.192",
+          "45.13.237.213",
+          "31.25.239.132",
+          "5.175.161.40",
+          "37.221.93.141",
+          "37.221.93.128"
+        ]
+      ],
+      "errors": []
+    },
+    {
+      "provider": "GeoHide EU",
+      "server": "143.20.64.192",
+      "protocol": "TCP",
+      "success": 3,
+      "attempts": 3,
+      "seconds": [
+        0.157,
+        0.222,
+        0.365
+      ],
+      "answers": [
+        [
+          "45.13.237.213",
+          "37.221.93.128",
+          "143.20.64.192",
+          "31.25.239.132",
+          "37.221.93.141",
+          "5.175.161.40",
+          "5.175.161.3"
+        ],
+        [
+          "37.221.93.141",
+          "45.13.237.213",
+          "5.175.161.3",
+          "31.25.239.132",
+          "143.20.64.192",
+          "37.221.93.128",
+          "5.175.161.40"
+        ],
+        [
+          "45.13.237.213",
+          "5.175.161.40",
+          "31.25.239.132",
+          "5.175.161.3",
+          "37.221.93.128",
+          "37.221.93.141",
+          "143.20.64.192"
+        ]
+      ],
+      "errors": []
+    },
+    {
+      "provider": "GeoHide EU",
+      "server": "5.175.161.40",
+      "protocol": "UDP",
+      "success": 3,
+      "attempts": 3,
+      "seconds": [
+        0.152,
+        0.171,
+        0.419
+      ],
+      "answers": [
+        [
+          "37.221.93.128",
+          "143.20.64.192",
+          "5.175.161.3",
+          "31.25.239.132",
+          "37.221.93.141",
+          "45.13.237.213",
+          "5.175.161.40"
+        ],
+        [
+          "37.221.93.141",
+          "37.221.93.128",
+          "31.25.239.132",
+          "5.175.161.3",
+          "143.20.64.192",
+          "5.175.161.40",
+          "45.13.237.213"
+        ],
+        [
+          "37.221.93.141",
+          "143.20.64.192",
+          "37.221.93.128",
+          "5.175.161.3",
+          "5.175.161.40",
+          "45.13.237.213",
+          "31.25.239.132"
+        ]
+      ],
+      "errors": []
+    },
+    {
+      "provider": "GeoHide EU",
+      "server": "5.175.161.40",
+      "protocol": "TCP",
+      "success": 3,
+      "attempts": 3,
+      "seconds": [
+        0.533,
+        0.672,
+        0.543
+      ],
+      "answers": [
+        [
+          "31.25.239.132",
+          "5.175.161.3",
+          "5.175.161.40",
+          "37.221.93.128",
+          "37.221.93.141",
+          "143.20.64.192",
+          "45.13.237.213"
+        ],
+        [
+          "5.175.161.40",
+          "37.221.93.128",
+          "31.25.239.132",
+          "37.221.93.141",
+          "45.13.237.213",
+          "143.20.64.192",
+          "5.175.161.3"
+        ],
+        [
+          "5.175.161.3",
+          "31.25.239.132",
+          "143.20.64.192",
+          "5.175.161.40",
+          "37.221.93.128",
+          "37.221.93.141",
+          "45.13.237.213"
+        ]
+      ],
+      "errors": []
+    },
+    {
+      "provider": "MagicDNS",
+      "server": "217.144.190.216",
+      "protocol": "UDP",
+      "success": 0,
+      "attempts": 3,
+      "seconds": [
+        2.007,
+        2.008,
+        2.011
+      ],
+      "answers": [
+        [],
+        [],
+        []
+      ],
+      "errors": [
+        ";; connection timed out; no servers could be reached",
+        ";; connection timed out; no servers could be reached",
+        ";; connection timed out; no servers could be reached"
+      ]
+    },
+    {
+      "provider": "MagicDNS",
+      "server": "217.144.190.216",
+      "protocol": "TCP",
+      "success": 0,
+      "attempts": 3,
+      "seconds": [
+        2.009,
+        2.011,
+        2.011
+      ],
+      "answers": [
+        [],
+        [],
+        []
+      ],
+      "errors": [
+        ";; connection timed out; no servers could be reached",
+        ";; connection timed out; no servers could be reached",
+        ";; connection timed out; no servers could be reached"
+      ]
+    },
+    {
+      "provider": "MagicDNS",
+      "server": "109.120.187.249",
+      "protocol": "UDP",
+      "success": 0,
+      "attempts": 3,
+      "seconds": [
+        2.01,
+        2.008,
+        2.011
+      ],
+      "answers": [
+        [],
+        [],
+        []
+      ],
+      "errors": [
+        ";; connection timed out; no servers could be reached",
+        ";; connection timed out; no servers could be reached",
+        ";; connection timed out; no servers could be reached"
+      ]
+    },
+    {
+      "provider": "MagicDNS",
+      "server": "109.120.187.249",
+      "protocol": "TCP",
+      "success": 0,
+      "attempts": 3,
+      "seconds": [
+        2.007,
+        2.007,
+        2.006
+      ],
+      "answers": [
+        [],
+        [],
+        []
+      ],
+      "errors": [
+        ";; connection timed out; no servers could be reached",
+        ";; connection timed out; no servers could be reached",
+        ";; connection timed out; no servers could be reached"
+      ]
+    },
+    {
+      "provider": "malw.link",
+      "server": "179.254.166.171",
+      "protocol": "UDP",
+      "success": 3,
+      "attempts": 3,
+      "seconds": [
+        0.739,
+        0.471,
+        0.24
+      ],
+      "answers": [
+        [
+          "48.102.233.174"
+        ],
+        [
+          "48.102.233.174"
+        ],
+        [
+          "48.102.233.174"
+        ]
+      ],
+      "errors": []
+    },
+    {
+      "provider": "malw.link",
+      "server": "179.254.166.171",
+      "protocol": "TCP",
+      "success": 3,
+      "attempts": 3,
+      "seconds": [
+        0.139,
+        0.172,
+        0.569
+      ],
+      "answers": [
+        [
+          "48.102.233.174"
+        ],
+        [
+          "48.102.233.174"
+        ],
+        [
+          "48.102.233.174"
+        ]
+      ],
+      "errors": []
+    },
+    {
+      "provider": "malw.link",
+      "server": "164.5.224.81",
+      "protocol": "UDP",
+      "success": 2,
+      "attempts": 3,
+      "seconds": [
+        0.193,
+        0.546,
+        2.013
+      ],
+      "answers": [
+        [
+          "48.102.233.174"
+        ],
+        [
+          "48.102.233.174"
+        ],
+        []
+      ],
+      "errors": [
+        ";; connection timed out; no servers could be reached"
+      ]
+    },
+    {
+      "provider": "malw.link",
+      "server": "164.5.224.81",
+      "protocol": "TCP",
+      "success": 2,
+      "attempts": 3,
+      "seconds": [
+        2.005,
+        0.778,
+        0.615
+      ],
+      "answers": [
+        [],
+        [
+          "48.102.233.174"
+        ],
+        [
+          "48.102.233.174"
+        ]
+      ],
+      "errors": [
+        ";; connection timed out; no servers could be reached"
+      ]
+    },
+    {
+      "provider": "GeoHide RU",
+      "server": "37.230.192.51",
+      "protocol": "UDP",
+      "success": 3,
+      "attempts": 3,
+      "seconds": [
+        0.514,
+        0.642,
+        0.245
+      ],
+      "answers": [
+        [
+          "193.233.112.68",
+          "193.233.112.88",
+          "193.233.112.67",
+          "159.194.200.33"
+        ],
+        [
+          "193.233.112.68",
+          "193.233.112.88",
+          "193.233.112.67",
+          "159.194.200.33"
+        ],
+        [
+          "193.233.112.68",
+          "193.233.112.67",
+          "193.233.112.88",
+          "159.194.200.33"
+        ]
+      ],
+      "errors": []
+    },
+    {
+      "provider": "GeoHide RU",
+      "server": "37.230.192.51",
+      "protocol": "TCP",
+      "success": 3,
+      "attempts": 3,
+      "seconds": [
+        0.306,
+        0.282,
+        0.596
+      ],
+      "answers": [
+        [
+          "159.194.200.33",
+          "193.233.112.68",
+          "193.233.112.67",
+          "193.233.112.88"
+        ],
+        [
+          "193.233.112.88",
+          "193.233.112.68",
+          "159.194.200.33",
+          "193.233.112.67"
+        ],
+        [
+          "193.233.112.68",
+          "193.233.112.67",
+          "159.194.200.33",
+          "193.233.112.88"
+        ]
+      ],
+      "errors": []
+    },
+    {
+      "provider": "GeoHide RU",
+      "server": "193.233.112.67",
+      "protocol": "UDP",
+      "success": 3,
+      "attempts": 3,
+      "seconds": [
+        0.897,
+        0.273,
+        0.707
+      ],
+      "answers": [
+        [
+          "159.194.200.33",
+          "193.233.112.68",
+          "193.233.112.67",
+          "193.233.112.88"
+        ],
+        [
+          "159.194.200.33",
+          "193.233.112.88",
+          "193.233.112.67",
+          "193.233.112.68"
+        ],
+        [
+          "193.233.112.88",
+          "159.194.200.33",
+          "193.233.112.67",
+          "193.233.112.68"
+        ]
+      ],
+      "errors": []
+    },
+    {
+      "provider": "GeoHide RU",
+      "server": "193.233.112.67",
+      "protocol": "TCP",
+      "success": 0,
+      "attempts": 3,
+      "seconds": [
+        2.014,
+        2.013,
+        2.015
+      ],
+      "answers": [
+        [],
+        [],
+        []
+      ],
+      "errors": [
+        ";; connection timed out; no servers could be reached",
+        ";; connection timed out; no servers could be reached",
+        ";; connection timed out; no servers could be reached"
+      ]
+    },
+    {
+      "provider": "GeoHide US",
+      "server": "192.255.159.241",
+      "protocol": "UDP",
+      "success": 3,
+      "attempts": 3,
+      "seconds": [
+        0.291,
+        0.527,
+        0.52
+      ],
+      "answers": [
+        [
+          "192.255.159.240",
+          "192.255.159.241",
+          "107.175.76.134",
+          "192.3.233.253"
+        ],
+        [
+          "107.175.76.134",
+          "192.3.233.253",
+          "192.255.159.241",
+          "192.255.159.240"
+        ],
+        [
+          "192.255.159.241",
+          "107.175.76.134",
+          "192.3.233.253",
+          "192.255.159.240"
+        ]
+      ],
+      "errors": []
+    },
+    {
+      "provider": "GeoHide US",
+      "server": "192.255.159.241",
+      "protocol": "TCP",
+      "success": 3,
+      "attempts": 3,
+      "seconds": [
+        0.393,
+        0.654,
+        0.349
+      ],
+      "answers": [
+        [
+          "107.175.76.134",
+          "192.255.159.240",
+          "192.255.159.241",
+          "192.3.233.253"
+        ],
+        [
+          "107.175.76.134",
+          "192.255.159.241",
+          "192.255.159.240",
+          "192.3.233.253"
+        ],
+        [
+          "192.255.159.240",
+          "107.175.76.134",
+          "192.255.159.241",
+          "192.3.233.253"
+        ]
+      ],
+      "errors": []
+    },
+    {
+      "provider": "GeoHide US",
+      "server": "192.255.159.240",
+      "protocol": "UDP",
+      "success": 3,
+      "attempts": 3,
+      "seconds": [
+        0.655,
+        0.259,
+        0.535
+      ],
+      "answers": [
+        [
+          "192.255.159.240",
+          "107.175.76.134",
+          "192.255.159.241",
+          "192.3.233.253"
+        ],
+        [
+          "192.3.233.253",
+          "107.175.76.134",
+          "192.255.159.240",
+          "192.255.159.241"
+        ],
+        [
+          "192.255.159.240",
+          "192.255.159.241",
+          "107.175.76.134",
+          "192.3.233.253"
+        ]
+      ],
+      "errors": []
+    },
+    {
+      "provider": "GeoHide US",
+      "server": "192.255.159.240",
+      "protocol": "TCP",
+      "success": 3,
+      "attempts": 3,
+      "seconds": [
+        0.649,
+        0.813,
+        0.348
+      ],
+      "answers": [
+        [
+          "192.255.159.240",
+          "192.255.159.241",
+          "107.175.76.134",
+          "192.3.233.253"
+        ],
+        [
+          "192.255.159.241",
+          "192.255.159.240",
+          "192.3.233.253",
+          "107.175.76.134"
+        ],
+        [
+          "192.255.159.241",
+          "192.3.233.253",
+          "192.255.159.240",
+          "107.175.76.134"
+        ]
+      ],
+      "errors": []
+    },
+    {
+      "provider": "Control",
+      "server": "1.1.1.1",
+      "protocol": "UDP",
+      "success": 3,
+      "attempts": 3,
+      "seconds": [
+        0.472,
+        0.177,
+        0.777
+      ],
+      "answers": [
+        [
+          "104.18.32.47",
+          "172.64.155.209"
+        ],
+        [
+          "104.18.32.47",
+          "172.64.155.209"
+        ],
+        [
+          "172.64.155.209",
+          "104.18.32.47"
+        ]
+      ],
+      "errors": []
+    },
+    {
+      "provider": "Control",
+      "server": "1.1.1.1",
+      "protocol": "TCP",
+      "success": 3,
+      "attempts": 3,
+      "seconds": [
+        0.151,
+        0.465,
+        0.507
+      ],
+      "answers": [
+        [
+          "104.18.32.47",
+          "172.64.155.209"
+        ],
+        [
+          "104.18.32.47",
+          "172.64.155.209"
+        ],
+        [
+          "172.64.155.209",
+          "104.18.32.47"
+        ]
+      ],
+      "errors": []
+    }
+  ]
+}

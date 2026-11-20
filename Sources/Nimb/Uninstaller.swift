@@ -3,8 +3,7 @@ import Foundation
 /// Removes the app together with everything it has left on the Mac. DNS and the sudoers rule are handled by
 /// `DNSManager` before this; this part only deletes files, after the app has quit.
 enum Uninstaller {
-    /// Both names the app has had.
-    static let identifiers = ["com.nimb.app", "com.rdns.app"]
+    static let identifiers = AppIdentity.isTest ? [AppIdentity.identifier] : [AppIdentity.identifier, "com.rdns.app"]
 
     /// The running copy is not the one on disk: macOS opens a downloaded app from a temporary read-only copy (App Translocation), and a
     /// disk image is read-only too. There is nothing to delete at that place: the real copies are looked for in the usual folders.
@@ -16,11 +15,11 @@ enum Uninstaller {
     /// Why the app cannot delete itself, or nil if it can.
     static func blocker() -> String? {
         let bundle = Bundle.main.bundleURL
-        guard bundle.pathExtension == "app" else { return "Nimb запущен не как приложение (.app), удалять нечего." }
+        guard bundle.pathExtension == "app" else { return "\(AppIdentity.name) запущен не как приложение (.app), удалять нечего." }
         if runsFromTemporaryPlace { return nil }
         let folder = bundle.deletingLastPathComponent().path
         guard FileManager.default.isWritableFile(atPath: folder) else {
-            return "У Nimb нет права записи в «\(folder)», поэтому он не может удалить сам себя. Перетащите его в Корзину вручную."
+            return "У \(AppIdentity.name) нет права записи в «\(folder)», поэтому он не может удалить сам себя. Перетащите его в Корзину вручную."
         }
         return nil
     }
@@ -41,7 +40,8 @@ enum Uninstaller {
         }
         if !runsFromTemporaryPlace {
             let folder = bundle.deletingLastPathComponent().path
-            for name in ["Nimb.app", "RDNS.app"] {
+            let bundleNames = AppIdentity.isTest ? [AppIdentity.bundleName] : [AppIdentity.bundleName, "RDNS.app"]
+            for name in bundleNames {
                 let path = "\(folder)/\(name)"
                 if path != bundle.path, fm.fileExists(atPath: path), isOurs(path) { result.append(path) }
             }
@@ -65,10 +65,11 @@ enum Uninstaller {
             ]
         }
         // The diary of the app (`AppLog`).
-        result.append("\(home)/Library/Logs/Nimb")
+        result.append(AppIdentity.logs.path)
 
         let temp = fm.temporaryDirectory
-        for name in (try? fm.contentsOfDirectory(atPath: temp.path)) ?? [] where name.hasPrefix("Nimb-update-") || name.hasPrefix("Nimb-move-") || name.hasPrefix("Nimb-start-") {
+        let prefixes = ["update", "move", "start"].map { "\(AppIdentity.name)-\($0)-" }
+        for name in (try? fm.contentsOfDirectory(atPath: temp.path)) ?? [] where prefixes.contains(where: { name.hasPrefix($0) }) {
             result.append(temp.appendingPathComponent(name).path)
         }
         return result
@@ -84,7 +85,7 @@ enum Uninstaller {
         for path in "$@"; do rm -rf "$path"; done
         rm -f "$0"
         """
-        let scriptURL = FileManager.default.temporaryDirectory.appendingPathComponent("Nimb-uninstall-\(UUID().uuidString).sh")
+        let scriptURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(AppIdentity.name)-uninstall-\(UUID().uuidString).sh")
         try script.write(to: scriptURL, atomically: true, encoding: .utf8)
 
         let process = Process()

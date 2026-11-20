@@ -68,7 +68,7 @@ struct DNSBackupStore {
 
     static var standard: DNSBackupStore {
         let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return DNSBackupStore(url: root.appendingPathComponent("com.nimb.app/dns-backup.json"))
+        return DNSBackupStore(url: root.appendingPathComponent("\(AppIdentity.identifier)/dns-backup.json"))
     }
 
     func load() throws -> DNSBackup {

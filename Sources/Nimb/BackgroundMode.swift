@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// "Work in the background": the Nimb icon stays in the menu bar, and closing the window or pressing Command-Q only
-/// hides the window, so that the Telegram proxy (and the menu with the DNS switch) keep working.
+/// "Work in the background": the Nimb icon stays in the menu bar when the window is closed.
+/// Quit and Command-Q still end the application.
 @MainActor
 final class BackgroundMode: ObservableObject {
     static let shared = BackgroundMode()

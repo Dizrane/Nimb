@@ -265,10 +265,7 @@ final class AutoReporter: ObservableObject {
     private static let countKey = "helpTestingCount"
     private static let lastKey = "helpTestingLast"
     private static let digestKey = "helpTestingDigest"
-    private static let folder: URL = {
-        let base = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first ?? URL(fileURLWithPath: NSHomeDirectory())
-        return base.appendingPathComponent("Logs/Nimb", isDirectory: true)
-    }()
+    private static let folder = AppIdentity.logs
     private static let pendingURL = folder.appendingPathComponent("pending-reports.json")
     private static let snapshotURL = folder.appendingPathComponent("first-fault.json")
 

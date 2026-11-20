@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -19,15 +21,17 @@ const (
 	dnsTimeout     = 2 * time.Second
 	connectTimeout = 3 * time.Second
 	requestTimeout = 6 * time.Second
-	parallel       = 24 // the requests wait for the network, so more than the cores; few enough not to look like an attack
+	perProvider    = 16 // the same per-provider limit as macOS; no shared queue behind a slow provider
 )
 
 // Prober runs the check. The zero value is the real thing; the fields are for tests.
 type Prober struct {
-	DNSPort   string         // "53"
-	HTTPSPort string         // "443"
-	RootCAs   *x509.CertPool // nil: the system's
-	loopback  bool           // keep 127.x answers (a test server)
+	DNSPort   string                                           // "53"
+	HTTPSPort string                                           // "443"
+	RootCAs   *x509.CertPool                                   // nil: the system's
+	loopback  bool                                             // keep 127.x answers (a test server)
+	lookup    func(context.Context, string, []string) []string // nil: real DNS
+	fetch     func(context.Context, Target, string) Outcome    // nil: real HTTPS
 }
 
 // Run checks every provider, one report for each, in the order of providers. progress is told how many of the requests are done
@@ -44,71 +48,106 @@ func (p *Prober) Run(ctx context.Context, providers []dnsx.Provider, progress fu
 		}
 	}
 	progress(0, 0)
+	resolve, request := p.resolve, p.request
+	if p.lookup != nil {
+		resolve = p.lookup
+	}
+	if p.fetch != nil {
+		request = p.fetch
+	}
 
-	// 1. Ask each provider's DNS for every target.
-	resolved := make([][]string, len(pairs))
-	each(len(pairs), func(i int) {
-		resolved[i] = p.resolve(ctx, pairs[i].target.Host, providers[pairs[i].provider].Addresses)
-	})
-
-	// 2. Request every returned address. A target with no usable answer counts as one failure.
+	// Each provider has its own HTTPS workers. Resolve and request overlap: a silent DNS must not delay all healthy providers.
 	type job struct {
-		provider int
-		target   Target
-		address  string
+		pair, sample int
+		address      string
 	}
-	var jobs []job
-	for i, pr := range pairs {
-		if len(resolved[i]) == 0 {
-			jobs = append(jobs, job{pr.provider, pr.target, ""})
-			continue
-		}
-		for _, a := range resolved[i] {
-			jobs = append(jobs, job{pr.provider, pr.target, a})
-		}
-	}
-	samples := make([]Sample, len(jobs))
+	samples := make([][]Sample, len(pairs))
+	queues := make([]chan job, len(providers))
+	var workers sync.WaitGroup
 	var mu sync.Mutex
-	done := 0
-	progress(0, len(jobs))
-	each(len(jobs), func(i int) {
-		j := jobs[i]
-		out := Outcome{Status: Failed}
-		if j.address != "" {
-			out = p.request(ctx, j.target, j.address)
-			if out.Status == Failed && ctx.Err() == nil {
-				out = p.request(ctx, j.target, j.address)
-			}
+	resolved, total, done := 0, 0, 0
+	for provider := range providers {
+		queue := make(chan job, perProvider)
+		queues[provider] = queue
+		for worker := 0; worker < perProvider; worker++ {
+			workers.Go(func() {
+				for j := range queue {
+					target := pairs[j.pair].target
+					out := Outcome{Status: Failed, Reason: "DNS: не получен IPv4-адрес"}
+					if ctx.Err() != nil {
+						out.Reason = "Проверка: отменена или истекло общее время ожидания"
+					}
+					if j.address != "" && ctx.Err() == nil {
+						out = request(ctx, target, j.address)
+						if out.Status == Failed && ctx.Err() == nil {
+							out = request(ctx, target, j.address)
+						}
+					}
+					samples[j.pair][j.sample] = Sample{Target: target, Address: j.address, Outcome: out}
+					mu.Lock()
+					done++
+					if resolved == len(pairs) {
+						progress(done, total)
+					}
+					mu.Unlock()
+				}
+			})
 		}
-		samples[i] = Sample{Target: j.target, Address: j.address, Outcome: out}
-		// The count and the call that tells it go together, so that the calls come in the order of the count (the last one is the whole).
+	}
+	eachInLanes(len(pairs), len(providers), func(i int) int { return pairs[i].provider }, func(i int) {
+		pr := pairs[i]
+		addresses := resolve(ctx, pr.target.Host, providers[pr.provider].Addresses)
+		if len(addresses) == 0 {
+			addresses = []string{""}
+		}
+		samples[i] = make([]Sample, len(addresses))
 		mu.Lock()
-		done++
-		progress(done, len(jobs))
+		total += len(addresses)
+		resolved++
+		if resolved == len(pairs) {
+			progress(done, total)
+		}
 		mu.Unlock()
+		for j, address := range addresses {
+			queues[pr.provider] <- job{i, j, address}
+		}
 	})
+	for _, queue := range queues {
+		close(queue)
+	}
+	workers.Wait()
 
 	reports := make([]ProviderReport, len(providers))
 	for i := range providers {
 		reports[i].Provider = providers[i]
 	}
-	for i, j := range jobs {
-		reports[j.provider].Samples = append(reports[j.provider].Samples, samples[i])
+	for i, pr := range pairs {
+		reports[pr.provider].Samples = append(reports[pr.provider].Samples, samples[i]...)
 	}
 	return reports
 }
 
-// each runs f for 0..n-1, a limited number at a time, and waits for all.
-func each(n int, f func(i int)) {
-	var wg sync.WaitGroup
-	slots := make(chan struct{}, parallel)
+// eachInLanes limits each provider separately, so a large or slow pool cannot occupy another provider's slots.
+func eachInLanes(n, lanes int, laneOf func(int) int, f func(int)) {
+	indices := make([][]int, lanes)
 	for i := 0; i < n; i++ {
-		wg.Add(1)
-		slots <- struct{}{}
-		go func() {
-			defer func() { <-slots; wg.Done() }()
-			f(i)
-		}()
+		lane := laneOf(i)
+		indices[lane] = append(indices[lane], i)
+	}
+	var wg sync.WaitGroup
+	for _, lane := range indices {
+		jobs := make(chan int, len(lane))
+		for _, i := range lane {
+			jobs <- i
+		}
+		close(jobs)
+		for worker := 0; worker < min(perProvider, len(lane)); worker++ {
+			wg.Go(func() {
+				for i := range jobs {
+					f(i)
+				}
+			})
+		}
 	}
 	wg.Wait()
 }
@@ -184,7 +223,15 @@ func (p *Prober) request(ctx context.Context, target Target, address string) Out
 	start := time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
-		return Outcome{Status: Failed}
+		var cert *tls.CertificateVerificationError
+		var network net.Error
+		reason := "HTTPS: не удалось соединиться с адресом или соединение прервано"
+		if errors.As(err, &cert) {
+			reason = "TLS: ошибка проверки сертификата"
+		} else if errors.As(err, &network) && network.Timeout() {
+			reason = "HTTPS: истекло время ожидания соединения или ответа"
+		}
+		return Outcome{Status: Failed, Reason: reason}
 	}
 	seconds := time.Since(start).Seconds()
 	defer resp.Body.Close()
@@ -199,7 +246,11 @@ func (p *Prober) request(ctx context.Context, target Target, address string) Out
 	if size > bigBody {
 		raw = raw[:bigBody]
 	}
-	return Classify(target, resp.StatusCode, seconds, size, headers, string(raw))
+	outcome := Classify(target, resp.StatusCode, seconds, size, headers, string(raw))
+	if outcome.Status == Failed {
+		outcome.Reason = fmt.Sprintf("HTTP: ответ %d", resp.StatusCode)
+	}
+	return outcome
 }
 
 func or(s, def string) string {

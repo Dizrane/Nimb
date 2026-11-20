@@ -370,6 +370,9 @@ enum Updater {
                         downloaded: @escaping @Sendable (Int64, Int64) -> Void = { _, _ in }) async throws {
         let target = Bundle.main.bundleURL
         let expected: String = try await runStage(.prepare, progress: progress) {
+            guard !AppIdentity.isTest else {
+                throw UpdateError("NimbTest обновляется тестовой сборкой проекта.")
+            }
             guard target.pathExtension == "app" else {
                 throw UpdateError("Обновление работает только из собранного приложения Nimb.")
             }
